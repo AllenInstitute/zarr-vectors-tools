@@ -23,6 +23,7 @@ def ingest_obj(
     dtype: str = "float32",
     encoding: str = "raw",
     draco_quantization_bits: int = 11,
+    auto_object_id: bool = False,
 ) -> dict[str, Any]:
     """Ingest an OBJ file into a zarr vectors mesh store.
 
@@ -36,6 +37,10 @@ def ingest_obj(
         dtype: Dtype for position data.
         encoding: ``"raw"`` or ``"draco"``.
         draco_quantization_bits: For Draco encoding.
+        auto_object_id: If True, parse ``o <name>`` / ``g <name>``
+            directives and assign each vertex an integer object ID based
+            on the most recently declared group. Object names are stored
+            in ``OBJHeader.object_names``.
 
     Returns:
         Summary dict from :func:`write_mesh`.
@@ -47,6 +52,9 @@ def ingest_obj(
     vertices: list[list[float]] = []
     normals_list: list[list[float]] = []
     faces: list[list[int]] = []
+    vertex_object_ids: list[int] = []
+    object_names: list[str] = []
+    current_obj_id = -1
 
     try:
         with open(input_path) as f:
@@ -57,6 +65,13 @@ def ingest_obj(
                 parts = line.split()
                 if parts[0] == "v" and len(parts) >= 4:
                     vertices.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    if auto_object_id:
+                        vertex_object_ids.append(max(current_obj_id, 0))
+                elif parts[0] in ("o", "g") and len(parts) >= 2 and auto_object_id:
+                    name = " ".join(parts[1:])
+                    if name not in object_names:
+                        object_names.append(name)
+                    current_obj_id = object_names.index(name)
                 elif parts[0] == "vn" and len(parts) >= 4:
                     normals_list.append([float(parts[1]), float(parts[2]), float(parts[3])])
                 elif parts[0] == "f" and len(parts) >= 4:
@@ -125,13 +140,30 @@ def ingest_obj(
             "normal": np.array(normals_list, dtype=np.float32),
         }
 
-    return write_mesh(
-        str(output_path),
-        positions,
-        faces_arr,
-        chunk_shape=chunk_shape,
-        encoding=encoding,
-        vertex_attributes=vertex_attributes,
-        dtype=dtype,
-        draco_quantization_bits=draco_quantization_bits,
-    )
+    object_ids_arr: np.ndarray | None = None
+    if auto_object_id and vertex_object_ids:
+        object_ids_arr = np.array(vertex_object_ids, dtype=np.int64)
+
+    write_kwargs: dict[str, Any] = {
+        "chunk_shape": chunk_shape,
+        "encoding": encoding,
+        "vertex_attributes": vertex_attributes,
+        "dtype": dtype,
+        "draco_quantization_bits": draco_quantization_bits,
+    }
+    if object_ids_arr is not None:
+        write_kwargs["object_ids"] = object_ids_arr
+
+    result = write_mesh(str(output_path), positions, faces_arr, **write_kwargs)
+
+    if auto_object_id and object_names:
+        try:
+            from zarr_vectors_tools.headers.formats import OBJHeader
+            from zarr_vectors_tools.headers.registry import HeaderRegistry
+
+            obj_header = OBJHeader(object_names=object_names)
+            HeaderRegistry(str(output_path)).add("obj", obj_header)
+        except Exception:
+            pass
+
+    return result

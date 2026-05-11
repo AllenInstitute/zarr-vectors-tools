@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zarr-vectors-tools"
 version = "0.1.0"
-description = "Ingest and export workflows for the Zarr Vector Format (ZVF). Wraps third-party readers/writers (nibabel, laspy, plyfile, trimesh, networkx, trx-python) on top of zarr-vectors."
+description = "Ingest and export workflows for the Zarr Vector Format (ZVF). Wraps third-party readers/writers (nibabel, laspy, plyfile, networkx, trx-python) on top of zarr-vectors."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
     "zarr-vectors>=0.1",
     "numpy>=1.24",
+    "pandas>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -34,12 +35,16 @@ las = ["laspy>=2.4"]
 ply = ["plyfile>=1.0"]
 streamlines = ["nibabel>=5.0", "trx-python>=0.3"]
 graph = ["networkx>=3.0"]
+points-enrichment = ["scipy>=1.10"]
+# Requires a RAPIDS-compatible CUDA environment. Install per https://docs.rapids.ai.
+gpu = ["cudf"]
 all = [
     "laspy>=2.4",
     "plyfile>=1.0",
     "nibabel>=5.0",
     "trx-python>=0.3",
     "networkx>=3.0",
+    "scipy>=1.10",
 ]
 dev = [
     "pytest>=7.0",

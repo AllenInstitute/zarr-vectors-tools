@@ -25,6 +25,9 @@ def ingest_ply(
     *,
     dtype: str = "float32",
     include_attributes: bool = True,
+    object_ids: np.ndarray | None = None,
+    knn_distance_k: int | None = None,
+    per_object_vertex_count: bool = False,
 ) -> dict[str, Any]:
     """Ingest a PLY file as a ZVF point cloud.
 
@@ -35,6 +38,14 @@ def ingest_ply(
         dtype: Dtype for position data.
         include_attributes: Whether to include non-position
             vertex properties (normals, colours, etc.).
+        object_ids: Optional ``(N,)`` integer array of per-vertex object
+            IDs. Required for ``per_object_vertex_count``.
+        knn_distance_k: If an int, compute each point's mean Euclidean
+            distance to its k nearest neighbours and store as
+            ``attributes["knn_distance"]``. Requires ``scipy``.
+        per_object_vertex_count: If True and ``object_ids`` is provided,
+            write per-object vertex counts to
+            ``object_attributes["vertex_count"]``.
 
     Returns:
         Summary dict from :func:`~zarr_vectors.types.points.write_points`.
@@ -99,10 +110,30 @@ def ingest_ply(
             except Exception:
                 continue
 
-    return write_points(
-        str(output_path),
-        positions,
-        chunk_shape=chunk_shape,
-        attributes=attributes if attributes else None,
-        dtype=dtype,
-    )
+    if knn_distance_k is not None and len(positions):
+        from zarr_vectors_tools.ingest._point_enrichments import compute_knn_distance
+        attributes["knn_distance"] = compute_knn_distance(positions, knn_distance_k)
+
+    object_attributes: dict[str, np.ndarray] | None = None
+    if per_object_vertex_count:
+        if object_ids is None:
+            raise IngestError(
+                "per_object_vertex_count requires object_ids to be supplied."
+            )
+        from zarr_vectors_tools.ingest._point_enrichments import (
+            compute_per_object_vertex_count,
+        )
+        _, counts = compute_per_object_vertex_count(object_ids)
+        object_attributes = {"vertex_count": counts}
+
+    write_kwargs: dict[str, Any] = {
+        "chunk_shape": chunk_shape,
+        "attributes": attributes if attributes else None,
+        "dtype": dtype,
+    }
+    if object_ids is not None:
+        write_kwargs["object_ids"] = object_ids
+    if object_attributes is not None:
+        write_kwargs["object_attributes"] = object_attributes
+
+    return write_points(str(output_path), positions, **write_kwargs)

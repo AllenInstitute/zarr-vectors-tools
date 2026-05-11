@@ -252,7 +252,12 @@ class OBJHeader(Header):
 
 @dataclass
 class CSVHeader(Header):
-    """CSV point cloud file header metadata."""
+    """CSV point cloud file header metadata.
+
+    ``normalise_offset`` and ``normalise_scale`` are populated by the
+    ``normalise=True`` ingest path so export can invert the transform.
+    They are ``None`` for stores that were not normalised.
+    """
 
     format_name: str = "csv"
     column_names: list[str] = field(default_factory=list)
@@ -260,6 +265,8 @@ class CSVHeader(Header):
     position_columns: list[str] = field(default_factory=lambda: ["x", "y", "z"])
     attribute_columns: list[str] = field(default_factory=list)
     has_header_row: bool = True
+    normalise_offset: list[float] | None = None
+    normalise_scale: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -269,6 +276,8 @@ class CSVHeader(Header):
             "position_columns": self.position_columns,
             "attribute_columns": self.attribute_columns,
             "has_header_row": self.has_header_row,
+            "normalise_offset": self.normalise_offset,
+            "normalise_scale": self.normalise_scale,
         }
 
     @classmethod
@@ -279,6 +288,52 @@ class CSVHeader(Header):
             position_columns=d.get("position_columns", ["x", "y", "z"]),
             attribute_columns=d.get("attribute_columns", []),
             has_header_row=d.get("has_header_row", True),
+            normalise_offset=d.get("normalise_offset"),
+            normalise_scale=d.get("normalise_scale"),
+        )
+
+
+# ===================================================================
+# Graph (summary metrics)
+# ===================================================================
+
+@dataclass
+class GraphHeader(Header):
+    """Graph-level summary metrics.
+
+    Stored as a workaround for the lack of per-object attributes on the
+    ``graphs`` geometry type in the core write API. When that gap is
+    closed in core, this header can migrate into ``graph_attributes``.
+    """
+
+    format_name: str = "graph"
+    node_count: int = 0
+    edge_count: int = 0
+    is_directed: bool = False
+    mean_degree: float = 0.0
+    n_components: int = 0
+    largest_component_size: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "format_name": self.format_name,
+            "node_count": self.node_count,
+            "edge_count": self.edge_count,
+            "is_directed": self.is_directed,
+            "mean_degree": self.mean_degree,
+            "n_components": self.n_components,
+            "largest_component_size": self.largest_component_size,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphHeader:
+        return cls(
+            node_count=d.get("node_count", 0),
+            edge_count=d.get("edge_count", 0),
+            is_directed=d.get("is_directed", False),
+            mean_degree=d.get("mean_degree", 0.0),
+            n_components=d.get("n_components", 0),
+            largest_component_size=d.get("largest_component_size", 0),
         )
 
 
@@ -293,6 +348,7 @@ HEADER_CLASSES: dict[str, type[Header]] = {
     "las": LASHeader,
     "obj": OBJHeader,
     "csv": CSVHeader,
+    "graph": GraphHeader,
 }
 
 

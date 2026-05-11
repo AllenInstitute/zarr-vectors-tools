@@ -22,6 +22,9 @@ def ingest_swc(
     *,
     dtype: str = "float32",
     preserve_header: bool = True,
+    compute_topological_depth: bool = False,
+    compute_strahler: bool = False,
+    compute_node_kind: bool = False,
 ) -> dict[str, Any]:
     """Ingest an SWC file into a zarr vectors skeleton store.
 
@@ -32,6 +35,13 @@ def ingest_swc(
         dtype: Dtype for position data.
         preserve_header: If True, store SWC comment lines in
             ``/headers/swc/`` for round-trip export.
+        compute_topological_depth: If True, write per-node edge count
+            from soma to ``node_attributes["topological_depth"]`` (uint16).
+        compute_strahler: If True, write per-node Strahler stream order
+            to ``node_attributes["strahler"]`` (uint8).
+        compute_node_kind: If True, write per-node kind label to
+            ``node_attributes["node_kind"]`` (uint8: 0=soma, 1=branch,
+            2=continuation, 3=terminal).
 
     Returns:
         Summary dict from :func:`write_graph`.
@@ -89,10 +99,29 @@ def ingest_swc(
 
     edges_arr = np.array(edges, dtype=np.int64) if edges else np.zeros((0, 2), dtype=np.int64)
 
-    node_attributes = {
+    node_attributes: dict[str, np.ndarray] = {
         "radius": radius,
         "compartment": compartment,
     }
+
+    if compute_topological_depth or compute_strahler or compute_node_kind:
+        # Build a parent-index array in SWC node order. Root nodes have parent -1.
+        parent_idx = np.full(n_nodes, -1, dtype=np.int64)
+        for i in range(n_nodes):
+            pid = int(parent_ids[i])
+            if pid != -1 and pid in id_to_idx:
+                parent_idx[i] = id_to_idx[pid]
+        root_idx = int(np.where(parent_idx == -1)[0][0]) if (parent_idx == -1).any() else 0
+
+        from zarr_vectors_tools.ingest._tree_enrichments import compute_tree_metrics
+        depth, strahler, node_kind = compute_tree_metrics(parent_idx, root_idx=root_idx)
+
+        if compute_topological_depth:
+            node_attributes["topological_depth"] = depth.astype(np.float32)
+        if compute_strahler:
+            node_attributes["strahler"] = strahler.astype(np.float32)
+        if compute_node_kind:
+            node_attributes["node_kind"] = node_kind.astype(np.float32)
 
     result = write_graph(
         str(output_path),

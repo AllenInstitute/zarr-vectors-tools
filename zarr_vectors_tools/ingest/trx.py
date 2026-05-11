@@ -25,6 +25,10 @@ def ingest_trx(
     chunk_shape: ChunkShape,
     *,
     dtype: str = "float32",
+    compute_length: bool = False,
+    compute_endpoints: bool = False,
+    length_range: tuple[float, float] | None = None,
+    mean_scalar: str | list[str] | None = None,
 ) -> dict[str, Any]:
     """Ingest a TRX file into a zarr vectors streamline store.
 
@@ -42,9 +46,20 @@ def ingest_trx(
         output_path: Path for the output zarr vectors store.
         chunk_shape: Spatial chunk size per dimension (3D).
         dtype: Dtype for position data.
+        compute_length: If True, write per-streamline path length to
+            ``object_attributes["length"]``.
+        compute_endpoints: If True, write per-streamline start and end
+            points to ``object_attributes["start"]`` and ``["end"]``.
+        length_range: Optional ``(min, max)`` length bounds; streamlines
+            outside the range are dropped before writing.
+        mean_scalar: Name or list of names of per-vertex (dpv) scalars to
+            aggregate. For each, write its per-streamline mean to
+            ``object_attributes["mean_<name>"]``. Names not found in the
+            TRX file are skipped silently.
 
     Returns:
-        Summary dict from :func:`write_polylines`.
+        Summary dict from :func:`write_polylines`, plus any enrichment
+        counters such as ``dropped_by_length``.
 
     Raises:
         IngestError: If trx-python is not installed or the file is unreadable.
@@ -123,7 +138,69 @@ def ingest_trx(
             "group_id": np.arange(len(group_names), dtype=np.float32),
         }
 
-    return write_polylines(
+    # Optional enrichments
+    from zarr_vectors_tools.ingest._polyline_enrichments import (
+        compute_endpoints as _compute_endpoints,
+        compute_lengths as _compute_lengths,
+        filter_by_length as _filter_by_length,
+    )
+
+    enrichment_summary: dict[str, Any] = {}
+    lengths: np.ndarray | None = None
+
+    if length_range is not None:
+        lengths = _compute_lengths(polylines)
+        kept, kept_idx, dropped = _filter_by_length(polylines, length_range, lengths=lengths)
+        if dropped:
+            polylines = kept
+            lengths = lengths[kept_idx]
+            if vertex_attributes is not None:
+                vertex_attributes = {
+                    k: [v[i] for i in kept_idx] for k, v in vertex_attributes.items()
+                }
+            if object_attributes is not None:
+                object_attributes = {
+                    k: v[kept_idx] for k, v in object_attributes.items()
+                }
+            # Groups index into the original streamline order; rebuild against kept_idx.
+            if groups is not None:
+                old_to_new = {int(old): new for new, old in enumerate(kept_idx)}
+                new_groups: dict[int, list[int]] = {}
+                for gid, idxs in groups.items():
+                    new_groups[gid] = [old_to_new[i] for i in idxs if i in old_to_new]
+                groups = new_groups
+        enrichment_summary["dropped_by_length"] = dropped
+
+    if compute_length:
+        if lengths is None:
+            lengths = _compute_lengths(polylines)
+        object_attributes = dict(object_attributes or {})
+        object_attributes["length"] = lengths
+
+    if compute_endpoints:
+        start, end = _compute_endpoints(polylines)
+        object_attributes = dict(object_attributes or {})
+        object_attributes["start"] = start
+        object_attributes["end"] = end
+
+    if mean_scalar is not None and vertex_attributes:
+        names = [mean_scalar] if isinstance(mean_scalar, str) else list(mean_scalar)
+        object_attributes = dict(object_attributes or {})
+        for name in names:
+            if name not in vertex_attributes:
+                continue
+            means = np.array(
+                [float(np.mean(v)) if len(v) else 0.0 for v in vertex_attributes[name]],
+                dtype=np.float32,
+            )
+            object_attributes[f"mean_{name}"] = means
+
+    if len(polylines) == 0:
+        raise IngestError(
+            f"No streamlines remain after enrichment filtering: {input_path}"
+        )
+
+    result = write_polylines(
         str(output_path),
         polylines,
         chunk_shape=chunk_shape,
@@ -134,3 +211,5 @@ def ingest_trx(
         dtype=dtype,
         geometry_type="streamline",
     )
+    result.update(enrichment_summary)
+    return result

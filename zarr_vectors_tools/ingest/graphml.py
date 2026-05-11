@@ -23,6 +23,10 @@ def ingest_graphml(
     *,
     position_attrs: tuple[str, ...] = ("x", "y", "z"),
     dtype: str = "float32",
+    compute_degree: bool = False,
+    compute_component: bool = False,
+    compute_clustering: bool = False,
+    compute_summary: bool = False,
 ) -> dict[str, Any]:
     """Ingest a GraphML file into a zarr vectors graph store.
 
@@ -32,6 +36,17 @@ def ingest_graphml(
         chunk_shape: Spatial chunk size per dimension.
         position_attrs: Node attribute names for coordinates.
         dtype: Dtype for position data.
+        compute_degree: If True, write per-node degree (total in+out for
+            directed graphs) to ``node_attributes["degree"]``.
+        compute_component: If True, write 0-indexed connected-component
+            label to ``node_attributes["component"]``. Uses weakly-
+            connected components for directed graphs.
+        compute_clustering: If True, write per-node clustering coefficient
+            to ``node_attributes["clustering"]``.
+        compute_summary: If True, write a :class:`GraphHeader` containing
+            node/edge counts, mean degree, and connected-component stats.
+            Blocked on a core API that supports per-graph attributes; the
+            header is the workaround until that lands.
 
     Returns:
         Summary dict from :func:`write_graph`.
@@ -96,7 +111,32 @@ def ingest_graphml(
             except (ValueError, TypeError):
                 continue
 
-    return write_graph(
+    if compute_degree:
+        deg = np.zeros(n_nodes, dtype=np.float32)
+        for node, d in G.degree():
+            deg[node_to_idx[node]] = float(d)
+        node_attributes["degree"] = deg
+
+    if compute_component:
+        comp_labels = np.zeros(n_nodes, dtype=np.float32)
+        if G.is_directed():
+            components = nx.weakly_connected_components(G)
+        else:
+            components = nx.connected_components(G)
+        for ci, comp in enumerate(components):
+            for node in comp:
+                comp_labels[node_to_idx[node]] = float(ci)
+        node_attributes["component"] = comp_labels
+
+    if compute_clustering:
+        # nx.clustering returns dict[node] -> float.
+        clust = nx.clustering(G.to_undirected() if G.is_directed() else G)
+        clust_arr = np.array(
+            [float(clust.get(n, 0.0)) for n in nodes], dtype=np.float32
+        )
+        node_attributes["clustering"] = clust_arr
+
+    result = write_graph(
         str(output_path),
         positions,
         edges,
@@ -106,3 +146,28 @@ def ingest_graphml(
         edge_attributes=edge_attributes if edge_attributes else None,
         dtype=dtype,
     )
+
+    if compute_summary:
+        try:
+            from zarr_vectors_tools.headers.formats import GraphHeader
+            from zarr_vectors_tools.headers.registry import HeaderRegistry
+
+            if G.is_directed():
+                comps = list(nx.weakly_connected_components(G))
+            else:
+                comps = list(nx.connected_components(G))
+            comp_sizes = [len(c) for c in comps] or [0]
+
+            graph_header = GraphHeader(
+                node_count=n_nodes,
+                edge_count=len(edge_list),
+                is_directed=bool(G.is_directed()),
+                mean_degree=(2 * len(edge_list) / n_nodes) if n_nodes else 0.0,
+                n_components=len(comps),
+                largest_component_size=max(comp_sizes),
+            )
+            HeaderRegistry(str(output_path)).add("graph", graph_header)
+        except Exception:
+            pass
+
+    return result

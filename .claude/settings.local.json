@@ -8,7 +8,9 @@
       "Bash(Select-Object FullName, PSIsContainer)",
       "Bash(Format-Table -AutoSize)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\\\\zarr_vectors_tools\" -Recurse -File -Filter \"*.py\")",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\" -Directory)",
+      "Bash(Select-Object Name)"
     ],
     "additionalDirectories": [
       "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\ingest"
