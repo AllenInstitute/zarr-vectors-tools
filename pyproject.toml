@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zarr-vectors-tools"
+version = "0.1.0"
+description = "Ingest and export workflows for the Zarr Vector Format (ZVF). Wraps third-party readers/writers (nibabel, laspy, plyfile, trimesh, networkx, trx-python) on top of zarr-vectors."
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Andrew Keenlyside"},
+    {name = "Forrest Collman"},
+]
+keywords = ["zarr", "point-cloud", "mesh", "skeleton", "streamline", "connectomics", "spatial", "ingest", "export"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "zarr-vectors>=0.1",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+las = ["laspy>=2.4"]
+ply = ["plyfile>=1.0"]
+streamlines = ["nibabel>=5.0", "trx-python>=0.3"]
+graph = ["networkx>=3.0"]
+all = [
+    "laspy>=2.4",
+    "plyfile>=1.0",
+    "nibabel>=5.0",
+    "trx-python>=0.3",
+    "networkx>=3.0",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+    "jupyter>=1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["zarr_vectors_tools*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

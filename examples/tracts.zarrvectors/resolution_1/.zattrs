@@ -1,0 +1,22 @@
+{
+  "zarr_vectors_level": {
+    "level": 1,
+    "bin_shape": [
+      20.0,
+      20.0,
+      20.0
+    ],
+    "bin_ratio": [
+      2,
+      2,
+      2
+    ],
+    "object_sparsity": 1.0,
+    "vertex_count": 913,
+    "coarsening_method": "grid_metanode",
+    "parent_level": 0,
+    "arrays_present": [
+      "vertices"
+    ]
+  }
+}

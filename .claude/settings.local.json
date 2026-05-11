@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\" && echo \"---\" && ls \"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\")",
+      "Read(//c/Users/andre/zarr-vectors-py/**)",
+      "Bash(cp \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\__init__.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\csv_points.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\graphml.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\las.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\obj.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\ply.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\stl.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\swc.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\tck.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\trk.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\\\\ingest\\\\trx.py\" \"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\\\\zarr_vectors_tools\\\\ingest\\\\\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\" -Recurse -Force)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\\\\zarr_vectors_tools\" -Recurse -File -Filter \"*.py\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\ingest"
+    ]
+  }
+}
