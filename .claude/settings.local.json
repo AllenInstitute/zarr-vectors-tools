@@ -10,7 +10,9 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\\\\zarr_vectors_tools\" -Recurse -File -Filter \"*.py\")",
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\zarr_vectors\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)"
     ],
     "additionalDirectories": [
       "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\ingest"

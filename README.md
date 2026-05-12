@@ -96,3 +96,29 @@ Install the enrichment extras as needed:
 pip install zarr-vectors-tools[points-enrichment]   # scipy, for kNN
 pip install zarr-vectors-tools[gpu]                 # cuDF, RAPIDS-only
 ```
+
+## Algorithms
+
+`zarr_vectors_tools.algorithms` exposes chunked graph and mesh algorithms that operate directly on the on-disk store — streaming per chunk plus a small cross-chunk pass — so they scale beyond what fits in memory.
+
+**Mesh:**
+
+| function | what it returns |
+|---|---|
+| `compute_mesh_summary(store)` | surface area, volume, Euler characteristic, face/vertex/edge counts |
+| `compute_vertex_normals(store)` | per-vertex unit normals (area- or uniform-weighted) |
+| `compute_mean_curvature(store)` | cotangent Laplace–Beltrami mean curvature per vertex |
+| `closest_point(store, query)` | nearest point on the mesh to a query point + the face/chunk it lies on |
+| `cast_ray(store, origin, direction)` | first ray–triangle hit along a ray, via 3D chunk-grid DDA |
+
+**Graph / skeleton:**
+
+| function | what it returns |
+|---|---|
+| `compute_connected_components(store)` | per-node component label, count, largest-component size |
+| `bfs_distances(store, source)` | unweighted shortest-path distances + predecessors from a seed |
+| `shortest_path(store, source, target)` | Dijkstra (or A*) shortest path between two nodes |
+
+All functions are read-only today: results are returned as numpy arrays or dicts. `write_back=True` variants will land once core gains a public post-hoc per-vertex attribute writer.
+
+Cross-chunk *faces* lose face identity in the current core storage (they're stored as boundary edge pairs), so mesh algorithms that need face-level structure are computed on intra-chunk faces only and report the excluded edge count in their result dict. Cross-chunk *edges* are preserved correctly and are used by the graph algorithms.
