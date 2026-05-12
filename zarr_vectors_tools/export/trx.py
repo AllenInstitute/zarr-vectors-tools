@@ -12,7 +12,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.polylines import read_polylines
-from zarr_vectors.typing import BoundingBox
+from zarr_vectors.typing import BoundingBox, ChunkCoords
 
 
 def export_trx(
@@ -22,6 +22,7 @@ def export_trx(
     level: int = 0,
     object_ids: list[int] | None = None,
     group_ids: list[int] | None = None,
+    chunks: list[ChunkCoords] | None = None,
 ) -> dict[str, Any]:
     """Export zarr vectors streamlines to a TRX file.
 
@@ -31,6 +32,11 @@ def export_trx(
         level: Resolution level to export.
         object_ids: Optional object ID filter.
         group_ids: Optional group ID filter.
+        chunks: Optional whitelist of chunk coordinate tuples. Filters at
+            the *segment* level: only vertex groups stored in listed
+            chunks are emitted, and each surviving contiguous run is
+            written as its own streamline. The output ``streamline_count``
+            can therefore exceed the source object count.
 
     Returns:
         Summary dict with ``streamline_count``, ``vertex_count``.
@@ -52,6 +58,7 @@ def export_trx(
             level=level,
             object_ids=object_ids,
             group_ids=group_ids,
+            chunks=chunks,
         )
     except Exception as e:
         raise ExportError(f"Failed to read store: {e}") from e

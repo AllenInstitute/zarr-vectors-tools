@@ -9,6 +9,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.graphs import read_graph
+from zarr_vectors.typing import ChunkCoords
 
 
 def export_swc(
@@ -16,6 +17,7 @@ def export_swc(
     output_path: str | Path,
     *,
     level: int = 0,
+    chunks: list[ChunkCoords] | None = None,
 ) -> dict[str, Any]:
     """Export a zarr vectors skeleton to an SWC file.
 
@@ -26,12 +28,17 @@ def export_swc(
         store_path: Path to the zarr vectors store.
         output_path: Path for the output .swc file.
         level: Resolution level to export.
+        chunks: Optional whitelist of chunk coordinate tuples; only
+            nodes (and intra-chunk edges) in those chunks are exported.
+            Edges spanning a listed and an unlisted chunk are dropped,
+            which can orphan child nodes — each surviving connected piece
+            is still written as a valid SWC tree (with its own root).
 
     Returns:
         Summary dict with ``node_count``.
     """
     try:
-        result = read_graph(str(store_path), level=level)
+        result = read_graph(str(store_path), level=level, chunks=chunks)
     except Exception as e:
         raise ExportError(f"Failed to read store: {e}") from e
 

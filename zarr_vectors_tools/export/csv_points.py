@@ -9,7 +9,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.points import read_points
-from zarr_vectors.typing import BoundingBox
+from zarr_vectors.typing import BoundingBox, ChunkCoords
 
 
 def export_csv(
@@ -19,6 +19,7 @@ def export_csv(
     level: int = 0,
     bbox: BoundingBox | None = None,
     object_ids: list[int] | None = None,
+    chunks: list[ChunkCoords] | None = None,
     delimiter: str = ",",
     header: bool = True,
     attribute_names: list[str] | None = None,
@@ -31,6 +32,9 @@ def export_csv(
         level: Resolution level to export.
         bbox: Optional bounding box filter.
         object_ids: Optional object ID filter.
+        chunks: Optional whitelist of chunk coordinate tuples; only data
+            stored in those chunks is exported. AND-ed with ``bbox`` and
+            ``object_ids``.
         delimiter: Column delimiter.
         header: Whether to write a header row.
         attribute_names: Attributes to include.  None = positions only.
@@ -47,6 +51,7 @@ def export_csv(
             level=level,
             bbox=bbox,
             object_ids=object_ids,
+            chunks=chunks,
             attribute_names=attribute_names,
         )
     except Exception as e:

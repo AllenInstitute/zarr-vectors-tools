@@ -24,8 +24,7 @@ from zarr_vectors.core.arrays import (
     read_chunk_links,
     read_chunk_vertices,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors.core.metadata import read_root_metadata
+from zarr_vectors.core.store import get_resolution_level, open_store, read_root_metadata
 from zarr_vectors_tools.algorithms._cross_chunk_index import build_cross_chunk_index
 
 

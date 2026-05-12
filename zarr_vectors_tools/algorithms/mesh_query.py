@@ -19,8 +19,7 @@ from zarr_vectors.core.arrays import (
     read_chunk_links,
     read_chunk_vertices,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors.core.metadata import read_root_metadata
+from zarr_vectors.core.store import get_resolution_level, open_store, read_root_metadata
 from zarr_vectors.spatial.chunking import chunks_intersecting_bbox
 from zarr_vectors.typing import ChunkCoords
 
@@ -121,8 +120,11 @@ def _moller_trumbore(
     """
     edge1 = b - a
     edge2 = c - a
+    # h = direction x edge2; direction is (3,) and edge2 is (F, 3), so
+    # np.cross broadcasts to (F, 3) — both operands of the dot are
+    # per-row, hence "ij,ij->i".
     h = np.cross(direction, edge2)
-    det = np.einsum("ij,j->i", edge1, h)
+    det = np.einsum("ij,ij->i", edge1, h)
 
     parallel = np.abs(det) < eps
     inv_det = np.where(parallel, 1.0, 1.0 / np.where(parallel, 1.0, det))
@@ -365,9 +367,25 @@ def cast_ray(
     best_chunk: ChunkCoords | None = None
     best_face: int | None = None
 
-    # Halt criterion: leave the bbox of occupied chunks.
+    # Halt criterion: along some axis we've permanently exited the bbox
+    # of occupied chunks (i.e. step is taking us further away and we're
+    # already past it). The previous "outside by more than 1" check would
+    # fire while the ray was still walking *towards* the mesh.
     occupied_min = np.min(np.array(list(occupied)), axis=0)
     occupied_max = np.max(np.array(list(occupied)), axis=0)
+
+    def _ray_past_bbox(cur_pos: list[int]) -> bool:
+        for d in range(3):
+            s = int(step[d])
+            if s > 0 and cur_pos[d] > occupied_max[d]:
+                return True
+            if s < 0 and cur_pos[d] < occupied_min[d]:
+                return True
+            if s == 0 and (
+                cur_pos[d] < occupied_min[d] or cur_pos[d] > occupied_max[d]
+            ):
+                return True
+        return False
 
     while travelled <= max_t:
         cur_key: ChunkCoords = tuple(cur)
@@ -417,11 +435,7 @@ def cast_ray(
         cur[axis] += int(step[axis])
         t_max[axis] += t_delta[axis]
 
-        # Stop if we've left the occupied bbox.
-        if any(
-            cur[d] < occupied_min[d] - 1 or cur[d] > occupied_max[d] + 1
-            for d in range(3)
-        ):
+        if _ray_past_bbox(cur):
             break
 
     hit = best_chunk is not None

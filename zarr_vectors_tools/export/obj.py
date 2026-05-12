@@ -9,7 +9,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.meshes import read_mesh
-from zarr_vectors.typing import BoundingBox
+from zarr_vectors.typing import BoundingBox, ChunkCoords
 
 
 def export_obj(
@@ -19,6 +19,7 @@ def export_obj(
     level: int = 0,
     bbox: BoundingBox | None = None,
     object_ids: list[int] | None = None,
+    chunks: list[ChunkCoords] | None = None,
 ) -> dict[str, Any]:
     """Export a zarr vectors mesh to a Wavefront OBJ file.
 
@@ -28,6 +29,10 @@ def export_obj(
         level: Resolution level to export.
         bbox: Optional bounding box filter.
         object_ids: Optional object ID filter.
+        chunks: Optional whitelist of chunk coordinate tuples; only data
+            stored in those chunks is exported. AND-ed with ``bbox`` and
+            ``object_ids``. Faces spanning a listed and an unlisted chunk
+            are dropped.
 
     Returns:
         Summary dict with ``vertex_count``, ``face_count``.
@@ -41,6 +46,7 @@ def export_obj(
             level=level,
             bbox=bbox,
             object_ids=object_ids,
+            chunks=chunks,
         )
     except Exception as e:
         raise ExportError(f"Failed to read store: {e}") from e

@@ -12,7 +12,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.polylines import read_polylines
-from zarr_vectors.typing import BoundingBox
+from zarr_vectors.typing import BoundingBox, ChunkCoords
 
 
 def export_trk(
@@ -22,6 +22,7 @@ def export_trk(
     level: int = 0,
     object_ids: list[int] | None = None,
     group_ids: list[int] | None = None,
+    chunks: list[ChunkCoords] | None = None,
     affine: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Export zarr vectors streamlines to a TRK file.
@@ -32,6 +33,11 @@ def export_trk(
         level: Resolution level to export.
         object_ids: Optional object ID filter.
         group_ids: Optional group ID filter.
+        chunks: Optional whitelist of chunk coordinate tuples. Filters at
+            the *segment* level: only vertex groups stored in listed
+            chunks are emitted, and each surviving contiguous run is
+            written as its own streamline. The output ``streamline_count``
+            can therefore exceed the source object count.
         affine: 4×4 voxel-to-RAS affine matrix. If None, uses identity.
 
     Returns:
@@ -55,6 +61,7 @@ def export_trk(
         level=level,
         object_ids=object_ids,
         group_ids=group_ids,
+        chunks=chunks,
     )
 
     poly_list = result["polylines"]

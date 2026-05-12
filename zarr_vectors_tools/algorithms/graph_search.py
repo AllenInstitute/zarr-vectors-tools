@@ -23,7 +23,6 @@ import numpy as np
 
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
-    read_chunk_attributes,
     read_chunk_links,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store
@@ -32,6 +31,7 @@ from zarr_vectors_tools.algorithms._indexing import (
     build_chunk_to_global_offset,
     resolve_endpoints,
 )
+from zarr_vectors_tools.algorithms._link_attributes import read_chunk_link_attributes
 
 
 def _build_adjacency(
@@ -60,16 +60,14 @@ def _build_adjacency(
             continue
         base = offsets[chunk_key]
 
-        # Edge attributes are per-chunk; index alignment with link_groups
-        # is best-effort. Skip if attribute read fails.
         attrs_per_chunk = None
         if weight_attr is not None:
-            try:
-                attrs_per_chunk = read_chunk_attributes(
-                    level_group, weight_attr, chunk_key,
-                )
-            except Exception:
-                attrs_per_chunk = None
+            attrs_per_chunk = read_chunk_link_attributes(
+                level_group,
+                weight_attr,
+                chunk_key,
+                [len(g) for g in link_groups],
+            )
 
         for gi, edges in enumerate(link_groups):
             if len(edges) == 0:

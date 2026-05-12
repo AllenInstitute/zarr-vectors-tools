@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import zarr_vectors_tools.algorithms as a; print\\([x for x in dir\\(a\\) if not x.startswith\\('_'\\)]\\)\")",
+      "Bash(python -c \"import zarr_vectors; print\\(zarr_vectors.__file__\\)\")",
+      "Bash(python -m pip show zarr-vectors-tools)",
+      "Bash(python -m pip show zarr-vectors)",
+      "PowerShell(Get-Command python -All | Select-Object -First 5 Source; Write-Output \"---\"; if \\($env:CONDA_DEFAULT_ENV\\) { Write-Output \"CONDA_DEFAULT_ENV: $env:CONDA_DEFAULT_ENV\" }; conda env list 2>$null)",
+      "PowerShell($venvs = @\\(\"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\.venv\\\\Scripts\\\\python.exe\",\"C:\\\\Users\\\\andre\\\\zarr-vectors-tools\\\\.venv\\\\Scripts\\\\python.exe\",\"C:\\\\Users\\\\andre\\\\zarr-vectors-py\\\\venv\\\\Scripts\\\\python.exe\"\\); foreach \\($p in $venvs\\) { if \\(Test-Path $p\\) { Write-Output \"FOUND: $p\" } }; Write-Output \"---\"; Get-ChildItem \"C:\\\\Users\\\\andre\" -Filter \".venv\" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 5 FullName; Get-ChildItem \"C:\\\\Users\\\\andre\" -Filter \"venv\" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 5 FullName)",
+      "PowerShell(Get-Command jupyter -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command pip -ErrorAction SilentlyContinue)",
+      "PowerShell(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Read(//c/Users/andre/**)",
+      "Read(//c/Program Files/**)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Python313-arm64\\\\python.exe\" -c \"import sys; print\\(sys.version\\)\")",
+      "PowerShell(& \"C:\\\\Program Files\\\\Python313-arm64\\\\python.exe\" -c \"import zarr_vectors; print\\(zarr_vectors.__file__\\)\")",
+      "Bash(python -c \"import json; print\\(json.dumps\\({'cells':[],'metadata':{},'nbformat':4,'nbformat_minor':5}\\)\\)\")",
+      "Bash(python -c \"import json; json.load\\(open\\(r'C:/Users/andre/zarr-vectors-tools/examples/07_network_metrics.ipynb','r',encoding='utf-8'\\)\\); print\\('07 valid JSON'\\)\")",
+      "Bash(python -c \"import json; json.load\\(open\\(r'C:/Users/andre/zarr-vectors-tools/examples/08_network_search.ipynb','r',encoding='utf-8'\\)\\); print\\('08 valid JSON'\\)\")",
+      "Bash(python -c \"import json; json.load\\(open\\(r'C:/Users/andre/zarr-vectors-tools/examples/09_mesh_algorithms.ipynb','r',encoding='utf-8'\\)\\); print\\('09 valid JSON'\\)\")",
+      "PowerShell(jupyter kernelspec list 2>&1; Write-Output \"---\"; Get-ChildItem \"$env:APPDATA\\\\jupyter\\\\kernels\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"C:\\\\ProgramData\\\\jupyter\\\\kernels\" -ErrorAction SilentlyContinue | Select-Object Name)",
+      "PowerShell($paths = @\\(\"$env:APPDATA\\\\jupyter\\\\kernels\", \"$env:LOCALAPPDATA\\\\jupyter\\\\kernels\", \"C:\\\\ProgramData\\\\jupyter\\\\kernels\"\\); foreach \\($p in $paths\\) { if \\(Test-Path $p\\) { Write-Output \"==> $p\"; Get-ChildItem $p -Directory | ForEach-Object { Write-Output \"  $\\($_.Name\\)\"; $kj = Join-Path $_.FullName \"kernel.json\"; if \\(Test-Path $kj\\) { Get-Content $kj -Raw } } } })",
+      "PowerShell($py = \"C:\\\\Program Files\\\\Python313-arm64\\\\python.exe\"; & $py -m pip --version; Write-Output \"---\"; & $py -m pip list 2>&1 | Select-String -Pattern \"zarr|jupyter|ipykernel|numpy\")",
+      "PowerShell(Write-Output \"=== py launcher ===\"; py -0 2>&1; Write-Output \"=== python.exe in PATH ===\"; Get-Command python -All -ErrorAction SilentlyContinue | Select-Object Source; Write-Output \"=== other interpreters ===\"; @\\(\"C:\\\\Program Files\\\\Python312-arm64\\\\python.exe\",\"C:\\\\Program Files\\\\Python312\\\\python.exe\",\"C:\\\\Program Files\\\\Python311\\\\python.exe\",\"C:\\\\Python312\\\\python.exe\",\"C:\\\\Python311\\\\python.exe\"\\) | ForEach-Object { if \\(Test-Path $_\\) { Write-Output \"FOUND: $_\" } })",
+      "Bash(python -c \"import zarr_vectors.core.metadata as m; print\\([x for x in dir\\(m\\) if not x.startswith\\('_'\\)]\\)\")",
+      "Bash(python -c \"from zarr_vectors_tools.algorithms import bfs_distances, shortest_path, cast_ray, closest_point, compute_mesh_summary, compute_vertex_normals, compute_mean_curvature, compute_connected_components; print\\('all imports OK'\\)\")",
+      "Bash(python -c \"import json; json.load\\(open\\(r'C:/Users/andre/zarr-vectors-tools/examples/08_network_search.ipynb','r',encoding='utf-8'\\)\\); print\\('08 still valid JSON'\\)\")",
+      "Bash(python -c \"from zarr_vectors_tools.algorithms.graph_search import shortest_path, bfs_distances; from zarr_vectors_tools.algorithms._link_attributes import read_chunk_link_attributes; print\\('imports OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/test_spatial.py tests/test_graphs.py -q --no-header)",
+      "Bash(python -m pytest tests/ -q --no-header -x)",
+      "Bash(python -m pytest tests/ -q --no-header --ignore=tests/integration)",
+      "Bash(python -c \"from zarr_vectors.types.meshes import read_mesh; print\\('OK'\\)\")",
+      "Bash(python -c \"from zarr_vectors.types.graphs import read_graph; print\\('OK'\\)\")",
+      "Bash(python -c \"from zarr_vectors.types.points import read_points; print\\('OK'\\)\")",
+      "Bash(python -c \"from zarr_vectors.types.polylines import read_polylines; print\\('OK'\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\types",
+      "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\lazy",
+      "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\core"
+    ]
+  }
+}

@@ -12,7 +12,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.points import read_points
-from zarr_vectors.typing import BoundingBox
+from zarr_vectors.typing import BoundingBox, ChunkCoords
 
 
 def export_ply(
@@ -22,6 +22,7 @@ def export_ply(
     level: int = 0,
     bbox: BoundingBox | None = None,
     object_ids: list[int] | None = None,
+    chunks: list[ChunkCoords] | None = None,
     attribute_names: list[str] | None = None,
     binary: bool = True,
 ) -> dict[str, Any]:
@@ -33,6 +34,9 @@ def export_ply(
         level: Resolution level to export.
         bbox: Optional bounding box filter.
         object_ids: Optional object ID filter.
+        chunks: Optional whitelist of chunk coordinate tuples; only data
+            stored in those chunks is exported. AND-ed with ``bbox`` and
+            ``object_ids``.
         attribute_names: Attributes to include.
         binary: Write binary PLY (default) or ASCII.
 
@@ -56,6 +60,7 @@ def export_ply(
             level=level,
             bbox=bbox,
             object_ids=object_ids,
+            chunks=chunks,
             attribute_names=attribute_names,
         )
     except Exception as e:
