@@ -9,6 +9,11 @@ core-package gaps; they will retire (or re-point at core) as the
 corresponding additions land in zarr-vectors-py.
 """
 
+from zarr_vectors_tools.algorithms.graph_clustering import (
+    compute_k_core,
+    compute_label_propagation,
+    compute_louvain,
+)
 from zarr_vectors_tools.algorithms.graph_components import (
     compute_connected_components,
 )
@@ -25,6 +30,9 @@ __all__ = [
     "cast_ray",
     "closest_point",
     "compute_connected_components",
+    "compute_k_core",
+    "compute_label_propagation",
+    "compute_louvain",
     "compute_mean_curvature",
     "compute_mesh_summary",
     "compute_vertex_normals",

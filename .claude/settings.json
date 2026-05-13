@@ -33,7 +33,17 @@
       "Bash(python -c \"from zarr_vectors.types.meshes import read_mesh; print\\('OK'\\)\")",
       "Bash(python -c \"from zarr_vectors.types.graphs import read_graph; print\\('OK'\\)\")",
       "Bash(python -c \"from zarr_vectors.types.points import read_points; print\\('OK'\\)\")",
-      "Bash(python -c \"from zarr_vectors.types.polylines import read_polylines; print\\('OK'\\)\")"
+      "Bash(python -c \"from zarr_vectors.types.polylines import read_polylines; print\\('OK'\\)\")",
+      "Bash(python -c \"from zarr_vectors_tools.algorithms.graph_clustering import compute_k_core, compute_label_propagation, compute_louvain; print\\('imports OK'\\)\")",
+      "Bash(python -m pytest C:/Users/andre/zarr-vectors-tools/tests/test_graph_clustering.py -v)",
+      "Bash(python -m pytest C:/Users/andre/zarr-vectors-tools/tests C:/Users/andre/zarr-vectors-py/tests -q --no-header --ignore=C:/Users/andre/zarr-vectors-py/tests/integration)",
+      "Bash(python -m pytest tests -q --no-header --ignore=tests/integration)",
+      "Bash(python -m pytest tests -q --no-header)",
+      "Bash(python -m pytest tests/test_mesh_query.py::TestCastRay::test_max_distance_clip -x)",
+      "Bash(python -m pytest tests/test_graph_components.py tests/test_graph_search.py tests/test_graph_clustering.py -q)",
+      "Bash(python -c \"import json; json.load\\(open\\(r'C:/Users/andre/zarr-vectors-tools/examples/10_graph_clustering.ipynb','r',encoding='utf-8'\\)\\); print\\('10 valid JSON'\\)\")",
+      "Bash(python -m pytest C:/Users/andre/zarr-vectors-tools/tests/test_graph_clustering.py C:/Users/andre/zarr-vectors-tools/tests/test_graph_components.py C:/Users/andre/zarr-vectors-tools/tests/test_graph_search.py C:/Users/andre/zarr-vectors-py/tests -q --no-header --ignore=C:/Users/andre/zarr-vectors-py/tests/integration)",
+      "Bash(python -m pytest tests/test_graph_clustering.py tests/test_graph_components.py tests/test_graph_search.py -q --no-header)"
     ],
     "additionalDirectories": [
       "C:\\Users\\andre\\zarr-vectors-py\\zarr_vectors\\types",

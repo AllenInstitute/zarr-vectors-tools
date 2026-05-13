@@ -118,6 +118,9 @@ pip install zarr-vectors-tools[gpu]                 # cuDF, RAPIDS-only
 | `compute_connected_components(store)` | per-node component label, count, largest-component size |
 | `bfs_distances(store, source)` | unweighted shortest-path distances + predecessors from a seed |
 | `shortest_path(store, source, target)` | Dijkstra (or A*) shortest path between two nodes |
+| `compute_k_core(store)` | per-node coreness (Batagelj–Zaversnik degree-peeling) + core-size histogram |
+| `compute_label_propagation(store)` | community labels via synchronous LPA; converges in a handful of rounds |
+| `compute_louvain(store, weight=...)` | modularity-optimised community labels + final `Q`; cross-chunk edges currently treated as unit weight |
 
 All functions are read-only today: results are returned as numpy arrays or dicts. `write_back=True` variants will land once core gains a public post-hoc per-vertex attribute writer.
 

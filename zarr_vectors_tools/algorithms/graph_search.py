@@ -34,12 +34,18 @@ from zarr_vectors_tools.algorithms._indexing import (
 from zarr_vectors_tools.algorithms._link_attributes import read_chunk_link_attributes
 
 
-def _build_adjacency(
+def build_adjacency(
     level_group,
     *,
     weight_attr: str | None = None,
 ) -> tuple[list[list[tuple[int, float]]], int]:
     """Materialise an adjacency list keyed by global vertex index.
+
+    Public helper shared with ``graph_clustering``. The clustering
+    algorithms (LPA, Louvain) need the same in-memory adjacency that
+    ``shortest_path`` builds, including the same fallback-to-unit-weight
+    behaviour for cross-chunk edges (the core's cross-link array has no
+    per-edge weight slot today).
 
     Args:
         level_group: Resolution level group.
@@ -128,7 +134,7 @@ def bfs_distances(
     """
     root = open_store(str(store_path))
     level_group = get_resolution_level(root, level)
-    adj, n = _build_adjacency(level_group)
+    adj, n = build_adjacency(level_group)
     if not (0 <= source < n):
         raise IndexError(f"source {source} out of range [0, {n})")
 
@@ -180,7 +186,7 @@ def shortest_path(
     """
     root = open_store(str(store_path))
     level_group = get_resolution_level(root, level)
-    adj, n = _build_adjacency(level_group, weight_attr=weight)
+    adj, n = build_adjacency(level_group, weight_attr=weight)
     if not (0 <= source < n):
         raise IndexError(f"source {source} out of range [0, {n})")
     if not (0 <= target < n):
