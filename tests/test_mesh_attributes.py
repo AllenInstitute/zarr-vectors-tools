@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from zarr_vectors.lazy import open_zv
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors_tools.algorithms import (
     compute_mean_curvature,
@@ -111,12 +112,35 @@ class TestMeanCurvature:
         median = float(np.median(curv))
         assert 0.5 / radius < median < 2.0 / radius
 
-    def test_cube_write_back_raises(self, tmp_path: Path) -> None:
+
+# ---------------------------------------------------------------------
+# write_back round-trip via ZVWriter.add_node_attribute_sync
+# ---------------------------------------------------------------------
+
+class TestWriteBack:
+
+    def test_normals_round_trip(self, tmp_path: Path) -> None:
         v, f = _unit_cube()
         store = tmp_path / "cube.zv"
         write_mesh(str(store), v, f, chunk_shape=(10.0, 10.0, 10.0))
-        try:
-            compute_mean_curvature(store, write_back=True)
-        except NotImplementedError:
-            return
-        raise AssertionError("expected NotImplementedError")
+        result = compute_vertex_normals(store, write_back=True)
+        zv = open_zv(str(store))
+        persisted = zv[0]["vertex_normal"].compute()
+        assert persisted.shape == result["normals"].shape
+        # Persisted values must equal the returned array (modulo dtype).
+        np.testing.assert_allclose(
+            persisted.astype(np.float32), result["normals"], atol=1e-6,
+        )
+
+    def test_curvature_round_trip(self, tmp_path: Path) -> None:
+        radius = 5.0
+        v, f = _uv_sphere(radius, lat=8, lon=12)
+        store = tmp_path / "sphere.zv"
+        write_mesh(str(store), v, f, chunk_shape=(100.0, 100.0, 100.0))
+        result = compute_mean_curvature(store, write_back=True)
+        zv = open_zv(str(store))
+        persisted = zv[0]["mean_curvature"].compute()
+        assert persisted.shape == result["mean_curvature"].shape
+        np.testing.assert_allclose(
+            persisted.astype(np.float32), result["mean_curvature"], atol=1e-6,
+        )

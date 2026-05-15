@@ -12,7 +12,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_swc(
@@ -20,6 +20,7 @@ def ingest_swc(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     dtype: str = "float32",
     preserve_header: bool = True,
     compute_topological_depth: bool = False,
@@ -128,6 +129,7 @@ def ingest_swc(
         positions,
         edges_arr,
         chunk_shape=chunk_shape,
+        bin_shape=bin_shape,
         is_tree=True,
         node_attributes=node_attributes,
         dtype=dtype,

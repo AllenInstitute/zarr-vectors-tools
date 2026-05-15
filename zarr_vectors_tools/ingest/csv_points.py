@@ -25,7 +25,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 # Lower-cased column name → canonical role.
@@ -71,6 +71,7 @@ def ingest_csv(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     ndim: int = 3,
     delimiter: str = ",",
     has_header: bool = True,
@@ -256,6 +257,7 @@ def ingest_csv(
 
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
+        "bin_shape": bin_shape,
         "attributes": attributes if attributes else None,
         "dtype": dtype,
     }

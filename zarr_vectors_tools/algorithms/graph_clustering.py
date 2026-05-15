@@ -14,13 +14,12 @@ network?" question:
 All three materialise the in-memory adjacency once via
 ``graph_search.build_adjacency``. For LPA and Louvain that's
 unavoidable (they touch every edge per iteration); for k-core it could
-be done in true streaming form once a per-chunk cross index lands in
-core (catalog Add 2), but for now uniformity wins.
+also be streamed, but uniformity wins.
 
-Cross-chunk edges currently lack a per-edge weight slot in core, so
-``compute_louvain(weight=...)`` treats boundary edges as unit weight.
-This biases community boundaries slightly away from chunk borders; see
-the function's docstring for the workaround.
+Cross-chunk edges now carry per-edge weights when the store has a
+matching ``cross_chunk_link_attributes/<weight>/0/`` array; otherwise a
+silent unit-weight fallback applies (matches intra-chunk behaviour for
+a missing attribute).
 """
 
 from __future__ import annotations
@@ -217,10 +216,9 @@ def compute_louvain(
         store_path: Path to a graph (or skeleton) store.
         level: Resolution level.
         weight: Optional edge-attribute name. ``None`` means unit
-            weights. **Cross-chunk edges currently have no per-edge
-            weight slot in core**, so they always contribute unit weight
-            regardless of ``weight=``; this biases community boundaries
-            slightly away from chunk borders (see module docstring).
+            weights. Cross-chunk edges contribute per-edge weights when
+            the store has a matching ``cross_chunk_link_attributes/<weight>/0/``
+            array; otherwise unit weight is used (silent fallback).
         max_iter: Maximum number of Phase-1+Phase-2 outer rounds.
         seed: RNG seed for tie-breaking in the local-move order.
 

@@ -17,7 +17,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def _read_csv(path: Path, *, use_cudf: bool):
@@ -49,6 +49,7 @@ def ingest_edgelist(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     use_cudf: bool = False,
     source_col: str = "source",
     target_col: str = "target",
@@ -212,6 +213,7 @@ def ingest_edgelist(
         positions,
         edges_arr,
         chunk_shape=chunk_shape,
+        bin_shape=bin_shape,
         is_tree=False,
         node_attributes=node_attributes if node_attributes else None,
         edge_attributes=edge_attributes if edge_attributes else None,

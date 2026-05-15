@@ -4,10 +4,9 @@ Per-chunk union-find on intra-chunk edges + a single global pass over
 the cross-chunk array. Scales beyond memory because per-chunk edge
 arrays are loaded one at a time.
 
-``write_back=True`` requires Add 5 (post-hoc per-node attribute writes)
-to land in core. Today it raises ``NotImplementedError`` — callers can
-write the labels themselves by re-running ``write_graph`` with the
-returned labels in ``node_attributes``.
+``write_back=True`` persists the component labels via
+:meth:`ZVWriter.add_node_attribute_sync` under
+``attributes/component_label/``.
 """
 
 from __future__ import annotations
@@ -18,13 +17,14 @@ from typing import Any
 
 import numpy as np
 
-from zarr_vectors.core.arrays import list_chunk_keys, read_chunk_links
-from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors_tools.algorithms._cross_chunk_index import build_cross_chunk_index
-from zarr_vectors_tools.algorithms._indexing import (
-    build_chunk_to_global_offset,
-    resolve_endpoints,
+from zarr_vectors.core.arrays import (
+    list_chunk_keys,
+    read_chunk_links,
+    read_cross_chunk_links,
 )
+from zarr_vectors.core.store import get_resolution_level, open_store
+from zarr_vectors.lazy import open_zv
+from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 
 
 class _DSU:
@@ -70,8 +70,9 @@ def compute_connected_components(
     Args:
         store_path: Path to a zarr-vectors graph (or skeleton) store.
         level: Resolution level to operate on.
-        write_back: Reserved. Persisting labels in place requires core
-            Add 5; this flag raises ``NotImplementedError`` for now.
+        write_back: When True, persist the labels under
+            ``attributes/component_label/`` via
+            :meth:`ZVWriter.add_node_attribute_sync`.
 
     Returns:
         Dict with:
@@ -82,17 +83,10 @@ def compute_connected_components(
           - ``component_sizes`` (np.ndarray): count of nodes per label,
             indexed by component id.
     """
-    if write_back:
-        raise NotImplementedError(
-            "write_back requires core Add 5 (post-hoc per-node attribute "
-            "writes). Re-run write_graph with the returned labels in "
-            "node_attributes to persist them today."
-        )
-
     root = open_store(str(store_path))
     level_group = get_resolution_level(root, level)
 
-    offsets, chunk_keys, n_vertices = build_chunk_to_global_offset(level_group)
+    offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
 
     dsu = _DSU(n_vertices)
 
@@ -100,7 +94,7 @@ def compute_connected_components(
     # indices by adding the chunk's start offset.
     for chunk_key in chunk_keys:
         try:
-            link_groups = read_chunk_links(level_group, chunk_key, link_width=2)
+            link_groups = read_chunk_links(level_group, chunk_key)
         except Exception:
             continue
         base = offsets[chunk_key]
@@ -112,14 +106,12 @@ def compute_connected_components(
                 dsu.union(int(u_local) + base, int(v_local) + base)
 
     # Cross-chunk edges: each endpoint is (chunk_key, local_index).
-    cross_links, _ = build_cross_chunk_index(level_group)
-    if cross_links:
-        endpoints_a = [(c, vi) for (c, vi), _ in cross_links]
-        endpoints_b = [(c, vi) for _, (c, vi) in cross_links]
-        a_global = resolve_endpoints(endpoints_a, offsets)
-        b_global = resolve_endpoints(endpoints_b, offsets)
-        for ai, bi in zip(a_global, b_global):
-            dsu.union(int(ai), int(bi))
+    try:
+        cross_links = read_cross_chunk_links(level_group, delta=0)
+    except Exception:
+        cross_links = []
+    for (chunk_a, vi_a), (chunk_b, vi_b) in cross_links:
+        dsu.union(offsets[chunk_a] + int(vi_a), offsets[chunk_b] + int(vi_b))
 
     # Compact roots into 0-indexed labels.
     roots = np.array([dsu.find(i) for i in range(n_vertices)], dtype=np.int64)
@@ -131,6 +123,11 @@ def compute_connected_components(
         counts = Counter(int(l) for l in labels)
         for k, v in counts.items():
             sizes[k] = v
+
+    if write_back and n_vertices:
+        zv = open_zv(str(store_path))
+        with zv[level].writer() as w:
+            w.add_node_attribute_sync("component_label", labels, dtype=np.uint32)
 
     return {
         "labels": labels,

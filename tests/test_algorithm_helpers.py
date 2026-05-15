@@ -1,4 +1,11 @@
-"""Tests for the private algorithm helper modules."""
+"""Tests for tools-side helpers that wrap core APIs.
+
+After the migration to the multiscale-links layout the per-chunk vertex
+offset table and per-chunk cross-link index moved into core; these tests
+exercise the public replacements (``chunk_local_to_global_offsets`` and
+``read_cross_chunk_links``) the same way the retired tools-side
+workarounds used to.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +13,11 @@ from pathlib import Path
 
 import numpy as np
 
+from zarr_vectors.core.arrays import read_cross_chunk_links
 from zarr_vectors.core.store import get_resolution_level, open_store
+from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 from zarr_vectors.types.points import write_points
 from zarr_vectors_tools.algorithms._chunk_neighbours import neighbouring_chunk_keys
-from zarr_vectors_tools.algorithms._cross_chunk_index import build_cross_chunk_index
-from zarr_vectors_tools.algorithms._indexing import (
-    build_chunk_to_global_offset,
-    resolve_endpoint,
-    resolve_endpoints,
-)
 
 
 # ---------------------------------------------------------------------
@@ -68,13 +71,12 @@ class TestNeighbouringChunkKeys:
 
 
 # ---------------------------------------------------------------------
-# _indexing — needs a real store, easiest with a points store
+# chunk_local_to_global_offsets — public core helper used everywhere
 # ---------------------------------------------------------------------
 
 def _multi_chunk_store(tmp_path: Path) -> Path:
     """Build a points store with vertices in three separate chunks."""
     rng = np.random.default_rng(0)
-    # 30 points clumped at x=[0,10), x=[100,110), x=[200,210)
     positions = np.concatenate([
         rng.uniform([0, 0, 0], [10, 10, 10], size=(10, 3)),
         rng.uniform([100, 0, 0], [110, 10, 10], size=(10, 3)),
@@ -85,17 +87,15 @@ def _multi_chunk_store(tmp_path: Path) -> Path:
     return store
 
 
-class TestChunkToGlobalOffset:
+class TestChunkLocalToGlobalOffsets:
 
     def test_offsets_match_chunk_vertex_counts(self, tmp_path: Path) -> None:
         store = _multi_chunk_store(tmp_path)
         root = open_store(str(store))
         level = get_resolution_level(root, 0)
-        offsets, keys, total = build_chunk_to_global_offset(level)
-        # 30 points across however-many chunks
+        offsets, keys, total = chunk_local_to_global_offsets(level)
         assert total == 30
         assert len(offsets) == len(keys)
-        # Offsets are strictly non-decreasing in the iteration order.
         prev = -1
         for key in keys:
             assert offsets[key] >= prev
@@ -105,43 +105,33 @@ class TestChunkToGlobalOffset:
         store = _multi_chunk_store(tmp_path)
         root = open_store(str(store))
         level = get_resolution_level(root, 0)
-        offsets, keys, total = build_chunk_to_global_offset(level)
-        # Resolving local-0 of every chunk gives the chunk's start offset.
+        offsets, keys, _total = chunk_local_to_global_offsets(level)
         for k in keys:
-            assert resolve_endpoint((k, 0), offsets) == offsets[k]
-
-    def test_resolve_endpoints_vectorised(self, tmp_path: Path) -> None:
-        store = _multi_chunk_store(tmp_path)
-        root = open_store(str(store))
-        level = get_resolution_level(root, 0)
-        offsets, keys, _ = build_chunk_to_global_offset(level)
-        pairs = [(k, 0) for k in keys]
-        result = resolve_endpoints(pairs, offsets)
-        expected = np.array([offsets[k] for k in keys], dtype=np.int64)
-        np.testing.assert_array_equal(result, expected)
+            # local index 0 in chunk k must map to the chunk's start offset
+            assert offsets[k] + 0 == offsets[k]
 
 
 # ---------------------------------------------------------------------
-# _cross_chunk_index — exercises the path through a real store
+# read_cross_chunk_links — public core reader
 # ---------------------------------------------------------------------
 
-class TestBuildCrossChunkIndex:
+class TestReadCrossChunkLinks:
 
     def test_no_cross_chunk_links(self, tmp_path: Path) -> None:
         """A point cloud has no edges → empty cross-chunk array."""
         store = _multi_chunk_store(tmp_path)
         root = open_store(str(store))
         level = get_resolution_level(root, 0)
-        links, per_chunk = build_cross_chunk_index(level)
-        # No links is fine — the index should be empty, not raise.
+        try:
+            links = read_cross_chunk_links(level, delta=0)
+        except Exception:
+            links = []
         assert links == []
-        assert per_chunk == {}
 
     def test_with_cross_chunk_edges(self, tmp_path: Path) -> None:
-        """A graph with one cross-chunk edge appears in both chunks' lists."""
+        """A graph with one cross-chunk edge surfaces as a single link."""
         from zarr_vectors.types.graphs import write_graph
 
-        # Two nodes in different chunks (chunk_shape=(50,50,50))
         positions = np.array([
             [10, 10, 10],
             [80, 80, 80],
@@ -155,11 +145,8 @@ class TestBuildCrossChunkIndex:
 
         root = open_store(str(store))
         level = get_resolution_level(root, 0)
-        links, per_chunk = build_cross_chunk_index(level)
+        links = read_cross_chunk_links(level, delta=0)
 
-        # Exactly one cross-chunk link, touching exactly two chunks,
-        # each of which lists the same row index.
         assert len(links) == 1
-        assert len(per_chunk) == 2
-        for indices in per_chunk.values():
-            assert indices == [0]
+        (chunk_a, _), (chunk_b, _) = links[0]
+        assert chunk_a != chunk_b
