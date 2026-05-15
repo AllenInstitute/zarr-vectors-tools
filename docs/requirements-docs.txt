@@ -1,0 +1,19 @@
+# Documentation build dependencies
+# Install with: pip install -r docs/requirements-docs.txt
+
+# Sphinx core
+sphinx>=7.2,<9
+
+# Theme
+furo>=2024.1.29
+
+# Markdown support
+myst-parser>=3.0
+
+# Extensions
+sphinx-copybutton>=0.5.2
+sphinx-autobuild>=2024.2.4   # live reload: sphinx-autobuild docs docs/_build/html
+
+# For autodoc to resolve type annotations from this package and its parent.
+zarr-vectors-tools[all]
+zarr-vectors[all]
