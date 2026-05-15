@@ -13,7 +13,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_graphml(
@@ -21,6 +21,7 @@ def ingest_graphml(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     position_attrs: tuple[str, ...] = ("x", "y", "z"),
     dtype: str = "float32",
     compute_degree: bool = False,
@@ -141,6 +142,7 @@ def ingest_graphml(
         positions,
         edges,
         chunk_shape=chunk_shape,
+        bin_shape=bin_shape,
         is_tree=False,
         node_attributes=node_attributes if node_attributes else None,
         edge_attributes=edge_attributes if edge_attributes else None,

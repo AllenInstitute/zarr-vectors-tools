@@ -1,13 +1,16 @@
 """Post-hoc per-vertex mesh attributes (normals, mean curvature).
 
-Streaming intra-chunk accumulation. Cross-chunk faces lose identity in
-the current core storage and are not contributed — boundary-vertex
-normals/curvatures will be slightly off near chunk boundaries. The
-returned dict reports an ``incomplete_boundary_vertices`` count so
-callers can quantify the effect.
+Streaming intra-chunk accumulation. Cross-chunk faces (records of
+arity >= 3 from ``read_cross_chunk_links``) contribute their endpoints
+to the boundary-vertex set but their per-face contributions are not
+accumulated — boundary-vertex normals/curvatures will be slightly off
+near chunk boundaries. The returned dict reports
+``incomplete_boundary_vertices`` so callers can quantify the effect.
 
-``write_back=True`` requires core Add 5 (post-hoc per-vertex attribute
-writes); today it raises ``NotImplementedError``.
+``write_back=True`` persists the result via
+:class:`zarr_vectors.lazy.ZVWriter.add_node_attribute_sync` under
+``attributes/<name>/`` (``vertex_normal`` for normals,
+``mean_curvature`` for curvature).
 """
 
 from __future__ import annotations
@@ -21,14 +24,15 @@ from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
     read_chunk_vertices,
+    read_cross_chunk_links,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors_tools.algorithms._cross_chunk_index import build_cross_chunk_index
-from zarr_vectors_tools.algorithms._indexing import build_chunk_to_global_offset
+from zarr_vectors.lazy import open_zv
+from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 
 
-def _read_triangles(level_group, chunk_key, link_width: int = 3):
-    """Yield (positions, faces) for a chunk; missing data returns None."""
+def _read_triangles(level_group, chunk_key):
+    """Yield (positions, triangle_groups) for a chunk; missing data returns None."""
     try:
         vgroups = read_chunk_vertices(level_group, chunk_key)
     except Exception:
@@ -37,20 +41,31 @@ def _read_triangles(level_group, chunk_key, link_width: int = 3):
         return None, None
     positions = np.concatenate(vgroups, axis=0).astype(np.float64)
     try:
-        link_groups = read_chunk_links(
-            level_group, chunk_key, link_width=link_width,
-        )
+        link_groups = read_chunk_links(level_group, chunk_key)
     except Exception:
         return positions, []
-    return positions, [np.asarray(lg, dtype=np.int64) for lg in link_groups if len(lg)]
+    triangles: list[np.ndarray] = []
+    for lg in link_groups:
+        if not len(lg):
+            continue
+        arr = np.asarray(lg, dtype=np.int64)
+        if arr.ndim != 2 or arr.shape[1] != 3:
+            # Non-triangle face data; skip rather than miscompute normals.
+            continue
+        triangles.append(arr)
+    return positions, triangles
 
 
 def _count_boundary_vertex_set(cross_links) -> set[tuple]:
-    """Vertices appearing in any cross-chunk edge are 'boundary'."""
+    """Vertices appearing in any cross-chunk record are 'boundary'.
+
+    Each record may carry 2 endpoints (cross-chunk edge) or 3+ (cross-chunk
+    face). We accumulate every endpoint regardless of link_width.
+    """
     boundary: set[tuple] = set()
-    for (ca, va), (cb, vb) in cross_links:
-        boundary.add((ca, int(va)))
-        boundary.add((cb, int(vb)))
+    for record in cross_links:
+        for chunk, vi in record:
+            boundary.add((chunk, int(vi)))
     return boundary
 
 
@@ -69,7 +84,9 @@ def compute_vertex_normals(
         weighting: ``"area"`` (default) or ``"uniform"``. Area-weighted
             sums each incident face's un-normalised normal; uniform sums
             unit face normals.
-        write_back: Not yet supported; raises ``NotImplementedError``.
+        write_back: When True, persist the result under
+            ``attributes/vertex_normal/`` via
+            :meth:`ZVWriter.add_node_attribute_sync`.
 
     Returns:
         Dict with:
@@ -79,17 +96,12 @@ def compute_vertex_normals(
             that appear in cross-chunk edges; their normals are based
             on intra-chunk faces only.
     """
-    if write_back:
-        raise NotImplementedError(
-            "write_back requires core Add 5 (post-hoc per-vertex "
-            "attribute writes)."
-        )
     if weighting not in ("area", "uniform"):
         raise ValueError(f"unknown weighting={weighting!r}")
 
     root = open_store(str(store_path))
     level_group = get_resolution_level(root, level)
-    offsets, chunk_keys, n_vertices = build_chunk_to_global_offset(level_group)
+    offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
 
     normals = np.zeros((n_vertices, 3), dtype=np.float64)
 
@@ -111,12 +123,22 @@ def compute_vertex_normals(
             for col in (0, 1, 2):
                 np.add.at(normals, faces[:, col] + base, face_n)
 
-    cross_links, _ = build_cross_chunk_index(level_group)
+    try:
+        cross_links = read_cross_chunk_links(level_group, delta=0)
+    except Exception:
+        cross_links = []
     boundary = _count_boundary_vertex_set(cross_links)
 
     norm_lens = np.linalg.norm(normals, axis=1, keepdims=True)
     safe = np.where(norm_lens == 0, 1.0, norm_lens)
     normals_unit = (normals / safe).astype(np.float32)
+
+    if write_back:
+        zv = open_zv(str(store_path))
+        with zv[level].writer() as w:
+            w.add_node_attribute_sync(
+                "vertex_normal", normals_unit, dtype=np.float32,
+            )
 
     return {
         "normals": normals_unit,
@@ -141,22 +163,18 @@ def compute_mean_curvature(
     Args:
         store_path: Path to the mesh store.
         level: Resolution level.
-        write_back: Not yet supported; raises ``NotImplementedError``.
+        write_back: When True, persist the result under
+            ``attributes/mean_curvature/`` via
+            :meth:`ZVWriter.add_node_attribute_sync`.
 
     Returns:
         Dict with:
           - ``mean_curvature``: ``(N,) float32``.
           - ``incomplete_boundary_vertices`` (int).
     """
-    if write_back:
-        raise NotImplementedError(
-            "write_back requires core Add 5 (post-hoc per-vertex "
-            "attribute writes)."
-        )
-
     root = open_store(str(store_path))
     level_group = get_resolution_level(root, level)
-    offsets, chunk_keys, n_vertices = build_chunk_to_global_offset(level_group)
+    offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
 
     H = np.zeros((n_vertices, 3), dtype=np.float64)
     area_voronoi = np.zeros(n_vertices, dtype=np.float64)
@@ -214,8 +232,18 @@ def compute_mean_curvature(
     H_per_vertex = H / (2.0 * safe_area[:, None])
     mean_curv = (np.linalg.norm(H_per_vertex, axis=1) * 0.5).astype(np.float32)
 
-    cross_links, _ = build_cross_chunk_index(level_group)
+    try:
+        cross_links = read_cross_chunk_links(level_group, delta=0)
+    except Exception:
+        cross_links = []
     boundary = _count_boundary_vertex_set(cross_links)
+
+    if write_back:
+        zv = open_zv(str(store_path))
+        with zv[level].writer() as w:
+            w.add_node_attribute_sync(
+                "mean_curvature", mean_curv, dtype=np.float32,
+            )
 
     return {
         "mean_curvature": mean_curv,

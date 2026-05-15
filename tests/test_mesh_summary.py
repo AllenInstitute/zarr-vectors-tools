@@ -113,12 +113,51 @@ class TestMeshSummary:
         # Surface area on intra faces alone is at most 6.
         assert 0 < result["surface_area"] <= 6.0 + 1e-5
 
-    def test_per_object_raises(self, tmp_path: Path) -> None:
+class TestPerObject:
+
+    def _two_tetrahedra_across_chunks(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Two unit tetrahedra at (0,0,0) and (10,10,10), each its own object."""
+        v_a, f_a = _tetrahedron()
+        v_b = v_a + np.array([10.0, 10.0, 10.0], dtype=np.float32)
+        f_b = f_a + 4  # offset into global vertex space
+        v = np.concatenate([v_a, v_b], axis=0)
+        f = np.concatenate([f_a, f_b], axis=0)
+        object_ids = np.array([0, 0, 0, 0, 1, 1, 1, 1], dtype=np.int64)
+        return v, f, object_ids
+
+    def test_per_object_two_tetrahedra(self, tmp_path: Path) -> None:
+        v, f, oids = self._two_tetrahedra_across_chunks()
+        store = tmp_path / "two_tet.zv"
+        write_mesh(
+            str(store), v, f, chunk_shape=(5.0, 5.0, 5.0), object_ids=oids,
+        )
+        result = compute_mesh_summary(store, per_object=True)
+        per_obj = result["per_object"]
+        assert len(per_obj) == 2
+        assert per_obj[0]["object_id"] == 0
+        assert per_obj[1]["object_id"] == 1
+        for entry in per_obj:
+            assert entry["vertex_count"] == 4
+            assert entry["face_count"] == 4
+            # Unit tetrahedron volume = 1/6.
+            assert abs(entry["volume"] - (1.0 / 6.0)) < 1e-5
+            # Surface area should match between the two identical shapes.
+        assert abs(per_obj[0]["surface_area"] - per_obj[1]["surface_area"]) < 1e-5
+        # Per-object totals should sum to global totals (each object's
+        # fragments are disjoint, no cross-chunk faces between them).
+        sum_area = sum(e["surface_area"] for e in per_obj)
+        sum_vol = sum(e["volume"] for e in per_obj)
+        assert abs(sum_area - result["surface_area"]) < 1e-5
+        assert abs(sum_vol - result["volume"]) < 1e-5
+
+    def test_per_object_single_object_matches_global(self, tmp_path: Path) -> None:
         v, f = _tetrahedron()
         store = tmp_path / "tet.zv"
         write_mesh(str(store), v, f, chunk_shape=(10.0, 10.0, 10.0))
-        try:
-            compute_mesh_summary(store, per_object=True)
-        except NotImplementedError:
-            return
-        raise AssertionError("expected NotImplementedError")
+        result = compute_mesh_summary(store, per_object=True)
+        per_obj = result["per_object"]
+        assert len(per_obj) == 1
+        assert per_obj[0]["face_count"] == result["face_count"]
+        assert per_obj[0]["vertex_count"] == result["vertex_count"]
+        assert abs(per_obj[0]["surface_area"] - result["surface_area"]) < 1e-5
+        assert abs(per_obj[0]["volume"] - result["volume"]) < 1e-5

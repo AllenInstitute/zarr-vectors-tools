@@ -14,7 +14,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.lines import write_lines
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_lines_csv(
@@ -22,6 +22,7 @@ def ingest_lines_csv(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     ndim: int = 3,
     delimiter: str = ",",
     has_header: bool = True,
@@ -151,6 +152,7 @@ def ingest_lines_csv(
         str(output_path),
         endpoints,
         chunk_shape=chunk_shape,
+        bin_shape=bin_shape,
         line_attributes=line_attributes if line_attributes else None,
         dtype=dtype,
     )

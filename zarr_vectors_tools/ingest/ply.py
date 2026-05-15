@@ -15,7 +15,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_ply(
@@ -23,6 +23,7 @@ def ingest_ply(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     dtype: str = "float32",
     include_attributes: bool = True,
     object_ids: np.ndarray | None = None,
@@ -128,6 +129,7 @@ def ingest_ply(
 
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
+        "bin_shape": bin_shape,
         "attributes": attributes if attributes else None,
         "dtype": dtype,
     }

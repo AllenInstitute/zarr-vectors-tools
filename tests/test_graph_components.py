@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from zarr_vectors.lazy import open_zv
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors_tools.algorithms import compute_connected_components
 
@@ -70,15 +71,22 @@ class TestConnectedComponents:
         assert result["n_components"] == 1
         assert result["largest_component_size"] == 4
 
-    def test_write_back_not_implemented(self, tmp_path: Path) -> None:
-        positions = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float32)
-        edges = np.array([[0, 1]], dtype=np.int64)
-        store = tmp_path / "g.zv"
+class TestWriteBackLabels:
+
+    def test_round_trip_labels(self, tmp_path: Path) -> None:
+        positions = np.array([
+            [10, 10, 10], [20, 20, 20],
+            [110, 110, 110], [120, 120, 120],
+        ], dtype=np.float32)
+        edges = np.array([[0, 1], [2, 3]], dtype=np.int64)
+        store = tmp_path / "two_comp.zv"
         write_graph(
             str(store), positions, edges, chunk_shape=(100.0, 100.0, 100.0),
         )
-        try:
-            compute_connected_components(store, write_back=True)
-        except NotImplementedError:
-            return
-        raise AssertionError("expected NotImplementedError")
+        result = compute_connected_components(store, write_back=True)
+        zv = open_zv(str(store))
+        persisted = zv[0]["component_label"].compute()
+        assert persisted.shape == result["labels"].shape
+        np.testing.assert_array_equal(
+            persisted.astype(np.uint32), result["labels"],
+        )

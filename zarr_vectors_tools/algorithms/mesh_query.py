@@ -193,7 +193,7 @@ def closest_point(
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
 
     try:
-        lmeta = level_group.read_array_meta("links")
+        lmeta = level_group.read_array_meta("links/0")
         link_width = int(lmeta.get("link_width", 3))
     except Exception:
         link_width = 3
@@ -240,9 +240,7 @@ def closest_point(
             positions = np.concatenate(vgroups, axis=0).astype(np.float64)
 
             try:
-                link_groups = read_chunk_links(
-                    level_group, chunk_key, link_width=link_width,
-                )
+                link_groups = read_chunk_links(level_group, chunk_key)
             except Exception:
                 continue
 
@@ -326,7 +324,7 @@ def cast_ray(
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
     try:
-        lmeta = level_group.read_array_meta("links")
+        lmeta = level_group.read_array_meta("links/0")
         link_width = int(lmeta.get("link_width", 3))
     except Exception:
         link_width = 3
@@ -403,9 +401,7 @@ def cast_ray(
 
             if positions is not None and len(positions):
                 try:
-                    link_groups = read_chunk_links(
-                        level_group, cur_key, link_width=link_width,
-                    )
+                    link_groups = read_chunk_links(level_group, cur_key)
                 except Exception:
                     link_groups = []
 
