@@ -12,7 +12,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.polylines import write_polylines
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_trk(
@@ -20,6 +20,7 @@ def ingest_trk(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     dtype: str = "float32",
     preserve_header: bool = True,
     compute_length: bool = False,
@@ -137,6 +138,7 @@ def ingest_trk(
         str(output_path),
         polylines,
         chunk_shape=chunk_shape,
+        bin_shape=bin_shape,
         vertex_attributes=vertex_attributes,
         object_attributes=object_attributes,
         dtype=dtype,

@@ -6,6 +6,11 @@ from pathlib import Path
 
 import numpy as np
 
+from zarr_vectors.core.arrays import (
+    read_cross_chunk_links,
+    write_cross_chunk_link_attributes,
+)
+from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors_tools.algorithms import bfs_distances, shortest_path
 
@@ -126,3 +131,66 @@ class TestShortestPath:
         assert dijkstra["cost"] == astar["cost"]
         assert dijkstra["path"][0] == 0 and dijkstra["path"][-1] == 15
         assert astar["path"][0] == 0 and astar["path"][-1] == 15
+
+
+# ---------------------------------------------------------------------
+# Cross-chunk link weights (new in the multiscale-links layout)
+# ---------------------------------------------------------------------
+
+def _two_chunk_path_graph(tmp_path: Path) -> tuple[Path, int]:
+    """Three-node path graph with one cross-chunk edge.
+
+    Layout (chunk_shape=(50, 50, 50)):
+        node 0 at (10, 10, 10) — chunk A
+        node 1 at (80, 10, 10) — chunk B (cross-chunk edge 0-1)
+        node 2 at (85, 10, 10) — chunk B (intra-chunk edge 1-2)
+
+    Returns the store path and the number of cross-chunk links written.
+    """
+    positions = np.array(
+        [[10, 10, 10], [80, 10, 10], [85, 10, 10]], dtype=np.float32,
+    )
+    edges = np.array([[0, 1], [1, 2]], dtype=np.int64)
+    store = tmp_path / "cross.zv"
+    summary = write_graph(
+        str(store), positions, edges, chunk_shape=(50.0, 50.0, 50.0),
+    )
+    return store, int(summary.get("cross_edge_count", 0))
+
+
+class TestCrossChunkWeights:
+
+    def test_unit_weight_when_no_attribute(self, tmp_path: Path) -> None:
+        """Without weights stored, cross-chunk edges contribute unit cost."""
+        store, n_cross = _two_chunk_path_graph(tmp_path)
+        assert n_cross >= 1  # fixture must produce at least one cross-chunk edge
+        result = shortest_path(store, source=0, target=2, weight="weight")
+        # Two unit edges along the only path → cost 2.0.
+        assert result["path"][0] == 0 and result["path"][-1] == 2
+        assert result["cost"] == 2.0
+
+    def test_cross_weight_steers_cost(self, tmp_path: Path) -> None:
+        """A non-unit cross-chunk weight changes the path cost."""
+        store, n_cross = _two_chunk_path_graph(tmp_path)
+        assert n_cross == 1
+
+        # Manually attach a weight of 5.0 to the single cross-chunk edge.
+        root = open_store(str(store), mode="r+")
+        level = get_resolution_level(root, 0)
+        cross_links = read_cross_chunk_links(level, delta=0)
+        assert len(cross_links) == 1
+        write_cross_chunk_link_attributes(
+            level, "weight",
+            np.array([5.0], dtype=np.float32),
+            num_links=len(cross_links),
+            delta=0,
+        )
+
+        # Without weight kwarg: still unit, cost 2.0.
+        unit = shortest_path(store, source=0, target=2)
+        assert unit["cost"] == 2.0
+
+        # With weight kwarg: cross-chunk edge 0-1 now costs 5; intra 1-2 missing
+        # the attribute falls back to 1.0 → total 6.0.
+        weighted = shortest_path(store, source=0, target=2, weight="weight")
+        assert abs(weighted["cost"] - 6.0) < 1e-6

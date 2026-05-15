@@ -1,15 +1,13 @@
 """Frontier graph search over a chunked store: BFS + Dijkstra / A*.
 
 Builds a tools-side adjacency map from the chunked storage (intra-chunk
-edges resolved via global-offset table, cross-chunk edges merged in
-from the global cross array), then runs a standard frontier loop in
-memory.
+edges resolved via the public global-offset helper, cross-chunk edges
+merged in from the global cross array), then runs a standard frontier
+loop in memory. Memory cost: O(N + E).
 
-This is not yet a true on-demand frontier — adjacency for every node
-is built up front rather than chunk-by-chunk — because the missing
-core Add 2 (per-chunk cross index) means each frontier expansion would
-otherwise scan the full cross array. Once Add 2 lands the implementation
-switches to true lazy expansion. Memory cost today: O(N + E).
+Cross-chunk edges now carry per-edge weights when the store has a
+matching ``cross_chunk_link_attributes/<weight>/0/`` array; otherwise a
+silent unit-weight fallback applies.
 """
 
 from __future__ import annotations
@@ -24,14 +22,53 @@ import numpy as np
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
+    read_cross_chunk_link_attributes,
+    read_cross_chunk_links,
 )
+from zarr_vectors.core.paths import link_attributes_path
 from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors_tools.algorithms._cross_chunk_index import build_cross_chunk_index
-from zarr_vectors_tools.algorithms._indexing import (
-    build_chunk_to_global_offset,
-    resolve_endpoints,
-)
-from zarr_vectors_tools.algorithms._link_attributes import read_chunk_link_attributes
+from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
+
+
+def _read_link_attribute_chunk(
+    level_group,
+    attr_name: str,
+    chunk_coords,
+    link_group_sizes: list[int],
+    *,
+    delta: int = 0,
+) -> list[np.ndarray] | None:
+    """Read a per-edge attribute for a single chunk.
+
+    Asymmetry: core ships ``read_cross_chunk_link_attributes`` (for
+    cross-chunk records) and ``read_chunk_attributes`` (per-vertex per
+    chunk), but no public per-chunk reader for ``link_attributes/<name>/
+    <delta>/``. We hit the bytes directly until that lands.
+
+    Returns ``None`` if the attribute isn't stored for this chunk or
+    the on-disk buffer disagrees with the expected size (stale write).
+    """
+    full_name = link_attributes_path(attr_name, delta)
+    try:
+        meta = level_group.read_array_meta(full_name)
+    except Exception:
+        return None
+    dtype = np.dtype(meta.get("dtype", "float32"))
+    key = ".".join(str(c) for c in chunk_coords)
+    try:
+        raw = level_group.read_bytes(full_name, key)
+    except Exception:
+        return None
+    flat = np.frombuffer(raw, dtype=dtype)
+    expected = int(sum(link_group_sizes))
+    if expected and len(flat) != expected:
+        return None
+    out: list[np.ndarray] = []
+    cursor = 0
+    for n in link_group_sizes:
+        out.append(np.ascontiguousarray(flat[cursor:cursor + n]))
+        cursor += n
+    return out
 
 
 def build_adjacency(
@@ -56,19 +93,19 @@ def build_adjacency(
         ``(adj, n)`` where ``adj[v]`` is a list of ``(neighbour, weight)``
         pairs and ``n`` is the total vertex count.
     """
-    offsets, chunk_keys, n_vertices = build_chunk_to_global_offset(level_group)
+    offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
     adj: list[list[tuple[int, float]]] = [[] for _ in range(n_vertices)]
 
     for chunk_key in chunk_keys:
         try:
-            link_groups = read_chunk_links(level_group, chunk_key, link_width=2)
+            link_groups = read_chunk_links(level_group, chunk_key)
         except Exception:
             continue
         base = offsets[chunk_key]
 
         attrs_per_chunk = None
         if weight_attr is not None:
-            attrs_per_chunk = read_chunk_link_attributes(
+            attrs_per_chunk = _read_link_attribute_chunk(
                 level_group,
                 weight_attr,
                 chunk_key,
@@ -94,17 +131,29 @@ def build_adjacency(
                 adj[u_g].append((v_g, float(w)))
                 adj[v_g].append((u_g, float(w)))
 
-    cross_links, _ = build_cross_chunk_index(level_group)
-    if cross_links:
-        endpoints_a = [(c, vi) for (c, vi), _ in cross_links]
-        endpoints_b = [(c, vi) for _, (c, vi) in cross_links]
-        a_global = resolve_endpoints(endpoints_a, offsets)
-        b_global = resolve_endpoints(endpoints_b, offsets)
-        for ai, bi in zip(a_global, b_global):
-            # Cross-chunk edges currently lack a weight slot in core;
-            # treat as unit weight (or ``weight_attr=None``).
-            adj[int(ai)].append((int(bi), 1.0))
-            adj[int(bi)].append((int(ai), 1.0))
+    try:
+        cross_links = read_cross_chunk_links(level_group, delta=0)
+    except Exception:
+        cross_links = []
+
+    cross_weights: np.ndarray | None = None
+    if weight_attr is not None and cross_links:
+        try:
+            cross_weights = read_cross_chunk_link_attributes(
+                level_group, weight_attr, delta=0,
+            ).astype(np.float64, copy=False)
+        except Exception:
+            cross_weights = None
+        if cross_weights is not None and len(cross_weights) != len(cross_links):
+            # Partial / stale write: fall back to unit weights.
+            cross_weights = None
+
+    for i, ((chunk_a, vi_a), (chunk_b, vi_b)) in enumerate(cross_links):
+        ai = offsets[chunk_a] + int(vi_a)
+        bi = offsets[chunk_b] + int(vi_b)
+        w = float(cross_weights[i]) if cross_weights is not None else 1.0
+        adj[ai].append((bi, w))
+        adj[bi].append((ai, w))
 
     return adj, n_vertices
 

@@ -12,7 +12,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.meshes import write_mesh
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_obj(
@@ -20,6 +20,7 @@ def ingest_obj(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     dtype: str = "float32",
     encoding: str = "raw",
     draco_quantization_bits: int = 11,
@@ -146,6 +147,7 @@ def ingest_obj(
 
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
+        "bin_shape": bin_shape,
         "encoding": encoding,
         "vertex_attributes": vertex_attributes,
         "dtype": dtype,

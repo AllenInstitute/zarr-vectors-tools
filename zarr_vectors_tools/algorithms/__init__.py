@@ -3,10 +3,6 @@
 This sub-package implements algorithms that operate directly on the
 chunked storage layout — streaming, halo, frontier, and pyramid patterns
 — rather than materialising the full geometry into memory.
-
-Modules prefixed with an underscore are private helpers that work around
-core-package gaps; they will retire (or re-point at core) as the
-corresponding additions land in zarr-vectors-py.
 """
 
 from zarr_vectors_tools.algorithms.graph_clustering import (

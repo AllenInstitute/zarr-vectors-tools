@@ -13,7 +13,7 @@ import numpy as np
 
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.meshes import write_mesh
-from zarr_vectors.typing import ChunkShape
+from zarr_vectors.typing import BinShape, ChunkShape
 
 
 def ingest_stl(
@@ -21,6 +21,7 @@ def ingest_stl(
     output_path: str | Path,
     chunk_shape: ChunkShape,
     *,
+    bin_shape: BinShape | None = None,
     dtype: str = "float32",
     encoding: str = "raw",
     merge_vertices: bool = True,
@@ -81,6 +82,7 @@ def ingest_stl(
         positions,
         faces,
         chunk_shape=chunk_shape,
+        bin_shape=bin_shape,
         encoding=encoding,
         dtype=dtype,
     )
