@@ -60,6 +60,10 @@ autodoc_default_options = {
 autodoc_typehints = "description"
 autodoc_typehints_format = "short"
 
+# zarr-vectors isn't on PyPI; mock it so autodoc can import this package
+# without needing the runtime dependency installed.
+autodoc_mock_imports = ["zarr_vectors"]
+
 # autosectionlabel — prefix with document name to avoid collisions
 autosectionlabel_prefix_document = True
 

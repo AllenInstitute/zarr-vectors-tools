@@ -103,6 +103,13 @@ Where to start
 
 .. toctree::
    :maxdepth: 1
+   :caption: Benchmarks
+   :hidden:
+
+   benchmarks/index
+
+.. toctree::
+   :maxdepth: 1
    :caption: API Reference
    :hidden:
 

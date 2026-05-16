@@ -36,7 +36,7 @@ result["face_index"]   # int | None — face index local to chunk_key
 : Safety cap on the ring expansion (default 4). Each ring widens the
   candidate bbox by one chunk size.
 
-### Algorithm notes
+### Closest-point algorithm notes
 
 Eberly 2001 closest-point-on-triangle, vectorised across each chunk's
 face array. Search expands rings outward from the query's home chunk
@@ -74,7 +74,7 @@ result["face_index"]   # int | None — local to chunk_key
 `max_distance`
 : Optional upper bound on hit distance.
 
-### Algorithm notes
+### Ray-cast algorithm notes
 
 Chunk traversal via 3D **DDA** (digital differential analyser) along
 the ray direction. Each occupied chunk along the path runs a
