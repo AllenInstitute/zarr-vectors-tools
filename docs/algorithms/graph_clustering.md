@@ -55,7 +55,7 @@ result["community_sizes"]  # (n_communities,) int64
 : RNG seed used to break ties when multiple neighbour labels are
   equally popular.
 
-### Algorithm notes
+### LPA algorithm notes
 
 Each vertex starts in its own community. In each round, every vertex
 adopts the most frequent label among its neighbours, breaking ties via
@@ -88,7 +88,7 @@ result["community_sizes"]  # (n_communities,) int64
 `seed`
 : RNG seed for tie-breaking in the local-move order.
 
-### Algorithm notes
+### Louvain algorithm notes
 
 The classic two-phase Blondel et al. loop: a local-move phase
 maximises modularity gain by moving vertices between communities, then
