@@ -69,10 +69,11 @@ autosectionlabel_prefix_document = True
 
 # intersphinx — link to upstream docs
 intersphinx_mapping = {
-    "python":       ("https://docs.python.org/3", None),
-    "numpy":        ("https://numpy.org/doc/stable", None),
-    "zarr":         ("https://zarr.readthedocs.io/en/stable", None),
-    "zarr_vectors": ("https://zarr-vectors.readthedocs.io/en/latest", None),
+    "python": ("https://docs.python.org/3", None),
+    "numpy":  ("https://numpy.org/doc/stable", None),
+    "zarr":   ("https://zarr.readthedocs.io/en/stable", None),
+    # zarr-vectors does not yet publish an objects.inv on Read the Docs.
+    # Add a "zarr_vectors" entry here once that site exists.
 }
 
 # Source suffixes
