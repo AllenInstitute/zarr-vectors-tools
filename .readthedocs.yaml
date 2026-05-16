@@ -4,16 +4,17 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
+  jobs:
+    install:
+      # zarr-vectors isn't on PyPI and isn't needed at docs build time —
+      # docs/conf.py mocks it via autodoc_mock_imports. Install the on-PyPI
+      # extras, then this package with --no-deps so pip doesn't try to
+      # resolve zarr-vectors, then the Sphinx toolchain.
+      - pip install numpy pandas laspy plyfile nibabel trx-python networkx scipy
+      - pip install --no-deps .
+      - pip install -r docs/requirements-docs.txt
 
 sphinx:
   builder: html
   configuration: docs/conf.py
   fail_on_warning: false
-
-python:
-  install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - all          # zarr-vectors-tools[all] for full autodoc coverage
-    - requirements: docs/requirements-docs.txt
