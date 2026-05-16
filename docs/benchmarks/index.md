@@ -28,9 +28,10 @@ inputs → sweep → table → plot).
 | `02_data_types.ipynb`   | geometry type (all six) | `N = 50 000`, each vs canonical competitor |
 | `03_filtering.ipynb`    | subset fraction `f ∈ {10⁻³, 10⁻², 10⁻¹, 0.5, 1.0}` | `N = 100 000`, point cloud + polylines |
 
-Notebooks 01 and 03 produce **log-log** Plotly plots with shaded
-**95 % CI** bands (`N_RUNS = 10` repeats per measurement, Student's
-t with df = 9). Notebook 02 produces a bar chart with error bars.
+Notebooks 01 and 03 produce **log-log** matplotlib plots with
+shaded **95 % CI** bands (`N_RUNS = 10` repeats per measurement,
+Student's t with df = 9). Notebook 02 produces a bar chart with
+error bars.
 
 ## What's compared
 
@@ -51,7 +52,7 @@ in numpy. The notebook-02 results table flags this with a
 ## Running locally
 
 ```bash
-pip install -e ".[all]" jupyter plotly matplotlib
+pip install -e ".[all]" jupyter matplotlib
 jupyter lab benchmarks/
 ```
 

@@ -6,6 +6,7 @@ Supports:
 - CSV without header (first D columns are coordinates, rest are attributes)
 
 Optional enrichments (all default off):
+
 - ``auto_detect_columns`` — heuristic detection of x/y/z, r/g/b, intensity, label.
 - ``drop_na`` — drop rows with NaN positions.
 - ``drop_duplicates`` — drop rows with duplicate position triples.
