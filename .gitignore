@@ -20,3 +20,4 @@ docs/_build/
 Thumbs.db
 .idea/
 .vscode/
+.claude/
