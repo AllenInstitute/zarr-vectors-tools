@@ -225,7 +225,7 @@ class TestLouvain:
         write_graph(
             str(store), positions, edges,
             chunk_shape=(100.0, 100.0, 100.0),
-            edge_attributes={"w": weights},
+            link_attributes={"w": weights},
         )
         r = compute_louvain(store, weight="w", seed=0)
         assert r["n_communities"] == 2

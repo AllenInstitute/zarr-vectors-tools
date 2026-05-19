@@ -33,6 +33,22 @@ def _make_cube_store(tmp_path: Path, chunk_shape) -> Path:
     return store
 
 
+def _make_two_cube_store(tmp_path: Path, chunk_shape, x_offset: float = 2.0) -> Path:
+    """Two unit cubes side-by-side along x: cube A at [0,1]^3, cube B shifted
+    by ``x_offset`` along x. Each cube fits in a single chunk when
+    ``chunk_shape >= (2, 1, 1)``; with ``chunk_shape=(2.0, 2.0, 2.0)`` the
+    store has two chunks, both fully intra-chunk (no cross-chunk faces)."""
+    v, f = _unit_cube()
+    v2 = v.copy()
+    v2[:, 0] += x_offset
+    verts = np.concatenate([v, v2], axis=0).astype(np.float32)
+    faces2 = f + 8  # second cube's vertex indices live at 8..15
+    faces = np.concatenate([f, faces2], axis=0)
+    store = tmp_path / "two_cubes.zv"
+    write_mesh(str(store), verts, faces, chunk_shape=chunk_shape)
+    return store
+
+
 # ---------------------------------------------------------------------
 # closest_point
 # ---------------------------------------------------------------------
@@ -55,16 +71,20 @@ class TestClosestPoint:
         # Nearest wall is z=0, distance 0.4.
         assert abs(result["distance"] - 0.4) < 1e-5
 
-    def test_chunked_cube_matches_single_chunk(self, tmp_path: Path) -> None:
+    def test_chunked_matches_single_chunk(self, tmp_path: Path) -> None:
+        """Multi-chunk traversal: two cubes side-by-side along x, each in
+        its own chunk under ``chunk_shape=(2,2,2)``. Both cubes are fully
+        intra-chunk (no cross-chunk faces) so the closest-point search
+        produces the same answer as the single-chunk control."""
         single = closest_point(
-            _make_cube_store(tmp_path / "single", (10.0, 10.0, 10.0)),
+            _make_two_cube_store(tmp_path / "single", (10.0, 10.0, 10.0)),
             np.array([5.0, 0.5, 0.5]),
         )
         chunked = closest_point(
-            _make_cube_store(tmp_path / "chunked", (0.5, 0.5, 0.5)),
+            _make_two_cube_store(tmp_path / "chunked", (2.0, 2.0, 2.0)),
             np.array([5.0, 0.5, 0.5]),
         )
-        # Both should find the same +x face position (within floating tol).
+        # Both should find the same +x face of the right cube (at x=3).
         assert single["found"] and chunked["found"]
         np.testing.assert_allclose(
             chunked["position"], single["position"], atol=1e-4,

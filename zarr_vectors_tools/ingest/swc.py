@@ -130,8 +130,8 @@ def ingest_swc(
         edges_arr,
         chunk_shape=chunk_shape,
         bin_shape=bin_shape,
-        is_tree=True,
-        node_attributes=node_attributes,
+        kind="skeleton",
+        vertex_attributes=node_attributes,
         dtype=dtype,
     )
 

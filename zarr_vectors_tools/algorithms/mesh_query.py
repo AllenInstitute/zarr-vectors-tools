@@ -14,6 +14,12 @@ from typing import Any
 
 import numpy as np
 
+from zarr_vectors.constants import (
+    LINK_FRAGMENTS,
+    LINKS,
+    VERTEX_FRAGMENTS,
+    VERTICES,
+)
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
@@ -204,6 +210,7 @@ def closest_point(
         )
 
     occupied = set(list_chunk_keys(level_group))
+    occupied_chunk_strs = [".".join(str(c) for c in cc) for cc in occupied]
 
     best_dist2 = (
         np.inf if max_distance is None else float(max_distance) ** 2
@@ -214,57 +221,63 @@ def closest_point(
 
     visited: set[ChunkCoords] = set()
 
-    for ring in range(max_expansion_rings + 1):
-        radius = (ring + 0.5) * chunk_shape
-        lo = query - radius
-        hi = query + radius
-        candidates = set(
-            chunks_intersecting_bbox(lo, hi, tuple(chunk_shape))
-        )
-        new = [c for c in candidates if c in occupied and c not in visited]
-        if not new:
-            if ring == 0:
-                continue
-            break
-
-        for chunk_key in new:
-            visited.add(chunk_key)
-            try:
-                vgroups = read_chunk_vertices(
-                    level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
-                )
-            except Exception:
-                continue
-            if not vgroups:
-                continue
-            positions = np.concatenate(vgroups, axis=0).astype(np.float64)
-
-            try:
-                link_groups = read_chunk_links(level_group, chunk_key)
-            except Exception:
-                continue
-
-            running_local_offset = 0
-            for faces in link_groups:
-                if len(faces) == 0:
+    with level_group.batched_reads([
+        (VERTICES, occupied_chunk_strs),
+        (VERTEX_FRAGMENTS, occupied_chunk_strs),
+        (f"{LINKS}/0", occupied_chunk_strs),
+        (LINK_FRAGMENTS, occupied_chunk_strs),
+    ]):
+        for ring in range(max_expansion_rings + 1):
+            radius = (ring + 0.5) * chunk_shape
+            lo = query - radius
+            hi = query + radius
+            candidates = set(
+                chunks_intersecting_bbox(lo, hi, tuple(chunk_shape))
+            )
+            new = [c for c in candidates if c in occupied and c not in visited]
+            if not new:
+                if ring == 0:
                     continue
-                a = positions[faces[:, 0]]
-                b = positions[faces[:, 1]]
-                c = positions[faces[:, 2]]
-                pts, dist2 = _closest_point_on_triangle(query, a, b, c)
-                local_argmin = int(np.argmin(dist2))
-                if dist2[local_argmin] < best_dist2:
-                    best_dist2 = float(dist2[local_argmin])
-                    best_point = pts[local_argmin]
-                    best_chunk = chunk_key
-                    best_face_index = running_local_offset + local_argmin
-                running_local_offset += len(faces)
+                break
 
-        # If we found something within the current ring radius, the
-        # answer is final (any closer face would be inside the searched
-        # bbox).
-        if best_chunk is not None and best_dist2 <= np.min(radius) ** 2:
-            break
+            for chunk_key in new:
+                visited.add(chunk_key)
+                try:
+                    vgroups = read_chunk_vertices(
+                        level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
+                    )
+                except Exception:
+                    continue
+                if not vgroups:
+                    continue
+                positions = np.concatenate(vgroups, axis=0).astype(np.float64)
+
+                try:
+                    link_groups = read_chunk_links(level_group, chunk_key)
+                except Exception:
+                    continue
+
+                running_local_offset = 0
+                for faces in link_groups:
+                    if len(faces) == 0:
+                        continue
+                    a = positions[faces[:, 0]]
+                    b = positions[faces[:, 1]]
+                    c = positions[faces[:, 2]]
+                    pts, dist2 = _closest_point_on_triangle(query, a, b, c)
+                    local_argmin = int(np.argmin(dist2))
+                    if dist2[local_argmin] < best_dist2:
+                        best_dist2 = float(dist2[local_argmin])
+                        best_point = pts[local_argmin]
+                        best_chunk = chunk_key
+                        best_face_index = running_local_offset + local_argmin
+                    running_local_offset += len(faces)
+
+            # If we found something within the current ring radius, the
+            # answer is final (any closer face would be inside the searched
+            # bbox).
+            if best_chunk is not None and best_dist2 <= np.min(radius) ** 2:
+                break
 
     found = best_chunk is not None and np.isfinite(best_dist2)
     return {
@@ -340,6 +353,7 @@ def cast_ray(
             "hit": False, "t": float("inf"),
             "position": origin, "chunk_key": None, "face_index": None,
         }
+    occupied_chunk_strs = [".".join(str(c) for c in cc) for cc in occupied]
 
     # 3D DDA on chunk coordinates.
     start_chunk = tuple(int(np.floor(origin[d] / chunk_shape[d])) for d in range(3))
@@ -385,54 +399,60 @@ def cast_ray(
                 return True
         return False
 
-    while travelled <= max_t:
-        cur_key: ChunkCoords = tuple(cur)
-        if cur_key in occupied:
-            try:
-                vgroups = read_chunk_vertices(
-                    level_group, cur_key, dtype=vertex_dtype, ndim=ndim,
-                )
-                positions = (
-                    np.concatenate(vgroups, axis=0).astype(np.float64)
-                    if vgroups else None
-                )
-            except Exception:
-                positions = None
-
-            if positions is not None and len(positions):
+    with level_group.batched_reads([
+        (VERTICES, occupied_chunk_strs),
+        (VERTEX_FRAGMENTS, occupied_chunk_strs),
+        (f"{LINKS}/0", occupied_chunk_strs),
+        (LINK_FRAGMENTS, occupied_chunk_strs),
+    ]):
+        while travelled <= max_t:
+            cur_key: ChunkCoords = tuple(cur)
+            if cur_key in occupied:
                 try:
-                    link_groups = read_chunk_links(level_group, cur_key)
+                    vgroups = read_chunk_vertices(
+                        level_group, cur_key, dtype=vertex_dtype, ndim=ndim,
+                    )
+                    positions = (
+                        np.concatenate(vgroups, axis=0).astype(np.float64)
+                        if vgroups else None
+                    )
                 except Exception:
-                    link_groups = []
+                    positions = None
 
-                running_local_offset = 0
-                for faces in link_groups:
-                    if len(faces) == 0:
-                        continue
-                    a = positions[faces[:, 0]]
-                    b = positions[faces[:, 1]]
-                    c = positions[faces[:, 2]]
-                    ts = _moller_trumbore(origin, direction, a, b, c)
-                    finite = np.where(np.isfinite(ts), ts, np.inf)
-                    local_argmin = int(np.argmin(finite))
-                    if finite[local_argmin] < best_t:
-                        best_t = float(finite[local_argmin])
-                        best_position = origin + best_t * direction
-                        best_chunk = cur_key
-                        best_face = running_local_offset + local_argmin
-                    running_local_offset += len(faces)
+                if positions is not None and len(positions):
+                    try:
+                        link_groups = read_chunk_links(level_group, cur_key)
+                    except Exception:
+                        link_groups = []
 
-                if best_chunk is not None:
-                    break  # first hit wins along the ray walk
+                    running_local_offset = 0
+                    for faces in link_groups:
+                        if len(faces) == 0:
+                            continue
+                        a = positions[faces[:, 0]]
+                        b = positions[faces[:, 1]]
+                        c = positions[faces[:, 2]]
+                        ts = _moller_trumbore(origin, direction, a, b, c)
+                        finite = np.where(np.isfinite(ts), ts, np.inf)
+                        local_argmin = int(np.argmin(finite))
+                        if finite[local_argmin] < best_t and finite[local_argmin] <= max_t:
+                            best_t = float(finite[local_argmin])
+                            best_position = origin + best_t * direction
+                            best_chunk = cur_key
+                            best_face = running_local_offset + local_argmin
+                        running_local_offset += len(faces)
 
-        # Step to next chunk along axis with smallest t_max.
-        axis = int(np.argmin(t_max))
-        travelled = float(t_max[axis])
-        cur[axis] += int(step[axis])
-        t_max[axis] += t_delta[axis]
+                    if best_chunk is not None:
+                        break  # first hit wins along the ray walk
 
-        if _ray_past_bbox(cur):
-            break
+            # Step to next chunk along axis with smallest t_max.
+            axis = int(np.argmin(t_max))
+            travelled = float(t_max[axis])
+            cur[axis] += int(step[axis])
+            t_max[axis] += t_delta[axis]
+
+            if _ray_past_bbox(cur):
+                break
 
     hit = best_chunk is not None
     return {
