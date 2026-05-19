@@ -19,6 +19,12 @@ from typing import Any, Callable
 
 import numpy as np
 
+from zarr_vectors.constants import (
+    CROSS_CHUNK_LINK_ATTRIBUTES,
+    CROSS_CHUNK_LINKS,
+    LINK_FRAGMENTS,
+    LINKS,
+)
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
@@ -96,57 +102,70 @@ def build_adjacency(
     offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
     adj: list[list[tuple[int, float]]] = [[] for _ in range(n_vertices)]
 
-    for chunk_key in chunk_keys:
-        try:
-            link_groups = read_chunk_links(level_group, chunk_key)
-        except Exception:
-            continue
-        base = offsets[chunk_key]
+    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    prefetch_plan: list[tuple[str, list[str]]] = [
+        (f"{LINKS}/0", chunk_key_strs),
+        (LINK_FRAGMENTS, chunk_key_strs),
+        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+    ]
+    if weight_attr is not None:
+        prefetch_plan.append((link_attributes_path(weight_attr, 0), chunk_key_strs))
+        prefetch_plan.append(
+            (f"{CROSS_CHUNK_LINK_ATTRIBUTES}/{weight_attr}/0", ["data"])
+        )
 
-        attrs_per_chunk = None
-        if weight_attr is not None:
-            attrs_per_chunk = _read_link_attribute_chunk(
-                level_group,
-                weight_attr,
-                chunk_key,
-                [len(g) for g in link_groups],
-            )
-
-        for gi, edges in enumerate(link_groups):
-            if len(edges) == 0:
+    with level_group.batched_reads(prefetch_plan):
+        for chunk_key in chunk_keys:
+            try:
+                link_groups = read_chunk_links(level_group, chunk_key)
+            except Exception:
                 continue
-            arr = np.asarray(edges, dtype=np.int64)
-            if (
-                attrs_per_chunk is not None
-                and gi < len(attrs_per_chunk)
-                and len(attrs_per_chunk[gi]) == len(arr)
-            ):
-                weights = np.asarray(attrs_per_chunk[gi], dtype=np.float64)
-            else:
-                weights = np.ones(len(arr), dtype=np.float64)
+            base = offsets[chunk_key]
 
-            for (u_local, v_local), w in zip(arr, weights):
-                u_g = int(u_local) + base
-                v_g = int(v_local) + base
-                adj[u_g].append((v_g, float(w)))
-                adj[v_g].append((u_g, float(w)))
+            attrs_per_chunk = None
+            if weight_attr is not None:
+                attrs_per_chunk = _read_link_attribute_chunk(
+                    level_group,
+                    weight_attr,
+                    chunk_key,
+                    [len(g) for g in link_groups],
+                )
 
-    try:
-        cross_links = read_cross_chunk_links(level_group, delta=0)
-    except Exception:
-        cross_links = []
+            for gi, edges in enumerate(link_groups):
+                if len(edges) == 0:
+                    continue
+                arr = np.asarray(edges, dtype=np.int64)
+                if (
+                    attrs_per_chunk is not None
+                    and gi < len(attrs_per_chunk)
+                    and len(attrs_per_chunk[gi]) == len(arr)
+                ):
+                    weights = np.asarray(attrs_per_chunk[gi], dtype=np.float64)
+                else:
+                    weights = np.ones(len(arr), dtype=np.float64)
 
-    cross_weights: np.ndarray | None = None
-    if weight_attr is not None and cross_links:
+                for (u_local, v_local), w in zip(arr, weights):
+                    u_g = int(u_local) + base
+                    v_g = int(v_local) + base
+                    adj[u_g].append((v_g, float(w)))
+                    adj[v_g].append((u_g, float(w)))
+
         try:
-            cross_weights = read_cross_chunk_link_attributes(
-                level_group, weight_attr, delta=0,
-            ).astype(np.float64, copy=False)
+            cross_links = read_cross_chunk_links(level_group, delta=0)
         except Exception:
-            cross_weights = None
-        if cross_weights is not None and len(cross_weights) != len(cross_links):
-            # Partial / stale write: fall back to unit weights.
-            cross_weights = None
+            cross_links = []
+
+        cross_weights: np.ndarray | None = None
+        if weight_attr is not None and cross_links:
+            try:
+                cross_weights = read_cross_chunk_link_attributes(
+                    level_group, weight_attr, delta=0,
+                ).astype(np.float64, copy=False)
+            except Exception:
+                cross_weights = None
+            if cross_weights is not None and len(cross_weights) != len(cross_links):
+                # Partial / stale write: fall back to unit weights.
+                cross_weights = None
 
     for i, ((chunk_a, vi_a), (chunk_b, vi_b)) in enumerate(cross_links):
         ai = offsets[chunk_a] + int(vi_a)
