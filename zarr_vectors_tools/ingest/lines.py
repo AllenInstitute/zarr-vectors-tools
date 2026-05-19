@@ -153,7 +153,7 @@ def ingest_lines_csv(
         endpoints,
         chunk_shape=chunk_shape,
         bin_shape=bin_shape,
-        line_attributes=line_attributes if line_attributes else None,
+        object_attributes=line_attributes if line_attributes else None,
         dtype=dtype,
     )
     result.update(enrichment_summary)

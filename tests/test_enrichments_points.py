@@ -107,7 +107,7 @@ class TestKnnDistance:
         store = tmp_path / "out.zv"
         ingest_csv(csv, store, (200., 200., 200.), knn_distance_k=3)
         r = read_points(str(store), attribute_names=["knn_distance"])
-        knn = r["attributes"]["knn_distance"]
+        knn = r["vertex_attributes"]["knn_distance"]
         # Every distance is >= 0 and finite.
         assert (knn >= 0).all() and np.isfinite(knn).all()
 

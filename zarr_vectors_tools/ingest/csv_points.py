@@ -259,7 +259,7 @@ def ingest_csv(
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
         "bin_shape": bin_shape,
-        "attributes": attributes if attributes else None,
+        "vertex_attributes": attributes if attributes else None,
         "dtype": dtype,
     }
     if object_ids is not None:

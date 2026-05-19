@@ -29,7 +29,7 @@ class TestPointCloudPipeline:
         summary = write_points(
             store, positions,
             chunk_shape=(200.0, 200.0, 200.0),
-            attributes={"intensity": intensity},
+            vertex_attributes={"intensity": intensity},
         )
         assert summary["vertex_count"] == 5000
         assert summary["chunk_count"] > 1
@@ -46,7 +46,7 @@ class TestPointCloudPipeline:
         )
         assert 0 < result_bbox["vertex_count"] < 5000
 
-        pyr = build_pyramid(store, reduction_factor=8)
+        pyr = build_pyramid(store, factors=[(2.0, 1.0)])
         assert pyr["levels_created"] >= 1
 
         vr5 = validate(store, level=5)

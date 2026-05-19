@@ -17,6 +17,11 @@ from typing import Any
 
 import numpy as np
 
+from zarr_vectors.constants import (
+    CROSS_CHUNK_LINKS,
+    LINK_FRAGMENTS,
+    LINKS,
+)
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
@@ -90,26 +95,32 @@ def compute_connected_components(
 
     dsu = _DSU(n_vertices)
 
-    # Intra-chunk edges: local indices within the chunk become global
-    # indices by adding the chunk's start offset.
-    for chunk_key in chunk_keys:
-        try:
-            link_groups = read_chunk_links(level_group, chunk_key)
-        except Exception:
-            continue
-        base = offsets[chunk_key]
-        for edges in link_groups:
-            if len(edges) == 0:
+    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    with level_group.batched_reads([
+        (f"{LINKS}/0", chunk_key_strs),
+        (LINK_FRAGMENTS, chunk_key_strs),
+        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+    ]):
+        # Intra-chunk edges: local indices within the chunk become global
+        # indices by adding the chunk's start offset.
+        for chunk_key in chunk_keys:
+            try:
+                link_groups = read_chunk_links(level_group, chunk_key)
+            except Exception:
                 continue
-            arr = np.asarray(edges, dtype=np.int64)
-            for u_local, v_local in arr:
-                dsu.union(int(u_local) + base, int(v_local) + base)
+            base = offsets[chunk_key]
+            for edges in link_groups:
+                if len(edges) == 0:
+                    continue
+                arr = np.asarray(edges, dtype=np.int64)
+                for u_local, v_local in arr:
+                    dsu.union(int(u_local) + base, int(v_local) + base)
 
-    # Cross-chunk edges: each endpoint is (chunk_key, local_index).
-    try:
-        cross_links = read_cross_chunk_links(level_group, delta=0)
-    except Exception:
-        cross_links = []
+        # Cross-chunk edges: each endpoint is (chunk_key, local_index).
+        try:
+            cross_links = read_cross_chunk_links(level_group, delta=0)
+        except Exception:
+            cross_links = []
     for (chunk_a, vi_a), (chunk_b, vi_b) in cross_links:
         dsu.union(offsets[chunk_a] + int(vi_a), offsets[chunk_b] + int(vi_b))
 

@@ -45,7 +45,7 @@ for entry in result["per_object"]:
 ```
 
 `per_object=True` reads every object manifest from `object_index/`,
-fetches each fragment via `read_vertex_group`, and pairs it with the
+fetches each fragment via `read_fragment`, and pairs it with the
 matching `read_chunk_links` entry (the v0.6 fragment-index layout
 aligns vertex and link groups index-for-index per chunk). A per-chunk
 link-group cache avoids re-decoding for objects that share chunks.

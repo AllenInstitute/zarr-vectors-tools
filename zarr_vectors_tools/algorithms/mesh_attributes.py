@@ -20,6 +20,13 @@ from typing import Any
 
 import numpy as np
 
+from zarr_vectors.constants import (
+    CROSS_CHUNK_LINKS,
+    LINK_FRAGMENTS,
+    LINKS,
+    VERTEX_FRAGMENTS,
+    VERTICES,
+)
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
@@ -105,28 +112,36 @@ def compute_vertex_normals(
 
     normals = np.zeros((n_vertices, 3), dtype=np.float64)
 
-    for chunk_key in chunk_keys:
-        positions, faces_list = _read_triangles(level_group, chunk_key)
-        if positions is None:
-            continue
-        base = offsets[chunk_key]
-        for faces in faces_list:
-            v0 = positions[faces[:, 0]]
-            v1 = positions[faces[:, 1]]
-            v2 = positions[faces[:, 2]]
-            face_n = np.cross(v1 - v0, v2 - v0)
-            if weighting == "uniform":
-                lens = np.linalg.norm(face_n, axis=1, keepdims=True)
-                safe = np.where(lens == 0, 1.0, lens)
-                face_n = face_n / safe
+    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    with level_group.batched_reads([
+        (VERTICES, chunk_key_strs),
+        (VERTEX_FRAGMENTS, chunk_key_strs),
+        (f"{LINKS}/0", chunk_key_strs),
+        (LINK_FRAGMENTS, chunk_key_strs),
+        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+    ]):
+        for chunk_key in chunk_keys:
+            positions, faces_list = _read_triangles(level_group, chunk_key)
+            if positions is None:
+                continue
+            base = offsets[chunk_key]
+            for faces in faces_list:
+                v0 = positions[faces[:, 0]]
+                v1 = positions[faces[:, 1]]
+                v2 = positions[faces[:, 2]]
+                face_n = np.cross(v1 - v0, v2 - v0)
+                if weighting == "uniform":
+                    lens = np.linalg.norm(face_n, axis=1, keepdims=True)
+                    safe = np.where(lens == 0, 1.0, lens)
+                    face_n = face_n / safe
 
-            for col in (0, 1, 2):
-                np.add.at(normals, faces[:, col] + base, face_n)
+                for col in (0, 1, 2):
+                    np.add.at(normals, faces[:, col] + base, face_n)
 
-    try:
-        cross_links = read_cross_chunk_links(level_group, delta=0)
-    except Exception:
-        cross_links = []
+        try:
+            cross_links = read_cross_chunk_links(level_group, delta=0)
+        except Exception:
+            cross_links = []
     boundary = _count_boundary_vertex_set(cross_links)
 
     norm_lens = np.linalg.norm(normals, axis=1, keepdims=True)
@@ -186,56 +201,65 @@ def compute_mean_curvature(
         safe = np.where(cr == 0, 1.0, cr)
         return dot / safe
 
-    for chunk_key in chunk_keys:
-        positions, faces_list = _read_triangles(level_group, chunk_key)
-        if positions is None:
-            continue
-        base = offsets[chunk_key]
-        for faces in faces_list:
-            v0 = positions[faces[:, 0]]
-            v1 = positions[faces[:, 1]]
-            v2 = positions[faces[:, 2]]
-            global_0 = faces[:, 0] + base
-            global_1 = faces[:, 1] + base
-            global_2 = faces[:, 2] + base
+    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    with level_group.batched_reads([
+        (VERTICES, chunk_key_strs),
+        (VERTEX_FRAGMENTS, chunk_key_strs),
+        (f"{LINKS}/0", chunk_key_strs),
+        (LINK_FRAGMENTS, chunk_key_strs),
+        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+    ]):
+        for chunk_key in chunk_keys:
+            positions, faces_list = _read_triangles(level_group, chunk_key)
+            if positions is None:
+                continue
+            base = offsets[chunk_key]
+            for faces in faces_list:
+                v0 = positions[faces[:, 0]]
+                v1 = positions[faces[:, 1]]
+                v2 = positions[faces[:, 2]]
+                global_0 = faces[:, 0] + base
+                global_1 = faces[:, 1] + base
+                global_2 = faces[:, 2] + base
 
-            # Edge vectors as seen from each vertex.
-            cot_at_0 = _cot(v1 - v0, v2 - v0)  # angle at v0
-            cot_at_1 = _cot(v0 - v1, v2 - v1)  # angle at v1
-            cot_at_2 = _cot(v0 - v2, v1 - v2)  # angle at v2
+                # Edge vectors as seen from each vertex.
+                cot_at_0 = _cot(v1 - v0, v2 - v0)  # angle at v0
+                cot_at_1 = _cot(v0 - v1, v2 - v1)  # angle at v1
+                cot_at_2 = _cot(v0 - v2, v1 - v2)  # angle at v2
 
-            # Edge contributions (opposite-angle weighting).
-            # Edge (v1, v2) uses cot_at_0; etc.
-            edge12_diff = (v1 - v2) * cot_at_0[:, None]
-            edge20_diff = (v2 - v0) * cot_at_1[:, None]
-            edge01_diff = (v0 - v1) * cot_at_2[:, None]
+                # Edge contributions (opposite-angle weighting).
+                # Edge (v1, v2) uses cot_at_0; etc.
+                edge12_diff = (v1 - v2) * cot_at_0[:, None]
+                edge20_diff = (v2 - v0) * cot_at_1[:, None]
+                edge01_diff = (v0 - v1) * cot_at_2[:, None]
 
-            np.add.at(H, global_1, +edge12_diff)
-            np.add.at(H, global_2, -edge12_diff)
-            np.add.at(H, global_2, +edge20_diff)
-            np.add.at(H, global_0, -edge20_diff)
-            np.add.at(H, global_0, +edge01_diff)
-            np.add.at(H, global_1, -edge01_diff)
+                np.add.at(H, global_1, +edge12_diff)
+                np.add.at(H, global_2, -edge12_diff)
+                np.add.at(H, global_2, +edge20_diff)
+                np.add.at(H, global_0, -edge20_diff)
+                np.add.at(H, global_0, +edge01_diff)
+                np.add.at(H, global_1, -edge01_diff)
 
-            # Voronoi (or barycentric for obtuse) area per vertex.
-            face_area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
-            # Use barycentric (face_area / 3 to each vertex) — a simpler
-            # and still standard approximation. The full Voronoi case
-            # introduces obtuse-triangle special handling that's not
-            # essential for v0.
-            contribution = face_area / 3.0
-            np.add.at(area_voronoi, global_0, contribution)
-            np.add.at(area_voronoi, global_1, contribution)
-            np.add.at(area_voronoi, global_2, contribution)
+                # Voronoi (or barycentric for obtuse) area per vertex.
+                face_area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
+                # Use barycentric (face_area / 3 to each vertex) — a simpler
+                # and still standard approximation. The full Voronoi case
+                # introduces obtuse-triangle special handling that's not
+                # essential for v0.
+                contribution = face_area / 3.0
+                np.add.at(area_voronoi, global_0, contribution)
+                np.add.at(area_voronoi, global_1, contribution)
+                np.add.at(area_voronoi, global_2, contribution)
+
+        try:
+            cross_links = read_cross_chunk_links(level_group, delta=0)
+        except Exception:
+            cross_links = []
 
     safe_area = np.where(area_voronoi == 0, 1.0, area_voronoi)
     H_per_vertex = H / (2.0 * safe_area[:, None])
     mean_curv = (np.linalg.norm(H_per_vertex, axis=1) * 0.5).astype(np.float32)
 
-    try:
-        cross_links = read_cross_chunk_links(level_group, delta=0)
-    except Exception:
-        cross_links = []
     boundary = _count_boundary_vertex_set(cross_links)
 
     if write_back:
