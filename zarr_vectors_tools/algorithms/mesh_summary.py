@@ -25,13 +25,20 @@ from typing import Any
 
 import numpy as np
 
+from zarr_vectors.constants import (
+    CROSS_CHUNK_LINKS,
+    LINK_FRAGMENTS,
+    LINKS,
+    VERTEX_FRAGMENTS,
+    VERTICES,
+)
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_all_object_manifests,
     read_chunk_links,
     read_chunk_vertices,
     read_cross_chunk_links,
-    read_vertex_group,
+    read_fragment,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store, read_root_metadata
 from zarr_vectors.typing import ChunkCoords
@@ -96,6 +103,7 @@ def compute_mesh_summary(
         )
 
     chunk_keys = list_chunk_keys(level_group)
+    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
 
     surface_area = 0.0
     volume = 0.0
@@ -110,50 +118,57 @@ def compute_mesh_summary(
     def _edge_key(a: tuple, b: tuple) -> tuple[tuple, tuple]:
         return (a, b) if a <= b else (b, a)
 
-    for chunk_key in chunk_keys:
-        try:
-            vgroups = read_chunk_vertices(
-                level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
-            )
-        except Exception:
-            continue
-
-        if not vgroups:
-            continue
-
-        local_positions = np.concatenate(vgroups, axis=0)
-        vertex_count += len(local_positions)
-
-        try:
-            link_groups = read_chunk_links(level_group, chunk_key)
-        except Exception:
-            link_groups = []
-
-        for faces in link_groups:
-            if len(faces) == 0:
+    with level_group.batched_reads([
+        (VERTICES, chunk_key_strs),
+        (VERTEX_FRAGMENTS, chunk_key_strs),
+        (f"{LINKS}/0", chunk_key_strs),
+        (LINK_FRAGMENTS, chunk_key_strs),
+        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+    ]):
+        for chunk_key in chunk_keys:
+            try:
+                vgroups = read_chunk_vertices(
+                    level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
+                )
+            except Exception:
                 continue
-            face_count += len(faces)
 
-            v0 = local_positions[faces[:, 0]]
-            v1 = local_positions[faces[:, 1]]
-            v2 = local_positions[faces[:, 2]]
+            if not vgroups:
+                continue
 
-            cross = np.cross(v1 - v0, v2 - v0)
-            surface_area += float(np.linalg.norm(cross, axis=1).sum() * 0.5)
-            volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
+            local_positions = np.concatenate(vgroups, axis=0)
+            vertex_count += len(local_positions)
 
-            for col_a, col_b in ((0, 1), (1, 2), (2, 0)):
-                a_locals = faces[:, col_a].tolist()
-                b_locals = faces[:, col_b].tolist()
-                for la, lb in zip(a_locals, b_locals):
-                    edge_set.add(
-                        _edge_key((chunk_key, int(la)), (chunk_key, int(lb)))
-                    )
+            try:
+                link_groups = read_chunk_links(level_group, chunk_key)
+            except Exception:
+                link_groups = []
 
-    try:
-        cross_links = read_cross_chunk_links(level_group, delta=0)
-    except Exception:
-        cross_links = []
+            for faces in link_groups:
+                if len(faces) == 0:
+                    continue
+                face_count += len(faces)
+
+                v0 = local_positions[faces[:, 0]]
+                v1 = local_positions[faces[:, 1]]
+                v2 = local_positions[faces[:, 2]]
+
+                cross = np.cross(v1 - v0, v2 - v0)
+                surface_area += float(np.linalg.norm(cross, axis=1).sum() * 0.5)
+                volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
+
+                for col_a, col_b in ((0, 1), (1, 2), (2, 0)):
+                    a_locals = faces[:, col_a].tolist()
+                    b_locals = faces[:, col_b].tolist()
+                    for la, lb in zip(a_locals, b_locals):
+                        edge_set.add(
+                            _edge_key((chunk_key, int(la)), (chunk_key, int(lb)))
+                        )
+
+        try:
+            cross_links = read_cross_chunk_links(level_group, delta=0)
+        except Exception:
+            cross_links = []
     excluded_cross_face_edges = 0
     # Records may have 2 endpoints (cross-chunk edge) or 3+ (cross-chunk face).
     # Each record contributes (len-1) consecutive edges to the dedup set.
@@ -194,8 +209,8 @@ def _compute_per_object(
 ) -> list[dict[str, Any]]:
     """Walk object manifests to attribute area / volume / counts per object.
 
-    Faces in ``read_chunk_links(chunk)[vg_index]`` align with vertices
-    in fragment ``vg_index`` of the same chunk (per the v0.6 fragment
+    Faces in ``read_chunk_links(chunk)[fragment_idx]`` align with vertices
+    in fragment ``fragment_idx`` of the same chunk (per the v0.6 fragment
     layout); a per-chunk link-group cache avoids re-decoding when many
     objects share a chunk.
     """
@@ -203,48 +218,61 @@ def _compute_per_object(
     if not manifests:
         return []
 
+    referenced_chunks: set[ChunkCoords] = {
+        chunk for manifest in manifests for chunk, _ in manifest
+    }
+    referenced_chunk_strs = [
+        ".".join(str(c) for c in cc) for cc in referenced_chunks
+    ]
+
     chunk_link_cache: dict[ChunkCoords, list[np.ndarray]] = {}
     per_object: list[dict[str, Any]] = []
 
-    for oid, manifest in enumerate(manifests):
-        area = 0.0
-        volume = 0.0
-        face_count = 0
-        vertex_count = 0
+    with level_group.batched_reads([
+        (VERTICES, referenced_chunk_strs),
+        (VERTEX_FRAGMENTS, referenced_chunk_strs),
+        (f"{LINKS}/0", referenced_chunk_strs),
+        (LINK_FRAGMENTS, referenced_chunk_strs),
+    ]):
+        for oid, manifest in enumerate(manifests):
+            area = 0.0
+            volume = 0.0
+            face_count = 0
+            vertex_count = 0
 
-        for chunk, vg_idx in manifest:
-            verts = read_vertex_group(
-                level_group, chunk, vg_idx, dtype=vertex_dtype, ndim=ndim,
-            ).astype(np.float64, copy=False)
-            vertex_count += len(verts)
+            for chunk, fragment_idx in manifest:
+                verts = read_fragment(
+                    level_group, chunk, fragment_idx, dtype=vertex_dtype, ndim=ndim,
+                ).astype(np.float64, copy=False)
+                vertex_count += len(verts)
 
-            if chunk not in chunk_link_cache:
-                try:
-                    chunk_link_cache[chunk] = read_chunk_links(level_group, chunk)
-                except Exception:
-                    chunk_link_cache[chunk] = []
-            groups = chunk_link_cache[chunk]
+                if chunk not in chunk_link_cache:
+                    try:
+                        chunk_link_cache[chunk] = read_chunk_links(level_group, chunk)
+                    except Exception:
+                        chunk_link_cache[chunk] = []
+                groups = chunk_link_cache[chunk]
 
-            if vg_idx >= len(groups):
-                continue
-            faces = groups[vg_idx]
-            if faces.ndim != 2 or faces.shape[1] != 3 or len(faces) == 0:
-                continue
+                if fragment_idx >= len(groups):
+                    continue
+                faces = groups[fragment_idx]
+                if faces.ndim != 2 or faces.shape[1] != 3 or len(faces) == 0:
+                    continue
 
-            v0 = verts[faces[:, 0]]
-            v1 = verts[faces[:, 1]]
-            v2 = verts[faces[:, 2]]
-            cr = np.cross(v1 - v0, v2 - v0)
-            area += float(np.linalg.norm(cr, axis=1).sum() * 0.5)
-            volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
-            face_count += len(faces)
+                v0 = verts[faces[:, 0]]
+                v1 = verts[faces[:, 1]]
+                v2 = verts[faces[:, 2]]
+                cr = np.cross(v1 - v0, v2 - v0)
+                area += float(np.linalg.norm(cr, axis=1).sum() * 0.5)
+                volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
+                face_count += len(faces)
 
-        per_object.append({
-            "object_id": oid,
-            "surface_area": area,
-            "volume": volume,
-            "face_count": face_count,
-            "vertex_count": vertex_count,
-        })
+            per_object.append({
+                "object_id": oid,
+                "surface_area": area,
+                "volume": volume,
+                "face_count": face_count,
+                "vertex_count": vertex_count,
+            })
 
     return per_object

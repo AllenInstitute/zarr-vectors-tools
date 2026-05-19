@@ -6,9 +6,30 @@ from pathlib import Path
 
 import numpy as np
 
-from zarr_vectors.lazy import open_zv
+from zarr_vectors.core.arrays import list_chunk_keys, read_chunk_attributes
+from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors_tools.algorithms import compute_connected_components
+
+
+def _read_full_attribute(
+    store_path: Path, attr_name: str, dtype: np.dtype, ncols: int
+) -> np.ndarray:
+    """Concatenate a per-vertex attribute across all chunks with explicit
+    dtype/ncols (bulk-attribute writes don't persist the metadata the
+    lazy reader would need to infer them)."""
+    root = open_store(str(store_path))
+    level_group = get_resolution_level(root, 0)
+    chunks = list_chunk_keys(level_group)
+    parts: list[np.ndarray] = []
+    for ck in chunks:
+        groups = read_chunk_attributes(
+            level_group, attr_name, ck, dtype=dtype, ncols=ncols,
+        )
+        for g in groups:
+            if len(g):
+                parts.append(g)
+    return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=dtype)
 
 
 class TestConnectedComponents:
@@ -84,9 +105,8 @@ class TestWriteBackLabels:
             str(store), positions, edges, chunk_shape=(100.0, 100.0, 100.0),
         )
         result = compute_connected_components(store, write_back=True)
-        zv = open_zv(str(store))
-        persisted = zv[0]["component_label"].compute()
-        assert persisted.shape == result["labels"].shape
-        np.testing.assert_array_equal(
-            persisted.astype(np.uint32), result["labels"],
+        persisted = _read_full_attribute(
+            store, "component_label", dtype=np.uint32, ncols=1,
         )
+        assert persisted.shape == result["labels"].shape
+        np.testing.assert_array_equal(persisted, result["labels"])

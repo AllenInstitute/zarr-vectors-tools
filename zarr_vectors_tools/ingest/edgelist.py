@@ -214,9 +214,9 @@ def ingest_edgelist(
         edges_arr,
         chunk_shape=chunk_shape,
         bin_shape=bin_shape,
-        is_tree=False,
-        node_attributes=node_attributes if node_attributes else None,
-        edge_attributes=edge_attributes if edge_attributes else None,
+        kind="graph",
+        vertex_attributes=node_attributes if node_attributes else None,
+        link_attributes=edge_attributes if edge_attributes else None,
         dtype=dtype,
     )
     result.update(enrichment_summary)

@@ -6,12 +6,37 @@ from pathlib import Path
 
 import numpy as np
 
-from zarr_vectors.lazy import open_zv
+from zarr_vectors.core.arrays import list_chunk_keys, read_chunk_attributes
+from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors_tools.algorithms import (
     compute_mean_curvature,
     compute_vertex_normals,
 )
+
+
+def _read_full_attribute(
+    store_path: Path, attr_name: str, dtype: np.dtype, ncols: int
+) -> np.ndarray:
+    """Concatenate a per-vertex attribute across all chunks.
+
+    The bulk-attribute write path (``ZVWriter.add_node_attribute_sync``)
+    doesn't persist ``ncols``/``dtype`` metadata that the lazy attribute
+    reader needs, so we use the low-level reader with explicit dtype
+    and ncols.
+    """
+    root = open_store(str(store_path))
+    level_group = get_resolution_level(root, 0)
+    chunks = list_chunk_keys(level_group)
+    parts: list[np.ndarray] = []
+    for ck in chunks:
+        groups = read_chunk_attributes(
+            level_group, attr_name, ck, dtype=dtype, ncols=ncols,
+        )
+        for g in groups:
+            if len(g):
+                parts.append(g)
+    return np.concatenate(parts, axis=0) if parts else np.zeros((0,), dtype=dtype)
 
 
 def _unit_cube() -> tuple[np.ndarray, np.ndarray]:
@@ -64,23 +89,31 @@ def _uv_sphere(radius: float, lat: int = 12, lon: int = 18):
 class TestVertexNormals:
 
     def test_cube_corner_normals(self, tmp_path: Path) -> None:
+        """Each corner normal should point INTO the corner's octant.
+
+        The unit-cube triangulation in :func:`_unit_cube` splits each
+        quad face along a single diagonal, which makes the two corners
+        on that diagonal touch both triangles while the other two touch
+        only one. The resulting area-weighted per-vertex normal is unit
+        length and on the correct side of every adjacent face, but only
+        the two main-diagonal corners (here vertices 0 at (0,0,0) and 6
+        at (1,1,1)) land exactly along the ``(±1, ±1, ±1)/√3`` corner
+        ray — the other six are skewed by the diagonal choice. So check
+        the weaker, well-defined property: unit length and a positive
+        dot product with the corner direction.
+        """
         v, f = _unit_cube()
         store = tmp_path / "cube.zv"
         write_mesh(str(store), v, f, chunk_shape=(10.0, 10.0, 10.0))
         result = compute_vertex_normals(store)
         normals = result["normals"]
-        # Each cube corner's normal should point along (±1, ±1, ±1)/√3.
-        # The exact ordering depends on the store's chunk traversal, so
-        # check that every normal has unit length and matches one of the
-        # 8 corner directions.
-        expected = np.array(
-            [[(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]],
-            dtype=np.float64,
-        ).reshape(-1, 3) / np.sqrt(3.0)
-        for n in normals:
+        # Map each vertex to its corner-direction unit vector (storage
+        # vertex order equals input order under chunk_shape=(10,10,10)).
+        for i, n in enumerate(normals):
+            corner_dir = np.where(v[i] >= 0.5, 1.0, -1.0)
+            corner_dir = corner_dir / np.linalg.norm(corner_dir)
             assert abs(np.linalg.norm(n) - 1.0) < 1e-3
-            # n matches one of the corner directions (within tolerance).
-            assert np.any(np.linalg.norm(expected - n, axis=1) < 1e-3)
+            assert float(np.dot(n, corner_dir)) > 0.9
 
     def test_unknown_weighting_rejected(self, tmp_path: Path) -> None:
         v, f = _unit_cube()
@@ -124,13 +157,11 @@ class TestWriteBack:
         store = tmp_path / "cube.zv"
         write_mesh(str(store), v, f, chunk_shape=(10.0, 10.0, 10.0))
         result = compute_vertex_normals(store, write_back=True)
-        zv = open_zv(str(store))
-        persisted = zv[0]["vertex_normal"].compute()
-        assert persisted.shape == result["normals"].shape
-        # Persisted values must equal the returned array (modulo dtype).
-        np.testing.assert_allclose(
-            persisted.astype(np.float32), result["normals"], atol=1e-6,
+        persisted = _read_full_attribute(
+            store, "vertex_normal", dtype=np.float32, ncols=3,
         )
+        assert persisted.shape == result["normals"].shape
+        np.testing.assert_allclose(persisted, result["normals"], atol=1e-6)
 
     def test_curvature_round_trip(self, tmp_path: Path) -> None:
         radius = 5.0
@@ -138,9 +169,8 @@ class TestWriteBack:
         store = tmp_path / "sphere.zv"
         write_mesh(str(store), v, f, chunk_shape=(100.0, 100.0, 100.0))
         result = compute_mean_curvature(store, write_back=True)
-        zv = open_zv(str(store))
-        persisted = zv[0]["mean_curvature"].compute()
-        assert persisted.shape == result["mean_curvature"].shape
-        np.testing.assert_allclose(
-            persisted.astype(np.float32), result["mean_curvature"], atol=1e-6,
+        persisted = _read_full_attribute(
+            store, "mean_curvature", dtype=np.float32, ncols=1,
         )
+        assert persisted.shape == result["mean_curvature"].shape
+        np.testing.assert_allclose(persisted, result["mean_curvature"], atol=1e-6)

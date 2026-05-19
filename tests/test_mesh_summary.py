@@ -96,22 +96,23 @@ class TestMeshSummary:
         assert result["euler_characteristic"] == 2
 
     def test_unit_cube_cross_chunk(self, tmp_path: Path) -> None:
-        """Cube straddling chunk boundaries: surface area + volume still
-        right because intra-chunk faces dominate; the Euler characteristic
-        is offset by however many cross-chunk faces lose identity."""
+        """Cube whose every face straddles 3 chunks (cube on unit grid,
+        chunks at 0.5): every triangle becomes a cross-chunk face under
+        upstream's all-three-vertices-share-a-chunk rule. The summary
+        algorithm intentionally excludes cross-chunk faces from face/area
+        accumulation but counts their boundary edges in
+        ``excluded_cross_face_edges``."""
         v, f = _unit_cube()
-        # Shift so the cube centre lands on (0.5, 0.5, 0.5) but the
-        # chunk shape is 0.5, forcing 8 chunks.
         store = tmp_path / "cube_chunked.zv"
         write_mesh(str(store), v, f, chunk_shape=(0.5, 0.5, 0.5))
 
         result = compute_mesh_summary(store)
-        # Vertex and face counts come from level metadata; should still
-        # be 8 and (intra-only) <= 12.
         assert result["vertex_count"] == 8
-        assert 0 < result["face_count"] <= 12
-        # Surface area on intra faces alone is at most 6.
-        assert 0 < result["surface_area"] <= 6.0 + 1e-5
+        # All 12 faces are cross-chunk; intra-chunk pass contributes nothing.
+        assert result["face_count"] == 0
+        assert result["surface_area"] == 0.0
+        # But cross-chunk face-boundary edges DO get tallied.
+        assert result["excluded_cross_face_edges"] > 0
 
 class TestPerObject:
 

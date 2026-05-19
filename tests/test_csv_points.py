@@ -111,7 +111,10 @@ class TestCSVRoundTrip:
 class TestOptionalDependencies:
 
     def test_las_missing_raises_ingest_error(self, tmp_path: Path) -> None:
-        """If laspy is not installed, ingest_las should raise IngestError."""
+        """If laspy is not installed, ingest_las raises IngestError mentioning
+        the missing dependency. When laspy IS installed, the same call against
+        a non-existent file raises IngestError("Input file not found: ...")
+        instead — both messages are valid IngestError surfaces."""
         from zarr_vectors_tools.ingest.las import ingest_las
         from zarr_vectors.exceptions import IngestError
 
@@ -122,12 +125,13 @@ class TestOptionalDependencies:
                 (100.0, 100.0, 100.0),
             )
         except IngestError as e:
-            assert "laspy" in str(e).lower()
-        except Exception:
-            pass  # laspy might actually be installed in some envs
+            msg = str(e).lower()
+            assert "laspy" in msg or "not found" in msg
 
     def test_ply_missing_raises_ingest_error(self, tmp_path: Path) -> None:
-        """If plyfile is not installed, ingest_ply should raise IngestError."""
+        """If plyfile is not installed, ingest_ply raises IngestError mentioning
+        the missing dependency. When plyfile IS installed, the same call against
+        a non-existent file raises IngestError("Input file not found: ...")."""
         from zarr_vectors_tools.ingest.ply import ingest_ply
         from zarr_vectors.exceptions import IngestError
 
@@ -138,6 +142,5 @@ class TestOptionalDependencies:
                 (100.0, 100.0, 100.0),
             )
         except IngestError as e:
-            assert "plyfile" in str(e).lower()
-        except Exception:
-            pass
+            msg = str(e).lower()
+            assert "plyfile" in msg or "not found" in msg
