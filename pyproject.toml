@@ -36,6 +36,7 @@ ply = ["plyfile>=1.0"]
 streamlines = ["nibabel>=5.0", "trx-python>=0.3"]
 graph = ["networkx>=3.0"]
 points-enrichment = ["scipy>=1.10"]
+neuroglancer = ["cloud-volume>=10.0"]
 # Requires a RAPIDS-compatible CUDA environment. Install per https://docs.rapids.ai.
 gpu = ["cudf"]
 all = [
@@ -45,6 +46,7 @@ all = [
     "trx-python>=0.3",
     "networkx>=3.0",
     "scipy>=1.10",
+    "cloud-volume>=10.0",
 ]
 dev = [
     "pytest>=7.0",
