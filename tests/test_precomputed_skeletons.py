@@ -28,6 +28,89 @@ def tmp_store():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def _tree_sha(store_dir):
+    import hashlib
+    import os
+    out = {}
+    for root, _dirs, files in os.walk(store_dir):
+        for fn in files:
+            fp = os.path.join(root, fn)
+            h = hashlib.sha256()
+            with open(fp, "rb") as f:
+                for blk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(blk)
+            out[os.path.relpath(fp, store_dir)] = h.hexdigest()
+    return out
+
+
+def _ppool_executor(func, items, shared=None):
+    """Parallel map over a ProcessPoolExecutor — exercises pickling of the
+    top-level L0 + pyramid workers, their payloads, and the shared
+    (scattered-once) reader/plan across processes."""
+    items = list(items)
+    if not items:
+        return []
+    from concurrent.futures import ProcessPoolExecutor
+    from functools import partial
+    with ProcessPoolExecutor(max_workers=2) as ex:
+        return list(ex.map(partial(func, shared=shared), items))
+
+
+def _flywire_cutout_reader():
+    """A small flywire-shaped in-memory cutout spanning multiple chunks."""
+    from zarr_vectors_tools.ingest.precomputed_skeletons import (
+        InMemoryFragsReader, SkeletonInfo, enumerate_frag_keys,
+    )
+    info = SkeletonInfo(
+        base_url="mem://x", resolution_nm=(32.0, 32.0, 40.0),
+        chunk_size_nm=(16384.0, 16384.0, 20480.0),
+        vertex_attributes=[
+            {"id": "radius", "data_type": "float32", "num_components": 1},
+        ])
+    cs = np.array(info.chunk_size_nm)
+    rng = np.random.default_rng(0)
+    anchor = (17910, 8912, 3088)
+    counts = (2, 2, 1)
+    keys = enumerate_frag_keys(info, anchor, counts)
+    from zarr_vectors_tools.ingest.precomputed_skeletons import parse_frag_key
+    seg = 720575940000000000
+    chunks = {}
+    for k in keys:
+        o = np.array(parse_frag_key(k)) * np.array(info.resolution_nm)
+        d = {}
+        for _ in range(12):
+            sid = seg; seg += 13
+            n = int(rng.integers(30, 90))
+            st = o + rng.uniform(0.1, 0.9, 3) * cs
+            p = np.clip(np.cumsum(rng.normal(0, 200, (n, 3)), 0) + st,
+                        o + 10, o + cs - 10).astype(np.float32)
+            d[sid] = {"vertices": p,
+                      "edges": np.array([[i, i - 1] for i in range(1, n)]),
+                      "radius": rng.uniform(50, 400, n).astype(np.float32)}
+        chunks[k] = d
+    reader = InMemoryFragsReader(info, chunks)
+    bounds = ([anchor[a] * info.resolution_nm[a] for a in range(3)],
+              [(anchor[a] + counts[a] * 512) * info.resolution_nm[a] for a in range(3)])
+    return reader, keys, bounds
+
+
+def test_run_ingest_parallel_matches_serial(tmp_path):
+    """A parallel executor (multi-process L0 + pyramid) must produce a
+    byte-identical store to the serial default."""
+    from zarr_vectors_tools.ingest.precomputed_skeletons import run_ingest
+    reader, keys, bounds = _flywire_cutout_reader()
+    a = str(tmp_path / "serial.zv")
+    b = str(tmp_path / "parallel.zv")
+    args = dict(bounds_nm=bounds, strides=[8, 8], chunk_scale_factors=[2, 2],
+                sparsity_factors=[1.0, 2.0], progress=False)
+    run_ingest(reader, a, list(keys), **args)                       # serial
+    run_ingest(reader, b, list(keys), executor=_ppool_executor, **args)
+    sa, sb = _tree_sha(a), _tree_sha(b)
+    assert set(sa) == set(sb), set(sa).symmetric_difference(sb)
+    mismatched = [p for p in sa if sa[p] != sb[p]]
+    assert not mismatched, mismatched
+
+
 def test_ingest_driver_offline(tmp_store):
     """End-to-end ETL (extract→write→reduce→pyramid) via an in-memory
     .frags reader, with a flywire-shaped spatial index and a phase-offset

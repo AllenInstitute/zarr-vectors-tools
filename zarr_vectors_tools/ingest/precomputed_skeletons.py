@@ -35,10 +35,13 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 import numpy.typing as npt
 
-from zarr_vectors.multiresolution.skeleton_graph import split_components
-from zarr_vectors.multiresolution.strategies.skeletons import build_skeleton_pyramid
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
+from zarr_vectors_tools.multiresolution.object_index import build_object_index
+from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
+from zarr_vectors_tools.multiresolution.strategies.skeletons import (
+    build_skeleton_pyramid,
+)
 
 
 # ===================================================================
@@ -393,6 +396,113 @@ def _detect_coincident_cross_edges(
 # Driver
 # ===================================================================
 
+def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
+    """Worker (aligned mode): read one ``.frag``, write its single level-0 zarr
+    chunk, and return the chunk's object-index ``records`` plus its
+    boundary-vertex records (small) for cross-chunk-edge matching.
+
+    Boundary vertices (on a chunk face) are tagged as anchors so
+    ``write_skeleton_chunk`` reports their post-write chunk-local indices;
+    only those tiny per-face records leave the worker, so the coordinator
+    never holds bulk vertex data.  Picklable / runs under the executor;
+    writes a disjoint chunk file.
+
+    The ``reader`` arrives via ``shared`` (scattered to the workers once), not in
+    the per-``.frag`` payload — so an in-memory reader holding many chunks is
+    transported a single time, never re-pickled per task.
+    """
+    import numpy as np
+    from zarr_vectors.core.store import get_resolution_level, open_store
+    from zarr_vectors.types import skeletons as sk
+
+    reader = (shared or {})["reader"]
+    key = payload["key"]
+    chunk = reader.read_chunk(key)
+    if not chunk:
+        return {"records": [], "boundary": [], "n_segments": 0, "read": 0}
+    chunk_shape_nm = tuple(payload["chunk_shape_nm"])
+    attribute_names = payload["attribute_names"]
+    attr_dtypes = {n: np.dtype(d) for n, d in payload["attr_dtypes"].items()}
+    origin = np.asarray(payload["origin"]) if payload["origin"] is not None else None
+    by_cc, _cr, _gid = pieces_from_chunk(
+        chunk, chunk_shape_nm=chunk_shape_nm,
+        attribute_names=attribute_names, gid_start=0,
+        origin=origin, fixed_cell=tuple(payload["fixed_cell"]),
+    )
+    cs = np.rint(np.asarray(chunk_shape_nm, dtype=np.float64)).astype(np.int64)
+    off = np.rint(np.asarray(payload["boundary_offset_nm"], dtype=np.float64)).astype(np.int64)
+
+    root = open_store(payload["store_path"], mode="r+")
+    lg = get_resolution_level(root, 0)
+    records: list = []
+    boundary: list = []
+    for cc, pieces in by_cc.items():
+        tag_meta: list = []
+        for pi, p in enumerate(pieces):
+            pos = np.asarray(p["positions"])
+            if len(pos) == 0:
+                continue
+            coord = np.rint(pos).astype(np.int64)
+            on_face = np.any(np.mod(coord - off, cs) == 0, axis=1)
+            for vidx in np.flatnonzero(on_face):
+                tag = ("b", pi, int(vidx))
+                p.setdefault("anchors", {})[tag] = int(vidx)
+                tag_meta.append(
+                    (int(p["segment_id"]),
+                     tuple(int(c) for c in coord[vidx]), tag)
+                )
+        recs, alocs = sk.write_skeleton_chunk(lg, cc, pieces, attr_dtypes=attr_dtypes)
+        records.extend(recs)
+        for seg, coordt, tag in tag_meta:
+            loc = alocs.get(tag)
+            if loc is not None:
+                boundary.append((seg, coordt, tuple(int(c) for c in cc), int(loc[1])))
+    return {
+        "records": records,
+        "boundary": boundary,
+        "n_segments": len(chunk),
+        "read": 1,
+    }
+
+
+def _match_coincident_links(boundary: list) -> list:
+    """Coordinator: match the per-chunk boundary-vertex records into
+    cross-chunk links.  Groups by ``(segment_id, coord)`` and, for each group
+    spanning ≥2 chunks, links one representative per chunk (star) — the same
+    grouping :func:`_detect_coincident_cross_edges` does globally, but on the
+    small gathered boundary records (post-write chunk-local indices), so no
+    bulk vertex data is held.
+
+    Returns ``[((ccA, viA), (ccB, viB)), ...]`` for
+    :func:`write_skeleton_cross_chunk_links`.
+    """
+    if not boundary:
+        return []
+    ndim = len(boundary[0][1])
+    seg = np.fromiter((b[0] for b in boundary), dtype=np.int64, count=len(boundary))
+    coord = np.array([b[1] for b in boundary], dtype=np.int64).reshape(-1, ndim)
+    key = np.column_stack([seg, coord])
+    order = np.lexsort([key[:, i] for i in range(key.shape[1] - 1, -1, -1)])
+    ks = key[order]
+    change = np.any(ks[1:] != ks[:-1], axis=1)
+    starts = np.concatenate([[0], np.flatnonzero(change) + 1])
+    ends = np.concatenate([starts[1:], [len(order)]])
+    links: list = []
+    for s, e in zip(starts, ends):
+        if e - s < 2:
+            continue
+        per_chunk: dict = {}
+        for m in order[s:e]:
+            ccloc = (boundary[m][2], boundary[m][3])
+            per_chunk.setdefault(ccloc[0], ccloc)
+        reps = list(per_chunk.values())
+        if len(reps) < 2:
+            continue
+        for k in range(1, len(reps)):
+            links.append((reps[0], reps[k]))
+    return links
+
+
 def run_ingest(
     reader: Any,
     out_store: str | Path,
@@ -408,6 +518,8 @@ def run_ingest(
     backend: str | None = None,
     align: bool = True,
     progress: bool = True,
+    workers: int | None = None,
+    executor: Any = None,
 ) -> dict[str, Any]:
     """Run the full ETL: extract + level-0 write + object index + pyramid.
 
@@ -460,97 +572,150 @@ def run_ingest(
         coordinate_offset=coord_off,
     )
     np_attr_dtypes = {n: np.dtype(attribute_dtypes[n]) for n in attribute_names}
-
-    # Accumulate all pieces per zarr chunk first, then write each chunk
-    # once.  In aligned mode each .frag maps to exactly one chunk (its
-    # grid cell); in non-aligned mode a chunk may collect pieces from
-    # several phase-offset .frags.  Bounded by the cutout size in RAM;
-    # the scale-out map unit is a zarr chunk.
     origin_voxel = np.rint(grid_origin / np.asarray(info.resolution_nm)).astype(np.int64)
     csv = np.asarray(info.chunk_size_voxels, dtype=np.int64)
-    pieces_by_cc: dict[ChunkCoords, list[dict[str, Any]]] = defaultdict(list)
-    cross_edges: list[tuple[int, int]] = []
-    n_chunks = 0
-    n_segments = 0
-    gid = 0
     keys = list(keys)
-    for ki, key in enumerate(keys):
-        chunk = reader.read_chunk(key)
-        if not chunk:
-            continue
-        n_chunks += 1
-        n_segments += len(chunk)
-        fixed_cell = None
+
+    # Build the map-like executor: an explicit one wins, else a Dask local
+    # cluster when ``workers`` is set, else serial in-process.  It drives the
+    # per-.frag extract+write (aligned mode) and is threaded into the pyramid.
+    _dask_cm = None
+    if executor is not None:
+        ex = executor
+    elif workers:
+        from zarr_vectors_tools.ingest._parallel import dask_executor
+        _dask_cm = dask_executor(workers)
+        ex = _dask_cm.__enter__()
+    else:
+        def ex(func, items, shared=None):
+            return [func(it, shared=shared) for it in items]
+
+    import os as _os
+    import time as _time
+    _timing = bool(_os.environ.get("ZV_TIMING"))
+    _phase: dict[str, float] = {}
+    _t0 = _time.perf_counter()
+
+    try:
+        records: list[tuple[int, ChunkCoords, int]] = []
+        cc_links: list = []
+        n_chunks = 0
+        n_segments = 0
+
         if align:
-            vs = np.asarray(parse_frag_key(key), dtype=np.int64)
-            fixed_cell = tuple(((vs - origin_voxel) // csv).tolist())
-        by_cc, cr, gid = pieces_from_chunk(
-            chunk, chunk_shape_nm=chunk_shape_nm,
-            attribute_names=attribute_names, gid_start=gid,
-            origin=(grid_origin if align else None),
-            fixed_cell=fixed_cell,
-        )
-        for cc, pieces in by_cc.items():
-            pieces_by_cc[cc].extend(pieces)
-        cross_edges += cr
-        if progress:
-            print(f"  [{ki + 1}/{len(keys)}] {key}: "
-                  f"{len(chunk)} segs → {len(by_cc)} zarr chunks", flush=True)
+            # Parallel per-.frag extract + level-0 write — each .frag maps to
+            # exactly one zarr chunk, written to disjoint files.  Workers
+            # return records + tiny boundary-vertex records; cross-chunk links
+            # are matched from the gathered boundary records (bounded — the
+            # coordinator never holds bulk vertices).
+            boundary_offset = (
+                0.5 * np.asarray(info.resolution_nm, dtype=np.float64)
+            ).tolist()
+            payloads = []
+            for key in keys:
+                vs = np.asarray(parse_frag_key(key), dtype=np.int64)
+                fixed_cell = tuple(((vs - origin_voxel) // csv).tolist())
+                payloads.append({
+                    "key": key, "store_path": str(out_store),
+                    "chunk_shape_nm": list(chunk_shape_nm),
+                    "attribute_names": list(attribute_names),
+                    "attr_dtypes": {n: str(attribute_dtypes[n]) for n in attribute_names},
+                    "origin": grid_origin.tolist(),
+                    "fixed_cell": list(fixed_cell),
+                    "boundary_offset_nm": boundary_offset,
+                })
+            # The reader is shared (scattered once), not re-pickled per .frag.
+            boundary: list = []
+            for r in ex(_l0_extract_write, payloads, {"reader": reader}):
+                records.extend(r["records"])
+                boundary.extend(r["boundary"])
+                n_chunks += r["read"]
+                n_segments += r["n_segments"]
+            _phase["l0_extract_write"] = _time.perf_counter() - _t0
+            _t1 = _time.perf_counter()
+            # Deterministic order (independent of worker completion) for the
+            # object index: sorted by (chunk, fragment).
+            records.sort(key=lambda rec: (tuple(rec[1]), rec[2]))
+            cc_links = _match_coincident_links(boundary)
+            sk.write_skeleton_cross_chunk_links(lg, cc_links, ndim=ndim)
+            _phase["l0_cross_links"] = _time.perf_counter() - _t1
+        else:
+            # Non-aligned (phase-split) mode: serial accumulation + global
+            # coincident detection (rare; alignment / cross-edge tests).
+            pieces_by_cc: dict[ChunkCoords, list[dict[str, Any]]] = defaultdict(list)
+            cross_edges: list[tuple[int, int]] = []
+            gid = 0
+            for ki, key in enumerate(keys):
+                chunk = reader.read_chunk(key)
+                if not chunk:
+                    continue
+                n_chunks += 1
+                n_segments += len(chunk)
+                by_cc, cr, gid = pieces_from_chunk(
+                    chunk, chunk_shape_nm=chunk_shape_nm,
+                    attribute_names=attribute_names, gid_start=gid,
+                    origin=None, fixed_cell=None,
+                )
+                for cc, pieces in by_cc.items():
+                    pieces_by_cc[cc].extend(pieces)
+                cross_edges += cr
+                if progress:
+                    print(f"  [{ki + 1}/{len(keys)}] {key}: "
+                          f"{len(chunk)} segs → {len(by_cc)} zarr chunks", flush=True)
+            gid_loc: dict[int, tuple[ChunkCoords, int]] = {}
+            for cc, pieces in sorted(pieces_by_cc.items()):
+                recs, alocs = sk.write_skeleton_chunk(
+                    lg, cc, pieces, attr_dtypes=np_attr_dtypes,
+                )
+                records += recs
+                gid_loc.update(alocs)
+            for ga, gb in cross_edges:
+                la = gid_loc.get(ga)
+                lb = gid_loc.get(gb)
+                if la is None or lb is None or tuple(la[0]) == tuple(lb[0]):
+                    continue
+                cc_links.append((la, lb))
+            sk.write_skeleton_cross_chunk_links(lg, cc_links, ndim=ndim)
 
-    # Aligned mode: recover cross-chunk edges from exact coincident
-    # boundary vertices (igneous duplicates the boundary vertex across
-    # adjacent .frags for the same object).
-    if align:
-        # Precomputed skeleton vertices are at voxel centers, so a
-        # duplicated boundary vertex sits exactly 0.5 voxel past the chunk
-        # face (measured: x/y +16 nm, z +20 nm, with zero spread).  Detect
-        # boundary vertices with the exact modular test using that offset.
-        boundary_offset = 0.5 * np.asarray(info.resolution_nm, dtype=np.float64)
-        cc_edges_extra, gid = _detect_coincident_cross_edges(
-            pieces_by_cc, chunk_shape_nm=chunk_shape_nm,
-            boundary_offset_nm=boundary_offset, gid_start=gid,
-        )
-        cross_edges += cc_edges_extra
+        _t2 = _time.perf_counter()
+        oid_of = build_object_index(lg, records, ndim=ndim)
+        sk.finalize_skeleton_store(root)
+        _phase["l0_object_index"] = _time.perf_counter() - _t2
 
-    records: list[tuple[int, ChunkCoords, int]] = []
-    gid_loc: dict[int, tuple[ChunkCoords, int]] = {}
-    for cc, pieces in sorted(pieces_by_cc.items()):
-        recs, alocs = sk.write_skeleton_chunk(
-            lg, cc, pieces, attr_dtypes=np_attr_dtypes,
-        )
-        records += recs
-        gid_loc.update(alocs)
+        summary: dict[str, Any] = {
+            "frag_chunks_read": n_chunks,
+            "source_segment_pieces": n_segments,
+            "objects": len(oid_of),
+            "level0_fragments": len(records),
+            "level0_cross_chunk_edges": len(cc_links),
+        }
 
-    # Resolve cross-chunk edges to final chunk-local endpoints and store.
-    cc_links = []
-    for ga, gb in cross_edges:
-        la = gid_loc.get(ga)
-        lb = gid_loc.get(gb)
-        if la is None or lb is None or tuple(la[0]) == tuple(lb[0]):
-            continue
-        cc_links.append((la, lb))
-    sk.write_skeleton_cross_chunk_links(lg, cc_links, ndim=ndim)
+        if strides:
+            _t3 = _time.perf_counter()
+            summary["pyramid"] = build_skeleton_pyramid(
+                str(out_store),
+                strides=list(strides),
+                chunk_scale_factors=list(chunk_scale_factors) if chunk_scale_factors else None,
+                sparsity_factors=list(sparsity_factors) if sparsity_factors else None,
+                sparsity_strategy=sparsity_strategy,
+                executor=ex,
+            )
+            _phase["pyramid"] = _time.perf_counter() - _t3
 
-    oid_of = sk.build_object_index(lg, records, ndim=ndim)
-    sk.finalize_skeleton_store(root)
-
-    summary: dict[str, Any] = {
-        "frag_chunks_read": n_chunks,
-        "source_segment_pieces": n_segments,
-        "objects": len(oid_of),
-        "level0_fragments": len(records),
-        "level0_cross_chunk_edges": len(cc_links),
-    }
-
-    if strides:
-        summary["pyramid"] = build_skeleton_pyramid(
-            str(out_store),
-            strides=list(strides),
-            chunk_scale_factors=list(chunk_scale_factors) if chunk_scale_factors else None,
-            sparsity_factors=list(sparsity_factors) if sparsity_factors else None,
-            sparsity_strategy=sparsity_strategy,
-        )
-    return summary
+        if _timing:
+            print(f"  [timing] total={_time.perf_counter() - _t0:.1f}s "
+                  f"workers={workers or 'serial'}", flush=True)
+            for k, v in _phase.items():
+                print(f"    {k:18s} {v:7.1f}s", flush=True)
+            for i, lv in enumerate(summary.get("pyramid", {}).get("levels", [])):
+                t = lv.get("timings", {})
+                print(f"    L{i}->L{i+1} setup={t.get('setup', 0):6.1f}s "
+                      f"map={t.get('map', 0):6.1f}s fin={t.get('finalize', 0):6.1f}s "
+                      f"chunks={t.get('n_target_chunks', 0)}", flush=True)
+        return summary
+    finally:
+        if _dask_cm is not None:
+            _dask_cm.__exit__(None, None, None)
 
 
 # ===================================================================
@@ -592,6 +757,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--no-align", action="store_true",
                    help="keep absolute coords on the origin-0 grid instead "
                    "of aligning the chunk grid to the .frag grid")
+    p.add_argument("--workers", type=int, default=0,
+                   help="scale the ingest across N worker processes via a Dask "
+                   "local cluster (requires the 'parallel' extra); 0 = serial")
     args = p.parse_args(argv)
 
     reader = PrecomputedFragsReader(args.source, frags_dir=args.frags_dir)
@@ -619,6 +787,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sparsity_factors=_floats(args.sparsity) or None,
         sparsity_strategy=args.sparsity_strategy,
         align=not args.no_align,
+        workers=args.workers or None,
     )
     import json
     print(json.dumps({k: v for k, v in summary.items() if k != "pyramid"}, indent=2))

@@ -120,12 +120,17 @@ def ingest(cache_path: str, out_dir: str, manifest_path: str) -> None:
         [ANCHOR[a] * res[a] for a in range(3)],
         [(ANCHOR[a] + COUNTS[a] * 512) * res[a] for a in range(3)],
     )
+    workers = int(os.environ.get("WORKERS", "0")) or None
     shutil.rmtree(out_dir, ignore_errors=True)
+    import time as _time
+    _t0 = _time.perf_counter()
     summary = api["run_ingest"](
         reader, out_dir, keys, bounds_nm=bounds,
         strides=STRIDES, chunk_scale_factors=CSF, sparsity_factors=SPF,
-        progress=False,
+        progress=False, workers=workers,
     )
+    print(f"  ingest wall ({'workers=' + str(workers) if workers else 'serial'}): "
+          f"{_time.perf_counter() - _t0:.1f}s")
     # Drop the non-deterministic 'pyramid' nested timing if present; keep counts.
     levels = summary.get("pyramid", {}).get("levels", [])
     manifest = {
@@ -160,14 +165,15 @@ def run(out_dir: str) -> None:
         [(ANCHOR[a] + COUNTS[a] * info.chunk_size_voxels[a]) * res[a] for a in range(3)],
     )
     print(f"ingest via {api['src']}: {URL}")
+    workers = int(os.environ.get("WORKERS", "0")) or None
     print(f"  anchor={ANCHOR} counts={COUNTS} -> {len(keys)} .frag keys")
-    print(f"  strides={STRIDES} csf={CSF} spf={SPF}")
+    print(f"  strides={STRIDES} csf={CSF} spf={SPF}  workers={workers or 'serial'}")
     print(f"  bounds_nm={bounds}  -> {out_dir}")
     shutil.rmtree(out_dir, ignore_errors=True)
     summary = api["run_ingest"](
         reader, out_dir, keys, bounds_nm=bounds,
         strides=STRIDES, chunk_scale_factors=CSF, sparsity_factors=SPF,
-        progress=True,
+        progress=True, workers=workers,
     )
     print("summary:", {k: v for k, v in summary.items() if k != "pyramid"})
     for lv in summary.get("pyramid", {}).get("levels", []):
