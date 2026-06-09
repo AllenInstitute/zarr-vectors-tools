@@ -245,6 +245,38 @@ def _build_random_skeleton_store(d, n_seg=30, seed=0):
     return n_seg
 
 
+def test_drop_interior_below_reduces_fragments_and_keeps_metrics_consistent(tmp_path):
+    """LOD interior-drop: dropping small fully-interior objects must reduce
+    coarse-level fragment counts, never report object_count > fragment_count,
+    keep object_count monotonically non-increasing, and leave a valid store."""
+    base = str(tmp_path / "nodrop.zv")
+    drop = str(tmp_path / "drop.zv")
+    _build_random_skeleton_store(base, n_seg=60, seed=5)
+    _build_random_skeleton_store(drop, n_seg=60, seed=5)
+    args = dict(strides=[8, 8], chunk_scale_factors=[2, 2], sparsity_factors=[1.0, 1.0])
+
+    s_base = build_skeleton_pyramid(base, **args)["levels"]
+    # boundary_offset=0 → chunk faces fall on multiples of the (target) chunk shape.
+    s_drop = build_skeleton_pyramid(
+        drop, drop_interior_below=3, boundary_offset_nm=[0.0, 0.0, 0.0], **args,
+    )["levels"]
+
+    for lv in s_drop:
+        # An object is only "present" if it has geometry → never more objects
+        # than fragments (the bug where empty inherited slots were counted).
+        assert lv["object_count"] <= lv["fragment_count"], lv
+    # object_count is non-increasing as we coarsen (drops only remove objects).
+    counts = [lv["object_count"] for lv in s_drop]
+    assert counts == sorted(counts, reverse=True), counts
+    # Dropping cuts coarse-level fragments vs the no-drop baseline.
+    assert s_drop[0]["fragment_count"] < s_base[0]["fragment_count"]
+    # Multi-chunk skeletons (touch a face) survive — the store isn't emptied.
+    assert s_drop[-1]["fragment_count"] > 0
+    # Store remains structurally valid.
+    from zarr_vectors.validate import validate_multiresolution
+    assert validate_multiresolution(drop).ok
+
+
 def _level_stats(d, lvl):
     g = get_resolution_level(open_store(d), lvl)
     mans = read_all_object_manifests(g)
