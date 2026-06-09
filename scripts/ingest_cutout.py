@@ -166,6 +166,7 @@ def run(out_dir: str) -> None:
     )
     print(f"ingest via {api['src']}: {URL}")
     workers = int(os.environ.get("WORKERS", "0")) or None
+    drop_below = int(os.environ.get("DROP_BELOW", "0"))
     print(f"  anchor={ANCHOR} counts={COUNTS} -> {len(keys)} .frag keys")
     print(f"  strides={STRIDES} csf={CSF} spf={SPF}  workers={workers or 'serial'}")
     print(f"  bounds_nm={bounds}  -> {out_dir}")
@@ -173,6 +174,7 @@ def run(out_dir: str) -> None:
     summary = api["run_ingest"](
         reader, out_dir, keys, bounds_nm=bounds,
         strides=STRIDES, chunk_scale_factors=CSF, sparsity_factors=SPF,
+        drop_interior_below=drop_below,
         progress=True, workers=workers,
     )
     print("summary:", {k: v for k, v in summary.items() if k != "pyramid"})

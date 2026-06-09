@@ -32,7 +32,8 @@ def split_components(
     Each connected component becomes one piece, re-indexed to a compact
     ``0..k-1`` local range and oriented as ``[child, parent]`` edges
     (BFS from the component's lowest-index node as root; the root has no
-    edge row).
+    edge row).  Components are returned in ascending order of their
+    lowest-index member.
 
     Args:
         positions: ``(N, D)`` vertex positions.
@@ -46,6 +47,13 @@ def split_components(
     Returns:
         List of ``{"positions", "edges", "attributes"[, "vertex_ids"]}``
         dicts, one per connected component.
+
+    Note: a pure-Python adjacency-list BFS is *intentional* here.  Each call
+    operates on one object's (small) merged skeleton, and this runs ~1M times
+    per coarsen level; a per-call ``scipy.sparse.csgraph`` formulation is
+    dominated by its constant setup cost on tiny graphs and benchmarks ~1.75×
+    slower end-to-end.  Vectorization for this layer must instead **batch** a
+    whole chunk's components into one graph (see the batched coarsener).
     """
     positions = np.asarray(positions)
     n = len(positions)
@@ -67,7 +75,6 @@ def split_components(
     for seed in range(n):
         if visited[seed]:
             continue
-        # BFS over the component, recording parent (child→parent edges).
         order: list[int] = []
         parent_of: dict[int, int] = {seed: -1}
         dq = deque([seed])

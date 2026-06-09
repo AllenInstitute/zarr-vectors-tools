@@ -515,6 +515,7 @@ def run_ingest(
     chunk_scale_factors: Sequence[int | tuple[int, ...]] | None = None,
     sparsity_factors: Sequence[float] | None = None,
     sparsity_strategy: str = "length",
+    drop_interior_below: int = 0,
     backend: str | None = None,
     align: bool = True,
     progress: bool = True,
@@ -698,6 +699,12 @@ def run_ingest(
                 chunk_scale_factors=list(chunk_scale_factors) if chunk_scale_factors else None,
                 sparsity_factors=list(sparsity_factors) if sparsity_factors else None,
                 sparsity_strategy=sparsity_strategy,
+                drop_interior_below=int(drop_interior_below or 0),
+                # 0.5·resolution = the half-voxel face offset the boundary /
+                # interior test uses (matches the L0 coincident-vertex check).
+                boundary_offset_nm=(
+                    0.5 * np.asarray(info.resolution_nm, dtype=np.float64)
+                ).tolist(),
                 executor=ex,
             )
             _phase["pyramid"] = _time.perf_counter() - _t3
@@ -760,6 +767,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--workers", type=int, default=0,
                    help="scale the ingest across N worker processes via a Dask "
                    "local cluster (requires the 'parallel' extra); 0 = serial")
+    p.add_argument("--drop-interior-below", type=int, default=0,
+                   help="LOD: at each coarse level drop objects whose entire "
+                   "decimated skeleton is <= N vertices AND fully chunk-interior "
+                   "(no boundary-touching vertex, so they can't extend into a "
+                   "neighbour chunk); 0 = keep all")
     args = p.parse_args(argv)
 
     reader = PrecomputedFragsReader(args.source, frags_dir=args.frags_dir)
@@ -786,6 +798,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         chunk_scale_factors=_ints(args.chunk_scales),
         sparsity_factors=_floats(args.sparsity) or None,
         sparsity_strategy=args.sparsity_strategy,
+        drop_interior_below=args.drop_interior_below,
         align=not args.no_align,
         workers=args.workers or None,
     )
