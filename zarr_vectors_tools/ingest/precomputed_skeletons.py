@@ -41,7 +41,13 @@ from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
+    coarsen_skeleton_level,
 )
+
+
+# Per-worker cache for lazily constructed external readers used by dask tasks.
+# Keyed by (base_url, frags_dir).
+_WORKER_READER_CACHE: dict[tuple[str, str], Any] = {}
 
 
 # ===================================================================
@@ -415,7 +421,22 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
     from zarr_vectors.core.store import get_resolution_level, open_store
     from zarr_vectors.types import skeletons as sk
 
-    reader = (shared or {})["reader"]
+    sh = shared or {}
+    if "reader" in sh:
+        # Backward-compatible path (tests/in-memory readers).
+        reader = sh["reader"]
+    else:
+        spec = sh.get("reader_spec")
+        if not isinstance(spec, dict):
+            raise RuntimeError("_l0_extract_write expected shared['reader'] or shared['reader_spec']")
+        base_url = str(spec["base_url"])
+        frags_dir = str(spec.get("frags_dir", ""))
+        cache_key = (base_url, frags_dir)
+        reader = _WORKER_READER_CACHE.get(cache_key)
+        if reader is None:
+            reader = PrecomputedFragsReader(base_url, frags_dir=frags_dir)
+            _WORKER_READER_CACHE[cache_key] = reader
+
     key = payload["key"]
     chunk = reader.read_chunk(key)
     if not chunk:
@@ -625,9 +646,23 @@ def run_ingest(
                     "fixed_cell": list(fixed_cell),
                     "boundary_offset_nm": boundary_offset,
                 })
-            # The reader is shared (scattered once), not re-pickled per .frag.
+            # Send only a lightweight reader spec to workers.  The worker task
+            # lazily builds and caches the concrete reader per process,
+            # avoiding huge graph/scatter payloads from heavy reader objects.
+            reader_shared: dict[str, Any]
+            if isinstance(reader, PrecomputedFragsReader):
+                reader_shared = {
+                    "reader_spec": {
+                        "base_url": reader.base_url,
+                        "frags_dir": reader.info.frags_dir,
+                    }
+                }
+            else:
+                # In-memory/offline readers are already lightweight.
+                reader_shared = {"reader": reader}
+
             boundary: list = []
-            for r in ex(_l0_extract_write, payloads, {"reader": reader}):
+            for r in ex(_l0_extract_write, payloads, reader_shared):
                 records.extend(r["records"])
                 boundary.extend(r["boundary"])
                 n_chunks += r["read"]
@@ -693,20 +728,103 @@ def run_ingest(
 
         if strides:
             _t3 = _time.perf_counter()
-            summary["pyramid"] = build_skeleton_pyramid(
-                str(out_store),
-                strides=list(strides),
-                chunk_scale_factors=list(chunk_scale_factors) if chunk_scale_factors else None,
-                sparsity_factors=list(sparsity_factors) if sparsity_factors else None,
-                sparsity_strategy=sparsity_strategy,
-                drop_interior_below=int(drop_interior_below or 0),
-                # 0.5·resolution = the half-voxel face offset the boundary /
-                # interior test uses (matches the L0 coincident-vertex check).
-                boundary_offset_nm=(
+            # Adaptive per-level scheduling: use at most one worker per target
+            # chunk (and no Dask when a level has only one target chunk).
+            if executor is None and workers:
+                from zarr_vectors.constants import VERTICES
+                from zarr_vectors.core.arrays import list_chunk_keys
+                from zarr_vectors.core.store import get_resolution_level, open_store
+                from zarr_vectors_tools.ingest._parallel import dask_executor
+
+                if _dask_cm is not None:
+                    _dask_cm.__exit__(None, None, None)
+                    _dask_cm = None
+
+                stride_list = list(strides)
+                n_levels = len(stride_list)
+                csf_list = (
+                    list(chunk_scale_factors)
+                    if chunk_scale_factors is not None
+                    else [2] * n_levels
+                )
+                spf_list = (
+                    list(sparsity_factors)
+                    if sparsity_factors is not None
+                    else [1.0] * n_levels
+                )
+
+                levels: list[dict[str, Any]] = []
+                boundary_offset_nm = (
                     0.5 * np.asarray(info.resolution_nm, dtype=np.float64)
-                ).tolist(),
-                executor=ex,
-            )
+                ).tolist()
+                max_workers = int(workers)
+                root_for_counts = open_store(str(out_store), mode="r")
+
+                for i in range(n_levels):
+                    csf = csf_list[i]
+                    spf = float(spf_list[i])
+                    if isinstance(csf, (tuple, list)):
+                        scale = tuple(int(s) for s in csf)
+                    else:
+                        scale = tuple(int(csf) for _ in range(ndim))
+
+                    src_level_group = get_resolution_level(root_for_counts, i)
+                    src_chunks = list_chunk_keys(src_level_group, VERTICES)
+                    target_chunks = {
+                        tuple(int(cc[a] // scale[a]) for a in range(ndim))
+                        for cc in src_chunks
+                    }
+                    target_chunk_count = max(1, len(target_chunks))
+                    level_workers = min(max_workers, target_chunk_count)
+
+                    if progress:
+                        print(
+                            f"  [pyramid] L{i}->L{i+1}: target_chunks={target_chunk_count} "
+                            f"workers={level_workers}",
+                            flush=True,
+                        )
+
+                    if level_workers <= 1:
+                        lv = coarsen_skeleton_level(
+                            str(out_store), source_level=i, target_level=i + 1,
+                            stride=int(stride_list[i]),
+                            sparsity_factor=spf,
+                            chunk_scale_factor=csf,
+                            sparsity_strategy=sparsity_strategy,
+                            drop_interior_below=int(drop_interior_below or 0),
+                            boundary_offset_nm=boundary_offset_nm,
+                            executor=None,
+                        )
+                    else:
+                        with dask_executor(level_workers) as level_ex:
+                            lv = coarsen_skeleton_level(
+                                str(out_store), source_level=i, target_level=i + 1,
+                                stride=int(stride_list[i]),
+                                sparsity_factor=spf,
+                                chunk_scale_factor=csf,
+                                sparsity_strategy=sparsity_strategy,
+                                drop_interior_below=int(drop_interior_below or 0),
+                                boundary_offset_nm=boundary_offset_nm,
+                                executor=level_ex,
+                            )
+                    levels.append(lv)
+
+                summary["pyramid"] = {"levels": levels, "num_levels": n_levels + 1}
+            else:
+                summary["pyramid"] = build_skeleton_pyramid(
+                    str(out_store),
+                    strides=list(strides),
+                    chunk_scale_factors=list(chunk_scale_factors) if chunk_scale_factors else None,
+                    sparsity_factors=list(sparsity_factors) if sparsity_factors else None,
+                    sparsity_strategy=sparsity_strategy,
+                    drop_interior_below=int(drop_interior_below or 0),
+                    # 0.5·resolution = the half-voxel face offset the boundary /
+                    # interior test uses (matches the L0 coincident-vertex check).
+                    boundary_offset_nm=(
+                        0.5 * np.asarray(info.resolution_nm, dtype=np.float64)
+                    ).tolist(),
+                    executor=ex,
+                )
             _phase["pyramid"] = _time.perf_counter() - _t3
 
         if _timing:
@@ -716,9 +834,15 @@ def run_ingest(
                 print(f"    {k:18s} {v:7.1f}s", flush=True)
             for i, lv in enumerate(summary.get("pyramid", {}).get("levels", [])):
                 t = lv.get("timings", {})
+                map_t = t.get("map_phase_a", t.get("map", 0.0))
+                red_t = t.get("reduce_phase_c", 0.0)
+                attrs_t = t.get("object_attrs", 0.0)
+                cross_t = t.get("cross_links_phase_b", 0.0)
                 print(f"    L{i}->L{i+1} setup={t.get('setup', 0):6.1f}s "
-                      f"map={t.get('map', 0):6.1f}s fin={t.get('finalize', 0):6.1f}s "
-                      f"chunks={t.get('n_target_chunks', 0)}", flush=True)
+                    f"mapA={map_t:6.1f}s reduceC={red_t:6.1f}s "
+                    f"attrs={attrs_t:6.1f}s crossB={cross_t:6.1f}s "
+                    f"fin={t.get('finalize', 0):6.1f}s "
+                    f"chunks={t.get('n_target_chunks', 0)}", flush=True)
         return summary
     finally:
         if _dask_cm is not None:

@@ -17,7 +17,9 @@ from collections import defaultdict
 import numpy as np
 
 from zarr_vectors.core.arrays import (
+    create_fragment_attribute_array,
     create_object_attributes_array,
+    write_chunk_fragment_attributes,
     write_object_attributes,
     write_object_index,
 )
@@ -60,6 +62,24 @@ def build_object_index(
         level_group, dict(manifests), sid_ndim=ndim,
         total_objects=len(seg_ids),
     )
+
+    # Materialize per-fragment OID in each chunk. This is required by the
+    # skeleton coarsener and avoids global segment_id->OID lookups at runtime.
+    create_fragment_attribute_array(level_group, "object_id", dtype="uint64")
+    by_chunk: dict[ChunkCoords, list[tuple[int, int]]] = defaultdict(list)
+    for seg, cc, fidx in records:
+        by_chunk[tuple(int(c) for c in cc)].append((int(fidx), oid_of_seg[int(seg)]))
+    for cc, pairs in by_chunk.items():
+        if not pairs:
+            continue
+        max_fidx = max(fidx for fidx, _ in pairs)
+        oid_arr = np.full(max_fidx + 1, np.uint64(0), dtype=np.uint64)
+        for fidx, oid in pairs:
+            oid_arr[int(fidx)] = np.uint64(oid)
+        write_chunk_fragment_attributes(
+            level_group, "object_id", cc, oid_arr, dtype=np.uint64
+        )
+
     seg_arr = np.asarray(seg_ids, dtype=np.uint64)
     create_object_attributes_array(level_group, SEGMENT_ID_ATTR, dtype="uint64")
     write_object_attributes(level_group, SEGMENT_ID_ATTR, seg_arr)

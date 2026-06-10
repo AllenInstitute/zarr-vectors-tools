@@ -33,6 +33,8 @@ ingest convention is "ignore cross-chunk edges if missing").
 from __future__ import annotations
 
 import pickle
+import shutil
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Sequence
@@ -404,8 +406,7 @@ def _build_local_plan(
     ndim: int,
     attr_names: list[str],
     attr_dtypes: dict[str, np.dtype],
-    seg_array: npt.NDArray,
-    keep_set: set | None,
+    keep_mask: npt.NDArray[np.uint8] | None,
     boundary_off: npt.NDArray,
     target_cs: npt.NDArray,
     source_cs: npt.NDArray,
@@ -417,10 +418,10 @@ def _build_local_plan(
     here is local to the target chunk:
 
     - read the source children ``scc ∈ [tcc·scale, (tcc+1)·scale)``: per-fragment
-      vertices/attributes, the per-fragment ``segment_id`` (object grouping), the
+            vertices/attributes, per-fragment ``segment_id`` + ``object_id`` (grouping), the
       branch links, and the fragment ranges (chunk-local → fragment),
-    - group fragments by ``segment_id`` → objects (``oid = searchsorted(seg_array,
-      segment_id)``; skip non-kept under sparsity),
+        - group fragments by per-fragment ``object_id`` (skip non-kept via
+            ``keep_mask[oid]`` under sparsity),
     - per object, compute merge edges in merged-index space from (a) branch links
       (remapped) and (b) **coincident boundary vertices on faces *interior* to the
       target chunk** (source-face AND NOT target-face) — the same connectivity the
@@ -452,6 +453,7 @@ def _build_local_plan(
     vcache: dict = {}
     acache: dict = {name: {} for name in attr_names}
     fragseg: dict = {}
+    fragoid: dict = {}
     fraglinks: dict = {}
     child_ranges: dict = {}  # scc -> (starts, ends, fidxs) for chunk-local→fragment
     for scc in child_ccs:
@@ -461,38 +463,53 @@ def _build_local_plan(
             continue
         if not vgroups:
             continue
-        for fidx, vg in enumerate(vgroups):
-            vcache[(scc, fidx)] = vg
-        for name in attr_names:
-            try:
-                ag = read_chunk_attributes(src, name, scc, dtype=attr_dtypes[name])
-            except ArrayError:
-                ag = None
-            if ag is not None:
-                for fidx in range(len(ag)):
-                    acache[name][(scc, fidx)] = ag[fidx]
         try:
             segs = read_chunk_fragment_attributes(src, "segment_id", scc, dtype=np.uint64)
         except ArrayError:
             segs = None
         try:
+            oids = read_chunk_fragment_attributes(src, "object_id", scc, dtype=np.uint64)
+        except ArrayError:
+            oids = None
+        try:
             lgroups = read_chunk_links(src, scc, link_width=2, delta=0)
         except ArrayError:
             lgroups = None
+
+        keep_fidx: set[int] = set()
         starts = []
         st = 0
         for fidx in range(len(vgroups)):
             cnt = len(vgroups[fidx])
             starts.append((st, st + cnt, fidx))
             st += cnt
-            fragseg[(scc, fidx)] = (
-                int(segs[fidx]) if segs is not None and fidx < len(segs) else -1
-            )
+            seg = int(segs[fidx]) if segs is not None and fidx < len(segs) else -1
+            oid = int(oids[fidx]) if oids is not None and fidx < len(oids) else -1
+            if seg < 0 or oid < 0:
+                continue
+            if keep_mask is not None:
+                if oid < 0 or oid >= len(keep_mask) or int(keep_mask[oid]) == 0:
+                    continue
+            keep_fidx.add(fidx)
+            vcache[(scc, fidx)] = vgroups[fidx]
+            fragseg[(scc, fidx)] = seg
+            fragoid[(scc, fidx)] = oid
             fraglinks[(scc, fidx)] = (
                 lgroups[fidx]
                 if lgroups is not None and fidx < len(lgroups)
                 else np.zeros((0, 2), np.int64)
             )
+
+        if keep_fidx:
+            for name in attr_names:
+                try:
+                    ag = read_chunk_attributes(src, name, scc, dtype=attr_dtypes[name])
+                except ArrayError:
+                    ag = None
+                if ag is not None:
+                    for fidx in keep_fidx:
+                        if fidx < len(ag):
+                            acache[name][(scc, fidx)] = ag[fidx]
         child_ranges[scc] = (
             np.asarray([r[0] for r in starts], np.int64),
             np.asarray([r[1] for r in starts], np.int64),
@@ -503,15 +520,8 @@ def _build_local_plan(
     members_by_oid: dict[int, list] = defaultdict(list)
     seg_by_oid: dict[int, int] = {}
     for (scc, fidx), seg in fragseg.items():
-        if seg < 0:
-            continue
-        # NB: search with a uint64 scalar — a Python-int query upcasts the
-        # comparison to float64, which at flywire-scale ids (~7e17, > 2^52)
-        # collapses distinct segment_ids into the same bucket.
-        oid = int(np.searchsorted(seg_array, np.uint64(seg)))
-        if oid >= len(seg_array) or int(seg_array[oid]) != seg:
-            continue  # segment_id not in this level's object space
-        if keep_set is not None and oid not in keep_set:
+        oid = int(fragoid.get((scc, fidx), -1))
+        if oid < 0:
             continue
         members_by_oid[oid].append((scc, fidx))
         seg_by_oid[oid] = seg
@@ -685,8 +695,7 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     attr_agg = shared["attr_agg"]
     tcc = tuple(int(x) for x in payload["tcc"])
     scale = tuple(int(s) for s in shared["scale"])
-    seg_array = np.asarray(shared["seg_array"], dtype=np.uint64)
-    keep_set = shared.get("keep_set")  # None ⇒ keep all
+    keep_mask = shared.get("keep_mask")  # None ⇒ keep all
     boundary_off = np.asarray(shared["boundary_offset"], dtype=np.float64)
     target_cs = np.asarray(shared["target_cs"], dtype=np.float64)
     source_cs = np.asarray(shared["source_cs"], dtype=np.float64)
@@ -700,9 +709,12 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     # central state). ``forced`` here = vertices on the target chunk's OUTER faces.
     groups, vcache, acache = _build_local_plan(
         src, tcc, scale=scale, ndim=ndim, attr_names=attr_names,
-        attr_dtypes=attr_dtypes, seg_array=seg_array, keep_set=keep_set,
+        attr_dtypes=attr_dtypes, keep_mask=keep_mask,
         boundary_off=boundary_off, target_cs=target_cs, source_cs=source_cs,
     )
+    input_fragments = int(len(vcache))
+    input_vertices = int(sum(len(v) for v in vcache.values()))
+    input_objects = int(len(groups))
 
     pieces: list = []
     total_out_vertices = 0
@@ -811,10 +823,24 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     recs, alocs = write_skeleton_chunk(
         level_group, tcc, pieces, attr_dtypes=attr_dtypes,
     )
-    # Records (object_index) + outer-face sidecar (cross-target stitching), all
-    # NumPy for fast Dask gather; every record lives in THIS chunk (coord = tcc).
-    rec_oid = np.fromiter((int(r[0]) for r in recs), np.int64, len(recs))
-    rec_fidx = np.fromiter((int(r[2]) for r in recs), np.int64, len(recs))
+    # Spill object-index refs partitioned by OID shard to avoid a central
+    # gather of whole-level ``{oid: manifest}`` structures.
+    oid_shards = int(shared.get("oid_reduce_shards", 1) or 1)
+    oid_tmp_dir = str(shared.get("oid_reduce_tmp_dir", ""))
+    sidecar_tmp_dir = str(shared.get("sidecar_tmp_dir", ""))
+    shard_rows: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for r in recs:
+        oid = int(r[0])
+        fidx = int(r[2])
+        shard_rows[oid % oid_shards].append((oid, fidx))
+    shard_files: list[tuple[int, str]] = []
+    if oid_tmp_dir and shard_rows:
+        tcc_tag = ".".join(str(int(x)) for x in tcc)
+        for shard, rows in shard_rows.items():
+            arr = np.asarray(rows, dtype=np.int64).reshape(-1, 2)
+            path = Path(oid_tmp_dir) / f"{tcc_tag}.s{int(shard)}.npy"
+            np.save(path, arr, allow_pickle=False)
+            shard_files.append((int(shard), str(path)))
     sc_rows = []
     for tag, (seg, coord) in anchor_meta.items():
         loc = alocs.get(tag)
@@ -822,11 +848,20 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
             sc_rows.append((seg, *coord, int(loc[1])))  # [segment_id, *coord, vi]
     sidecar = (np.asarray(sc_rows, dtype=np.int64) if sc_rows
                else np.zeros((0, 2 + ndim), dtype=np.int64))
+    sidecar_path = None
+    if sidecar_tmp_dir and len(sidecar):
+        tcc_tag = ".".join(str(int(x)) for x in tcc)
+        p = Path(sidecar_tmp_dir) / f"{tcc_tag}.anchors.npy"
+        np.save(p, sidecar, allow_pickle=False)
+        sidecar_path = str(p)
     return {
         "tcc": tcc,
-        "rec_oid": rec_oid,
-        "rec_fidx": rec_fidx,
-        "sidecar": sidecar,
+        "input_fragments": input_fragments,
+        "input_vertices": input_vertices,
+        "input_objects": input_objects,
+        "fragment_count": int(len(recs)),
+        "oid_shards": shard_files,
+        "sidecar_path": sidecar_path,
         "vertex_count": int(total_out_vertices),
         "dropped_oids": np.asarray(dropped_oids, dtype=np.int64),
     }
@@ -849,27 +884,57 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
     ndim = shared["ndim"]
     cgs = tuple(int(x) for x in shared["chunk_grid_shape"])
     corigin = tuple(int(x) for x in shared["chunk_origin"])
-    sidecars = pickle.loads(payload["sidecars"])  # {tcc: ndarray (n, 2+ndim)}
+    sidecar_paths = {
+        tuple(int(x) for x in e["tcc"]): str(e["path"])
+        for e in payload.get("sidecar_paths", [])
+    }
     pairs = payload["pairs"]
+    sidecar_cache: dict[str, npt.NDArray[np.int64]] = {}
+    keymap_cache: dict[tuple[int, ...], dict[tuple[int, tuple[int, ...]], int]] = {}
+
+    def _read_sidecar(cc: tuple[int, ...]) -> npt.NDArray[np.int64] | None:
+        path = sidecar_paths.get(cc)
+        if path is None:
+            return None
+        arr = sidecar_cache.get(path)
+        if arr is None:
+            arr = np.asarray(np.load(path, allow_pickle=False), dtype=np.int64)
+            sidecar_cache[path] = arr
+        return arr
+
+    def _chunk_keymap(cc: tuple[int, ...]) -> dict[tuple[int, tuple[int, ...]], int]:
+        km = keymap_cache.get(cc)
+        if km is not None:
+            return km
+        arr = _read_sidecar(cc)
+        km = {}
+        if arr is not None and len(arr):
+            for row in arr:
+                key = (int(row[0]), tuple(int(x) for x in row[1:1 + ndim]))
+                if key not in km:
+                    km[key] = int(row[1 + ndim])
+        keymap_cache[cc] = km
+        return km
 
     links: list = []
     for A_, B_ in pairs:
         A = tuple(int(x) for x in A_)
         B = tuple(int(x) for x in B_)
-        sa = sidecars.get(A)
-        sb = sidecars.get(B)
-        if sa is None or sb is None or len(sa) == 0 or len(sb) == 0:
+        amap = _chunk_keymap(A)
+        bmap = _chunk_keymap(B)
+        if not amap or not bmap:
             continue
-        amap: dict = {}
-        for row in sa:  # (segment_id, *coord, vertex_index)
-            key = (int(row[0]), tuple(int(x) for x in row[1:1 + ndim]))
-            if key not in amap:
-                amap[key] = int(row[1 + ndim])  # first rep on this face
-        for row in sb:
-            key = (int(row[0]), tuple(int(x) for x in row[1:1 + ndim]))
-            viA = amap.get(key)
-            if viA is not None:
-                links.append([(A, viA), (B, int(row[1 + ndim]))])
+        # Intersect keymaps directly (seg_id + coord), iterating the smaller map.
+        if len(amap) <= len(bmap):
+            for k, viA in amap.items():
+                viB = bmap.get(k)
+                if viB is not None:
+                    links.append([(A, int(viA)), (B, int(viB))])
+        else:
+            for k, viB in bmap.items():
+                viA = amap.get(k)
+                if viA is not None:
+                    links.append([(A, int(viA)), (B, int(viB))])
     if links:
         root = open_store(shared["store_path"], mode="r+")
         level_group = get_resolution_level(root, shared["target_level"])
@@ -878,6 +943,46 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
             chunk_grid_shape=cgs, chunk_origin=corigin, delta=0, link_width=2,
         )
     return {"n_links": len(links)}
+
+
+def _reduce_object_index_shard(payload: dict, shared: dict | None = None) -> dict:
+    """Reduce one OID shard's chunk spills into encoded manifest blobs.
+
+    Phase A workers spill per-chunk ``(oid, fidx)`` rows partitioned by
+    ``oid % num_shards``. This worker ingests one shard's spills, groups rows by
+    OID, and returns encoded v0.6 manifest blobs for just those OIDs.
+    """
+    from zarr_vectors.encoding.fragments import encode_object_manifest_blocks
+
+    shared = shared or {}
+    sid_ndim = int(shared["sid_ndim"])
+
+    manifests: dict[int, list[tuple[tuple[int, ...], int]]] = defaultdict(list)
+    for e in payload.get("entries", []):
+        tcc = tuple(int(x) for x in e["tcc"])
+        path = str(e["path"])
+        arr = np.load(path, allow_pickle=False)
+        if arr.size == 0:
+            continue
+        rows = np.asarray(arr, dtype=np.int64).reshape(-1, 2)
+        for oid, fidx in rows.tolist():
+            manifests[int(oid)].append((tcc, int(fidx)))
+
+    oids = np.asarray(sorted(manifests), dtype=np.int64)
+    blobs: list[bytes] = []
+    for oid in oids.tolist():
+        blocks = [
+            (tuple(int(c) for c in chunk_coords), int(fragment_index))
+            for chunk_coords, fragment_index in sorted(
+                manifests[int(oid)], key=lambda x: (tuple(x[0]), int(x[1]))
+            )
+        ]
+        blobs.append(encode_object_manifest_blocks(blocks, sid_ndim=sid_ndim))
+
+    return {
+        "oid": oids,
+        "blobs": pickle.dumps(blobs, protocol=pickle.HIGHEST_PROTOCOL),
+    }
 
 
 def coarsen_skeleton_level(
@@ -927,6 +1032,9 @@ def coarsen_skeleton_level(
     # Imports are local to avoid a module-load cycle
     # (coarsen.py imports this module).
     from zarr_vectors.core.arrays import (
+        OBJECT_INDEX,
+        OBJECT_INDEX_LAYOUT_V1,
+        _write_object_index_manifests,
         CROSS_CHUNK_LINK_SHARD_AXIS,
         create_attribute_array,
         create_cross_chunk_link_kN_arrays,
@@ -935,11 +1043,11 @@ def coarsen_skeleton_level(
         create_object_attributes_array,
         create_object_index_array,
         create_vertices_array,
+        read_chunk_fragment_attributes,
         list_chunk_keys,
         read_all_object_manifests,
         read_object_attributes,
         write_object_attributes,
-        write_object_index,
     )
     from zarr_vectors.core.metadata import (
         LevelMetadata,
@@ -967,6 +1075,14 @@ def coarsen_skeleton_level(
     import time as _time
     _t0 = _time.perf_counter()
     _timings: dict[str, float] = {}
+
+    def _progress(msg: str) -> None:
+        print(
+            f"[coarsen L{int(source_level)}->L{int(target_level)}] {msg}",
+            flush=True,
+        )
+
+    _progress("start")
 
     root = open_store(str(store_path), mode="r+")
     root_meta = read_root_metadata(root)
@@ -1004,10 +1120,8 @@ def coarsen_skeleton_level(
                 continue
 
     # --- object space (O(objects), not O(fragments)) --------------------
-    # The dense OID ⇄ segment_id map is the sorted segment-id array written at
-    # L0 (oid == searchsorted(seg_array, segment_id)).  Reading it is O(objects);
-    # workers self-plan from their own children, so the coordinator holds NO
-    # whole-level per-fragment state (that is what OOM'd at scale).
+    # The dense OID space comes from object_attributes/segment_id, while worker
+    # grouping requires per-fragment object_id on the source level.
     try:
         seg_array = np.asarray(read_object_attributes(src, "segment_id"))
     except ArrayError:
@@ -1016,6 +1130,26 @@ def coarsen_skeleton_level(
         return {"vertex_count": 0, "object_count": 0, "method": COARSEN_SKELETON}
     seg_array = seg_array.astype(np.uint64)
     n_src = int(len(seg_array))
+
+    # Hard requirement: source fragments must carry object_id. Probe a real
+    # source chunk to avoid metadata-only false positives.
+    src_vertex_chunks = list_chunk_keys(src, VERTICES)
+    if not src_vertex_chunks:
+        return {"vertex_count": 0, "object_count": 0, "method": COARSEN_SKELETON}
+    src_has_fragment_oid = False
+    probe_oid = read_chunk_fragment_attributes(
+        src,
+        "object_id",
+        tuple(int(x) for x in src_vertex_chunks[0]),
+        dtype=np.uint64,
+        default=None,
+    )
+    src_has_fragment_oid = probe_oid is not None
+    if not src_has_fragment_oid:
+        raise ValueError(
+            "coarsen_skeleton_level now requires fragment_attributes/object_id "
+            "on the source level; re-ingest or migrate the source level first"
+        )
 
     # Sparsity keep-set (O(objects)).  The "length" strategy needs per-object
     # sizes — the only path that still reads all manifests (O(fragments)), and
@@ -1030,14 +1164,15 @@ def coarsen_skeleton_level(
             n_src, 1.0 / sparsity_factor, sparsity_strategy,
             seed=sparsity_seed, lengths=lengths,
         )
-        keep_set: set | None = {int(o) for o in kept}
+        keep_mask = np.zeros(n_src, dtype=np.uint8)
+        keep_mask[np.asarray(kept, dtype=np.int64)] = 1
     else:
-        keep_set = None  # keep all
+        keep_mask = None  # keep all
 
     # --- target chunks from the source chunk grid (O(chunks)) -----------
     target_chunks = sorted({
         tuple(int(cc[a] // scale[a]) for a in range(ndim))
-        for cc in list_chunk_keys(src, VERTICES)
+        for cc in src_vertex_chunks
     })
     if not target_chunks:
         return {"vertex_count": 0, "object_count": 0, "method": COARSEN_SKELETON}
@@ -1069,6 +1204,7 @@ def coarsen_skeleton_level(
     create_links_array(level_group, link_width=2, delta=0)
     create_object_index_array(level_group)
     create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
+    create_fragment_attribute_array(level_group, "object_id", dtype="uint64")
     for name in attr_names:
         create_attribute_array(level_group, name, dtype=str(attr_dtypes[name]))
 
@@ -1090,6 +1226,10 @@ def coarsen_skeleton_level(
     # --- Phase A: decimate each target chunk (workers self-plan locally) ---
     boundary_off = (list(boundary_offset_nm)
                     if boundary_offset_nm is not None else [0.0] * ndim)
+    oid_reduce_shards = 64
+    oid_reduce_tmp_dir = tempfile.mkdtemp(prefix=f"oid_reduce_l{target_level}_")
+    sidecar_tmp_dir = tempfile.mkdtemp(prefix=f"sidecar_l{target_level}_")
+
     sharedA = {
         "store_path": str(store_path),
         "source_level": int(source_level),
@@ -1100,52 +1240,111 @@ def coarsen_skeleton_level(
         "attr_dtypes": {n: str(attr_dtypes[n]) for n in attr_names},
         "stride": int(stride),
         "attr_agg": attr_agg,
-        "seg_array": seg_array,          # NumPy → fast buffer-protocol scatter
-        "keep_set": keep_set,
+        "keep_mask": keep_mask,
         "boundary_offset": boundary_off,
         "target_cs": list(target_chunk_shape),
         "source_cs": list(src_chunk_shape),
         "drop_interior_below": int(drop_interior_below or 0),
+        "oid_reduce_shards": int(oid_reduce_shards),
+        "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
+        "sidecar_tmp_dir": str(sidecar_tmp_dir),
     }
     payloadsA = [{"tcc": list(tcc)} for tcc in target_chunks]
     _timings["setup"] = _time.perf_counter() - _t0
+    _progress(f"phase A start: target_chunks={len(payloadsA)}")
     _tmap = _time.perf_counter()
     resultsA = list(executor(_coarsen_target_chunk, payloadsA, sharedA))
-    _timings["map"] = _time.perf_counter() - _tmap
+    _timings["map_phase_a"] = _time.perf_counter() - _tmap
+    _progress(f"phase A done: dt={_timings['map_phase_a']:.2f}s")
     _tfin = _time.perf_counter()
 
     # --- gather (compact NumPy) + build object_index --------------------
-    new_manifests = defaultdict(list)
     total_out_vertices = 0
     total_fragments = 0
-    sidecars: dict = {}
+    total_in_fragments = 0
+    total_in_vertices = 0
+    total_in_objects = 0
+    max_in_fragments = 0
+    max_in_vertices = 0
+    max_in_objects = 0
+    sidecar_paths: dict[tuple[int, ...], str] = {}
+    shard_entries: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for res in resultsA:
-        tcc = tuple(int(x) for x in res["tcc"])
-        for oid, fidx in zip(res["rec_oid"].tolist(), res["rec_fidx"].tolist()):
-            new_manifests[oid].append((tcc, fidx))
-        total_fragments += int(len(res["rec_oid"]))
+        in_f = int(res.get("input_fragments", 0))
+        in_v = int(res.get("input_vertices", 0))
+        in_o = int(res.get("input_objects", 0))
+        total_in_fragments += in_f
+        total_in_vertices += in_v
+        total_in_objects += in_o
+        max_in_fragments = max(max_in_fragments, in_f)
+        max_in_vertices = max(max_in_vertices, in_v)
+        max_in_objects = max(max_in_objects, in_o)
+        total_fragments += int(res["fragment_count"])
         total_out_vertices += int(res["vertex_count"])
-        sc = res["sidecar"]
-        if len(sc):
-            sidecars[tcc] = sc
+        tcc = tuple(int(x) for x in res["tcc"])
+        sp = res.get("sidecar_path")
+        if sp:
+            sidecar_paths[tcc] = str(sp)
+        for shard, path in res.get("oid_shards", []):
+            shard_entries[int(shard)].append(
+                {"tcc": list(tcc), "path": str(path)}
+            )
+    # Release phase-A result payloads as soon as we've compacted what we need.
+    resultsA = []
 
     level_meta.vertex_count = int(total_out_vertices)
     create_resolution_level(root, target_level, level_meta)
-
-    write_object_index(
-        level_group, dict(new_manifests), sid_ndim=ndim, total_objects=n_src,
+    _progress(
+        "phase A stats: "
+        f"in_objs={total_in_objects} in_frags={total_in_fragments} "
+        f"in_verts={total_in_vertices} "
+        f"max_task_objs={max_in_objects} max_task_frags={max_in_fragments} "
+        f"max_task_verts={max_in_vertices}"
     )
+
+    # --- Phase C: shard-parallel object-index reduce + one-shot commit -----
+    empty_blob = b"\x00\x00\x00\x00"  # encode_object_manifest_blocks([], sid_ndim)
+    manifest_blobs: list[bytes] = [empty_blob] * int(n_src)
+    try:
+        _tc = _time.perf_counter()
+        payloadsC = [
+            {"shard": int(s), "entries": es}
+            for s, es in sorted(shard_entries.items())
+            if es
+        ]
+        _progress(f"phase C start: shard_tasks={len(payloadsC)}")
+        sharedC = {"sid_ndim": int(ndim)}
+        if payloadsC:
+            for rc in executor(_reduce_object_index_shard, payloadsC, sharedC):
+                oids = np.asarray(rc.get("oid", np.zeros((0,), np.int64)), np.int64)
+                blobs = pickle.loads(rc.get("blobs", b"")) if len(oids) else []
+                for i, oid in enumerate(oids.tolist()):
+                    if 0 <= int(oid) < int(n_src):
+                        manifest_blobs[int(oid)] = blobs[i]
+        _write_object_index_manifests(level_group, manifest_blobs)
+        level_group.write_array_meta(OBJECT_INDEX, {
+            "zv_array": "object_index",
+            "num_objects": int(n_src),
+            "sid_ndim": int(ndim),
+            "layout": OBJECT_INDEX_LAYOUT_V1,
+        })
+        _timings["reduce_phase_c"] = _time.perf_counter() - _tc
+        _progress(f"phase C done: dt={_timings['reduce_phase_c']:.2f}s")
+    finally:
+        shutil.rmtree(oid_reduce_tmp_dir, ignore_errors=True)
 
     # carry object attributes forward; "present" = objects with geometry here.
-    present_oids = np.fromiter(
-        (int(o) for o in new_manifests), dtype=np.int64, count=len(new_manifests)
-    )
+    present_oids = np.flatnonzero(
+        np.fromiter((1 if b != empty_blob else 0 for b in manifest_blobs), np.uint8)
+    ).astype(np.int64)
     src_attr_names = (
         [n for n in src["object_attributes"]] if "object_attributes" in src else []
     )
     mask = np.zeros(n_src, dtype=np.uint8)
     if len(present_oids):
         mask[present_oids] = 1
+    _progress(f"object attrs start: names={len(src_attr_names)}")
+    _tattrs = _time.perf_counter()
     for aname in src_attr_names:
         try:
             src_data = read_object_attributes(src, aname)
@@ -1156,6 +1355,8 @@ def coarsen_skeleton_level(
             out[present_oids] = src_data[present_oids]
         create_object_attributes_array(level_group, aname, dtype=str(src_data.dtype))
         write_object_attributes(level_group, aname, out, present_mask=mask)
+    _timings["object_attrs"] = _time.perf_counter() - _tattrs
+    _progress(f"object attrs done: dt={_timings['object_attrs']:.2f}s")
 
     # --- Phase B: cross-target links, decentralized per ccl shard -------
     # Each adjacent target-chunk pair's k2 cell falls in one outer shard; group
@@ -1180,31 +1381,45 @@ def coarsen_skeleton_level(
             )
             shard_pairs[shard].append((tcc, nb))
     n_cross = 0
-    if shard_pairs:
-        payloadsB = []
-        for _shard, sps in shard_pairs.items():
-            need: set = set()
-            for A, B in sps:
-                need.add(A)
-                need.add(B)
-            sc_sub = {c: sidecars[c] for c in need if c in sidecars}
-            payloadsB.append({
-                "pairs": [(list(A), list(B)) for A, B in sps],
-                "sidecars": pickle.dumps(sc_sub, protocol=pickle.HIGHEST_PROTOCOL),
-            })
-        sharedB = {
-            "store_path": str(store_path),
-            "target_level": int(target_level),
-            "ndim": int(ndim),
-            "chunk_grid_shape": list(chunk_grid_shape),
-            "chunk_origin": list(chunk_origin),
-        }
-        for rb in executor(_cross_edge_shard, payloadsB, sharedB):
-            n_cross += int(rb.get("n_links", 0))
+    try:
+        _tb = _time.perf_counter()
+        _progress(f"phase B start: shard_groups={len(shard_pairs)}")
+        if shard_pairs:
+            payloadsB = []
+            for _shard, sps in shard_pairs.items():
+                need: set = set()
+                for A, B in sps:
+                    need.add(A)
+                    need.add(B)
+                sc_sub = [
+                    {"tcc": list(c), "path": sidecar_paths[c]}
+                    for c in need
+                    if c in sidecar_paths
+                ]
+                payloadsB.append({
+                    "pairs": [(list(A), list(B)) for A, B in sps],
+                    "sidecar_paths": sc_sub,
+                })
+            sharedB = {
+                "store_path": str(store_path),
+                "target_level": int(target_level),
+                "ndim": int(ndim),
+                "chunk_grid_shape": list(chunk_grid_shape),
+                "chunk_origin": list(chunk_origin),
+            }
+            for rb in executor(_cross_edge_shard, payloadsB, sharedB):
+                n_cross += int(rb.get("n_links", 0))
+        _timings["cross_links_phase_b"] = _time.perf_counter() - _tb
+        _progress(
+            f"phase B done: links={n_cross} dt={_timings['cross_links_phase_b']:.2f}s"
+        )
+    finally:
+        shutil.rmtree(sidecar_tmp_dir, ignore_errors=True)
 
     _timings["finalize"] = _time.perf_counter() - _tfin
     _timings["total"] = _time.perf_counter() - _t0
     _timings["n_target_chunks"] = len(target_chunks)
+    _progress(f"done: total={_timings['total']:.2f}s")
 
     return {
         "vertex_count": int(total_out_vertices),
