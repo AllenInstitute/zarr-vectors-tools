@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from typing import cast
 from typing import Any, Callable, Iterable
 
 
@@ -36,7 +37,7 @@ def dask_executor(workers: int | None = None):
 
     n = workers if workers and workers > 0 else max(1, (os.cpu_count() or 2) - 1)
     cluster = LocalCluster(
-        n_workers=n, threads_per_worker=1, processes=True, dashboard_address=None,
+        n_workers=n, threads_per_worker=1, processes=True, dashboard_address="127.0.0.1:8787",
     )
     client = Client(cluster)
     try:
@@ -56,9 +57,22 @@ def dask_executor(workers: int | None = None):
             if not items:
                 return []
             if shared is None:
-                return client.gather(client.map(func, items))
-            sh = client.scatter(shared, broadcast=True)
-            return client.gather(client.map(func, items, shared=sh))
+                return cast(list[Any], client.gather(client.map(func, items)))
+            # Preferred path: scatter shared data once.
+            # If the shared object is not safely serializable (or triggers a
+            # transport/protocol size issue), fall back to passing it directly.
+            # Callers should keep `shared` lightweight where possible.
+            try:
+                sh = client.scatter(shared, broadcast=True)
+                return cast(
+                    list[Any],
+                    client.gather(client.map(func, items, shared=sh)),
+                )
+            except Exception:
+                return cast(
+                    list[Any],
+                    client.gather(client.map(func, items, shared=shared)),
+                )
 
         yield executor
     finally:
