@@ -1155,14 +1155,17 @@ def coarsen_skeleton_level(
     # sizes — the only path that still reads all manifests (O(fragments)), and
     # only when sparsity is active.
     if sparsity_factor > 1.0 and n_src > 1:
-        lengths = None
-        if sparsity_strategy == "length":
-            lengths = np.array(
-                [len(m) for m in read_all_object_manifests(src)], dtype=np.float64
-            )
+        manifest_lens = np.array(
+            [len(m) for m in read_all_object_manifests(src)], dtype=np.float64
+        )
+        lengths = manifest_lens if sparsity_strategy == "length" else None
+        # Objects already emptied by an earlier pyramid level's sparsity
+        # drop must not be re-"kept" here — see `apply_sparsity`'s
+        # `alive_mask` docstring.
+        alive_mask = manifest_lens > 0
         kept = apply_sparsity(
             n_src, 1.0 / sparsity_factor, sparsity_strategy,
-            seed=sparsity_seed, lengths=lengths,
+            seed=sparsity_seed, lengths=lengths, alive_mask=alive_mask,
         )
         keep_mask = np.zeros(n_src, dtype=np.uint8)
         keep_mask[np.asarray(kept, dtype=np.int64)] = 1

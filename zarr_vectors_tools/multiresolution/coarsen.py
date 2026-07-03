@@ -76,6 +76,7 @@ from zarr_vectors_tools.multiresolution.coarsen_implicit import (
 from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
 from zarr_vectors.spatial.boundary import (
     build_vertex_chunk_mapping,
+    cross_chunk_links_for_segments,
     partition_cross_level_edges,
 )
 from zarr_vectors.spatial.chunking import assign_chunks
@@ -115,10 +116,17 @@ def select_coarsener_key(root_meta: Any) -> str:
     """Pick the coarsener key for a store from its root metadata.
 
     Skeleton stores (``implicit_sequential_with_branches``) use the
-    skeleton-aware decimator; everything else uses the per-object pyramid.
+    skeleton-aware decimator; streamline stores (``implicit_sequential`` with
+    geometry_type ``"streamline"``) use the RDP polyline coarsener; everything
+    else uses the per-object pyramid.
     """
     if root_meta.links_convention == LINKS_IMPLICIT_BRANCHES:
         return "skeleton"
+    if (
+        root_meta.links_convention == LINKS_IMPLICIT_SEQUENTIAL
+        and "streamline" in (root_meta.geometry_types or [])
+    ):
+        return "polyline"
     return "per_object"
 
 
@@ -137,6 +145,8 @@ def coarsen_level(
     sparsity_strategy: str = "random",
     sparsity_seed: int | None = None,
     cross_level_storage: str = XLEVEL_NONE,
+    coarsen_mode: str = "rdp",
+    executor: Any = None,
 ) -> dict[str, Any]:
     """Coarsen a single level and write it to the store.
 
@@ -169,6 +179,16 @@ def coarsen_level(
             threaded through to enable inline ``±1`` cross-level link
             emission.  Standalone callers should leave it at the
             ``"none"`` default.
+        coarsen_mode: Only consulted by the polyline (streamline) coarsener:
+            ``"rdp"`` (default) does Douglas-Peucker simplification;
+            ``"decimate"`` does uniform stride decimation, in which case
+            ``coarsen_factor`` is interpreted as the stride. Ignored by the
+            other coarseners.
+        executor: Optional ``map``-like ``(func, items, shared) ->
+            list[result]`` callable (e.g. ``dask_executor``) used by the
+            chunk-local skeleton and polyline coarseners to parallelize
+            per-target-chunk work.  ``None`` (default) runs serially
+            in-process.  Ignored by the per-object coarsener.
 
     Returns:
         Summary dict.  Always includes ``method``,
@@ -198,6 +218,8 @@ def coarsen_level(
         sparsity_strategy=sparsity_strategy,
         sparsity_seed=sparsity_seed,
         cross_level_storage=cross_level_storage,
+        coarsen_mode=coarsen_mode,
+        executor=executor,
     )
 
 
@@ -304,11 +326,19 @@ def _per_object_coarsen(
     keep_oids: list[int]
     if sparsity_factor > 1.0 and n_src_objects > 1:
         keep_frac = 1.0 / sparsity_factor
+        # Objects already emptied by an earlier pyramid level's sparsity
+        # drop must not be re-"kept" here — see `apply_sparsity`'s
+        # `alive_mask` docstring.
+        alive_mask = np.array(
+            [len(src_manifests[oid]) > 0 for oid in range(n_src_objects)],
+            dtype=bool,
+        )
         kept = apply_sparsity(
             n_src_objects, keep_frac, sparsity_strategy,
             seed=sparsity_seed,
             representative_points=None,
             bin_shape=base_bin,
+            alive_mask=alive_mask,
         )
         keep_oids = sorted(int(o) for o in kept)
     else:
@@ -629,10 +659,11 @@ def _per_object_coarsen(
             new_cross_links.append(
                 ((new_cc_a, new_vi_a), (new_cc_b, new_vi_b)),
             )
-        create_cross_chunk_links_array(level_group, delta=0)
+        create_cross_chunk_links_array(level_group, delta=0, sid_ndim=ndim)
         if new_cross_links:
             write_cross_chunk_links(
                 level_group, new_cross_links, sid_ndim=ndim, delta=0,
+                directed=True,
             )
     else:
         # Legacy Step 9b: one fragment per metavertex, so consecutive
@@ -647,7 +678,7 @@ def _per_object_coarsen(
                 cc_b, frag_b = manifest[i + 1]
                 # vi_a == frag_a, vi_b == frag_b (one metavertex per fragment).
                 cross_links.append(((cc_a, frag_a), (cc_b, frag_b)))
-        create_cross_chunk_links_array(level_group, delta=0)
+        create_cross_chunk_links_array(level_group, delta=0, sid_ndim=ndim)
         if cross_links:
             write_cross_chunk_links(
                 level_group, cross_links, sid_ndim=ndim, delta=0,
@@ -1179,6 +1210,8 @@ def build_pyramid(
     sparsity_seed: int | None = None,
     cross_level_depth: int = DEFAULT_CROSS_LEVEL_DEPTH,
     cross_level_storage: str = DEFAULT_CROSS_LEVEL_STORAGE,
+    coarsen_mode: str = "rdp",
+    executor: Any = None,
 ) -> dict[str, Any]:
     """Build a multi-resolution pyramid for an existing store.
 
@@ -1210,6 +1243,14 @@ def build_pyramid(
             ``"explicit"`` materializes both ``+N`` (at the finer level)
             and ``-N`` (at the coarser level); ``"implicit"`` writes
             only ``+N``.  Default ``"explicit"``.
+        coarsen_mode: Only consulted for streamline/polyline stores:
+            ``"rdp"`` (default) does Douglas-Peucker simplification;
+            ``"decimate"`` does uniform stride decimation, in which case
+            each level's ``coarsen_factor`` is interpreted as the stride.
+        executor: Optional ``map``-like ``(func, items, shared) ->
+            list[result]`` callable forwarded to every level's
+            :func:`coarsen_level` call, parallelizing the chunk-local
+            skeleton/polyline coarseners.  ``None`` (default) runs serially.
 
     Returns:
         Summary dict.
@@ -1251,6 +1292,8 @@ def build_pyramid(
             sparsity_strategy=sparsity_strategy,
             sparsity_seed=sparsity_seed,
             cross_level_storage=cross_level_storage,
+            coarsen_mode=coarsen_mode,
+            executor=executor,
         ))
 
     # Compose deeper-delta cross-level links from the inline-emitted +1
@@ -1286,10 +1329,14 @@ def _skeleton_coarsener(
     sparsity_strategy: str,
     sparsity_seed: int | None,
     cross_level_storage: str,
+    coarsen_mode: str = "rdp",
+    executor: Any = None,
 ) -> dict[str, Any]:
     """Skeleton stores: route to the skeleton-aware decimator.  ``coarsen_factor``
     is the decimation stride, ``chunk_scale_factor`` defaults to 2, and the
-    random sparsity strategy degrades to deterministic ``"length"``."""
+    random sparsity strategy degrades to deterministic ``"length"``.
+    ``coarsen_mode`` is accepted for signature parity with other coarseners
+    but has no effect here — this coarsener always decimates."""
     from zarr_vectors_tools.multiresolution.strategies.skeletons import (
         coarsen_skeleton_level,
     )
@@ -1303,6 +1350,7 @@ def _skeleton_coarsener(
             sparsity_strategy if sparsity_strategy != "random" else "length"
         ),
         sparsity_seed=sparsity_seed,
+        executor=executor,
     )
 
 
@@ -1317,8 +1365,12 @@ def _per_object_coarsener(
     sparsity_strategy: str,
     sparsity_seed: int | None,
     cross_level_storage: str,
+    coarsen_mode: str = "rdp",
+    executor: Any = None,
 ) -> dict[str, Any]:
-    """Default geometries: per-object metavertex aggregation."""
+    """Default geometries: per-object metavertex aggregation.
+    ``coarsen_mode`` and ``executor`` are accepted for signature parity with
+    other coarseners but have no effect here (this coarsener is not chunk-local)."""
     return _per_object_coarsen(
         store_path=store_path,
         source_level=source_level,
@@ -1332,5 +1384,44 @@ def _per_object_coarsener(
     )
 
 
+def _polyline_coarsener(
+    store_path: str | Path,
+    source_level: int,
+    target_level: int,
+    *,
+    coarsen_factor: float,
+    sparsity_factor: float,
+    chunk_scale_factor: int | tuple[int, ...],
+    sparsity_strategy: str,
+    sparsity_seed: int | None,
+    cross_level_storage: str,
+    coarsen_mode: str = "rdp",
+    executor: Any = None,
+) -> dict[str, Any]:
+    """Geometry-preserving polyline/streamline coarsener (RDP simplification
+    or uniform stride decimation, selected by ``coarsen_mode``).
+
+    Chunk-local and executor-parallel — see
+    :func:`zarr_vectors_tools.multiresolution.strategies.polylines.coarsen_polyline_level`
+    for the implementation (peak memory O(one target chunk), not O(the whole
+    source level))."""
+    from zarr_vectors_tools.multiresolution.strategies.polylines import (
+        coarsen_polyline_level,
+    )
+    return coarsen_polyline_level(
+        store_path,
+        source_level,
+        target_level,
+        coarsen_factor=coarsen_factor,
+        sparsity_factor=sparsity_factor,
+        chunk_scale_factor=chunk_scale_factor,
+        sparsity_strategy=sparsity_strategy,
+        sparsity_seed=sparsity_seed,
+        coarsen_mode=coarsen_mode,
+        executor=executor,
+    )
+
+
 register_coarsener("skeleton", _skeleton_coarsener)
 register_coarsener("per_object", _per_object_coarsener)
+register_coarsener("polyline", _polyline_coarsener)

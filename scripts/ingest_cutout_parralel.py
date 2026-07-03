@@ -27,7 +27,8 @@ def main():
               [float((anchor[a]+COUNTS[a]*csv[a])*res[a]) for a in range(3)])
 
     summary = run_ingest(
-        reader, "/tmp/o_center_121851_8_8_4", keys, bounds_nm=bounds,
+        reader, "/tmp/" \
+        "", keys, bounds_nm=bounds,
         strides=[8, 8, 8], chunk_scale_factors=[2, 2, 2], sparsity_factors=[1, 1, 4],
         workers=8,            # <-- Dask local cluster of 8 process workers
         drop_interior_below=3,   # optional LOD: drop tiny fully-interior objects

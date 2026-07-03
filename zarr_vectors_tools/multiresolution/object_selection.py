@@ -277,6 +277,7 @@ def apply_sparsity(
     attribute_mode: str = "max",
     representative_points: npt.NDArray | None = None,
     bin_shape: tuple[float, ...] | float | None = None,
+    alive_mask: npt.NDArray[np.bool_] | None = None,
 ) -> npt.NDArray[np.int64]:
     """Convenience wrapper: compute target count from sparsity and dispatch.
 
@@ -294,6 +295,22 @@ def apply_sparsity(
         representative_points: ``(N, D)`` points (for ``"spatial_coverage"``
             and ``"point_thinning"``).
         bin_shape: Bin shape for spatial coverage / point thinning.
+        alive_mask: ``(n_objects,)`` boolean — ``True`` for object indices
+            that still have data at the source level (e.g. object IDs
+            preserved but emptied by an earlier pyramid level's sparsity
+            drop are ``False``).  When given, ``target_count`` is still
+            computed against the full ``n_objects`` (so callers keep the
+            "keep N of the *original* population" semantics), but every
+            strategy's *candidate pool* is restricted to alive objects —
+            without this, ``"random"`` selection has no way to avoid
+            re-"keeping" already-empty objects, silently wasting most of
+            its budget on them once enough earlier levels have dropped
+            objects (the ranking-based strategies — ``"length"`` etc. —
+            happen to dodge this only because a dead object's length/
+            attribute value is degenerate and never wins a top-N rank;
+            that's incidental, not guaranteed for every factor sequence).
+            Omit (default ``None``) to consider every index a candidate,
+            matching prior behavior.
 
     Returns:
         Sorted array of kept object indices.
@@ -304,22 +321,31 @@ def apply_sparsity(
     if sparsity >= 1.0:
         return np.arange(n_objects, dtype=np.int64)
 
+    if alive_mask is not None:
+        candidates = np.flatnonzero(alive_mask)
+    else:
+        candidates = np.arange(n_objects, dtype=np.int64)
+
     target_count = max(1, round(n_objects * sparsity))
+    target_count = min(target_count, len(candidates))
 
     if strategy == "random":
-        return select_random(n_objects, target_count, seed=seed)
+        local = select_random(len(candidates), target_count, seed=seed)
+        return np.sort(candidates[local])
 
     elif strategy == "length":
         if lengths is None:
             raise ValueError("'length' strategy requires 'lengths' array")
-        return select_by_length(lengths, target_count)
+        local = select_by_length(lengths[candidates], target_count)
+        return np.sort(candidates[local])
 
     elif strategy == "attribute":
         if attribute_values is None:
             raise ValueError("'attribute' strategy requires 'attribute_values' array")
-        return select_by_attribute(
-            attribute_values, target_count, mode=attribute_mode,
+        local = select_by_attribute(
+            attribute_values[candidates], target_count, mode=attribute_mode,
         )
+        return np.sort(candidates[local])
 
     elif strategy == "spatial_coverage":
         if representative_points is None:
@@ -330,9 +356,10 @@ def apply_sparsity(
             raise ValueError(
                 "'spatial_coverage' strategy requires 'bin_shape'"
             )
-        return select_by_spatial_coverage(
-            representative_points, bin_shape, target_count,
+        local = select_by_spatial_coverage(
+            representative_points[candidates], bin_shape, target_count,
         )
+        return np.sort(candidates[local])
 
     elif strategy == "point_thinning":
         if representative_points is None:
@@ -343,9 +370,10 @@ def apply_sparsity(
             raise ValueError(
                 "'point_thinning' strategy requires 'bin_shape'"
             )
-        return select_point_thinning(
-            representative_points, bin_shape, seed=seed,
+        local = select_point_thinning(
+            representative_points[candidates], bin_shape, seed=seed,
         )
+        return np.sort(candidates[local])
 
     else:
         raise ValueError(
