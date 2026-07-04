@@ -701,59 +701,69 @@ def _polyline_cross_edge_shard(payload: dict, shared: dict | None = None) -> dic
         for e in payload.get("sidecar_paths", [])
     }
     pairs = payload["pairs"]
-    sidecar_cache: dict[str, npt.NDArray[np.int64]] = {}
-    keymap_cache: dict[tuple[int, ...], dict[tuple[int, tuple[int, ...]], list[tuple[int, int]]]] = {}
+    link_w = 2 * ndim + 2
 
-    def _read_sidecar(cc: tuple[int, ...]) -> npt.NDArray[np.int64] | None:
+    # Sorted-key equi-join, entirely in NumPy — no per-row Python objects.
+    # A single chunk's sidecar can hold MILLIONS of rows at whole-brain
+    # scale; a `dict[tuple -> list]` keymap there costs ~500-600 bytes of
+    # pure Python object overhead per row (measured ~1.2GB for 2M rows),
+    # enough alone to blow a worker's memory budget.  Each row's key (the
+    # source link's own identity, see _build_local_polyline_plan) is
+    # unique within one chunk's sidecar by construction — a chunk only
+    # emits ONE endpoint per source cross-chunk-link record — so this is a
+    # simple sorted-array equi-join: sort both chunks' keys (viewed as
+    # opaque fixed-width blobs, ~30 bytes/row including the sort's working
+    # arrays), binary-search one into the other, keep exact hits.
+    sorted_cache: dict[tuple[int, ...], tuple | None] = {}
+
+    def _load_sorted(cc: tuple[int, ...]):
+        if cc in sorted_cache:
+            return sorted_cache[cc]
         path = sidecar_paths.get(cc)
         if path is None:
+            sorted_cache[cc] = None
             return None
-        arr = sidecar_cache.get(path)
-        if arr is None:
-            arr = np.asarray(np.load(path, allow_pickle=False), dtype=np.int64)
-            sidecar_cache[path] = arr
-        return arr
-
-    def _chunk_keymap(cc: tuple[int, ...]):
-        km = keymap_cache.get(cc)
-        if km is not None:
-            return km
-        arr = _read_sidecar(cc)
-        km: dict = {}
-        if arr is not None and len(arr):
-            # row = (*ccA, viA, *ccB, viB, role, local_vi) — the leading
-            # 2*ndim+2 columns are the source link's own identity, read
-            # identically by whichever side's Phase-A worker found it (see
-            # _build_local_polyline_plan); that's the join key here, NOT a
-            # geometric coincidence (polyline fragments share no duplicate
-            # boundary vertex to match on).
-            link_w = 2 * ndim + 2
-            for row in arr:
-                key = tuple(int(x) for x in row[:link_w])
-                role = int(row[link_w])
-                vi = int(row[link_w + 1])
-                km.setdefault(key, []).append((role, vi))
-        keymap_cache[cc] = km
-        return km
+        arr = np.asarray(np.load(path, allow_pickle=False), dtype=np.int64)
+        if arr.size == 0:
+            sorted_cache[cc] = None
+            return None
+        keys = np.ascontiguousarray(arr[:, :link_w])
+        void_keys = keys.view(np.dtype((np.void, keys.dtype.itemsize * link_w))).reshape(-1)
+        order = np.argsort(void_keys, kind="stable")
+        result = (void_keys[order], arr[order, link_w], arr[order, link_w + 1])
+        sorted_cache[cc] = result
+        return result
 
     links: list = []
     for A_, B_ in pairs:
         A = tuple(int(x) for x in A_)
         B = tuple(int(x) for x in B_)
-        amap = _chunk_keymap(A)
-        bmap = _chunk_keymap(B)
-        if not amap or not bmap:
+        da = _load_sorted(A)
+        db = _load_sorted(B)
+        if da is None or db is None:
             continue
-        keys = amap.keys() & bmap.keys()
-        for k in keys:
-            for role_a, vi_a in amap[k]:
-                for role_b, vi_b in bmap[k]:
-                    if role_a == role_b:
-                        continue  # same-role anchors can't stitch (data anomaly)
-                    if role_a == 0:  # A holds the predecessor (exit) side
-                        links.append([(A, vi_a), (B, vi_b)])
-                    else:  # B holds the predecessor (exit) side
-                        links.append([(B, vi_b), (A, vi_a)])
+        keysA, rolesA, visA = da
+        keysB, rolesB, visB = db
+        pos = np.searchsorted(keysB, keysA)
+        in_range = pos < len(keysB)
+        pos_clamped = np.where(in_range, pos, 0)
+        hit = in_range & (keysB[pos_clamped] == keysA)
+        if not np.any(hit):
+            continue
+        idxA = np.flatnonzero(hit)
+        idxB = pos[idxA]
+        ra, va = rolesA[idxA], visA[idxA]
+        rb, vb = rolesB[idxB], visB[idxB]
+        stitch = ra != rb  # same-role anchors can't stitch (data anomaly)
+        idxA, idxB = idxA[stitch], idxB[stitch]
+        ra, va = ra[stitch], va[stitch]
+        vb = vb[stitch]
+        a_is_pred = ra == 0
+        for i in range(len(idxA)):
+            if a_is_pred[i]:
+                links.append([(A, int(va[i])), (B, int(vb[i]))])
+            else:
+                links.append([(B, int(vb[i])), (A, int(va[i]))])
     if links:
         root = open_store(shared["store_path"], mode="r+")
         level_group = get_resolution_level(root, shared["target_level"])
@@ -937,7 +947,15 @@ def coarsen_polyline_level(
     level_meta = LevelMetadata(
         level=target_level,
         vertex_count=0,
-        arrays_present=["vertices", "object_index"],
+        # "fragment_attributes" must be listed: this coarsener always writes
+        # fragment_attributes/segment_id (needed to reconstruct object
+        # connectivity locally — see the module docstring).  Omitting it here
+        # previously made neuroglancer's reader treat coarsened levels as
+        # lacking per-fragment segment ids (gated on this exact list, see
+        # datasource/zarr-vectors/frontend.ts's hasFragmentSegmentIds), so it
+        # silently fell back to a meaningless chunk-local fragment index for
+        # picking/selection at every level except the finest.
+        arrays_present=["vertices", "object_index", "fragment_attributes"],
         bin_shape=tuple(
             float(b) * float(coarsen_factor) for b in root_meta.effective_bin_shape
         ),
@@ -964,13 +982,27 @@ def coarsen_polyline_level(
     chunk_grid_shape = tuple(
         int(max(1, int(cmax[a]) - chunk_origin[a] + 1)) for a in range(ndim)
     )
+    # min_K=2: a genuine cross-target transition always connects two
+    # DIFFERENT target chunks (never the same one), so streamlines can
+    # never produce a K=1 (same-chunk) cross-chunk-link record.  Skip
+    # pre-creating k1 entirely — an empty-but-existing kN array (zarr.json
+    # present, zero shard files) makes neuroglancer's reader 404 and fail
+    # the whole chunk download instead of treating it as "no records",
+    # which cascades into the LOD picker falling back to level 0.
     create_cross_chunk_link_kN_arrays(
         level_group, sid_ndim=ndim, link_width=2,
-        chunk_grid_shape=chunk_grid_shape, chunk_origin=chunk_origin, max_K=2,
-        directed=True,
+        chunk_grid_shape=chunk_grid_shape, chunk_origin=chunk_origin,
+        min_K=2, max_K=2, directed=True,
     )
 
-    oid_reduce_shards = 64
+    # Scale shard count with the dense OID space instead of a fixed 64: a
+    # level with millions of surviving objects (e.g. a low-sparsity level
+    # right after a high-sparsity one keeps most of its huge parent
+    # population) needs more, smaller shards to keep each
+    # _reduce_object_index_shard call's working set bounded — ~20k
+    # objects/shard, capped so trivially small levels don't pay excess
+    # file-handle overhead for no benefit.
+    oid_reduce_shards = max(64, min(4096, -(-n_src // 20_000)))
     oid_reduce_tmp_dir = tempfile.mkdtemp(prefix=f"polyline_oid_reduce_l{target_level}_")
     sidecar_tmp_dir = tempfile.mkdtemp(prefix=f"polyline_sidecar_l{target_level}_")
 
@@ -1111,6 +1143,28 @@ def coarsen_polyline_level(
                 stamp_ccl_capabilities(root)
     finally:
         shutil.rmtree(sidecar_tmp_dir, ignore_errors=True)
+
+    if n_cross == 0:
+        # The kN arrays were pre-created (to give decentralized Phase-B
+        # workers a race-free place to write cells) before it was known
+        # whether this level would have ANY cross-target transitions — a
+        # coarse enough level can easily end up as a single chunk (no
+        # cross-chunk transitions are even possible) or otherwise produce
+        # zero links.  Left in place, that's a `cross_chunk_links/0/k2`
+        # array with valid metadata but zero shard files on disk, which
+        # neuroglancer's reader 404s on and fails outright (the same
+        # failure mode fixed for the never-populated k1 array — this is
+        # the k2 side of the same problem).  Remove only the kN
+        # sub-ARRAYS (each k{K} is a zarr array, not a group — the
+        # existing `_clear_kN_arrays` helper looks for group children via
+        # `list_subgroups` and silently finds nothing here, so it can't
+        # be reused) — NOT the parent cross_chunk_links/0 group itself,
+        # whose own meta (sid_ndim, link_width, directed) readers expect
+        # to find even on an empty/no-links level.
+        from zarr_vectors.core.arrays import cross_chunk_links_path
+        parent = cross_chunk_links_path(0)
+        for K in range(1, 3):
+            level_group.delete_subtree(f"{parent}/k{K}")
 
     _stamp_root_capability(root, CAP_PRESERVED_OBJECT_IDS)
 
