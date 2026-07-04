@@ -24,11 +24,11 @@ INPUT_TRK = Path(
 
 # Output zarr-vectors store directory
 #OUTPUT_STORE = Path("/tmp/wholebrain_tractogram.zarrvectors")
-OUTPUT_STORE = Path("/tmp/wholebrain_tractogram_subset.zarrvectors")
+OUTPUT_STORE = Path("/tmp/wholebrain_tractogram.zarrvectors")
 
 # For quick test runs: only ingest the first N streamlines from the file
 # (in on-disk order). Set to None to ingest all streamlines.
-MAX_STREAMLINES = 100_000
+MAX_STREAMLINES = None
 
 # Target total spatial chunk count; pipeline picks near-isotropic per-axis sizes.
 # For ~70x184x111 mm extent, 125 gives ~5x13x8 mm chunks.
@@ -40,7 +40,7 @@ NUM_CHUNKS = 5000
 # N_PARTS can safely be >> WORKERS (e.g. 4-8× is a good rule of thumb).
 # Increasing N_PARTS does NOT increase the number of processes running at
 # once — that is controlled solely by WORKERS below.
-N_PARTS = 4
+N_PARTS = 20
 
 
 # Number of Dask worker processes that run in parallel.

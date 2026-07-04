@@ -681,7 +681,16 @@ def ingest_trk_parallel(
         level_meta = LevelMetadata(
             level=0,
             vertex_count=0,  # updated after Phase B
-            arrays_present=["vertices", "object_index"],
+            # "fragment_attributes" listed up front (not just in the
+            # best-effort re-stamp near the end of this function): segment_id
+            # is created right below and neuroglancer's reader gates whether
+            # it even attempts to fetch per-fragment segment ids on this
+            # list being accurate — a level left showing the initial
+            # placeholder here (e.g. if a later pipeline stage crashes
+            # before the re-stamp runs, as happened when Phase 6 OOM'd on a
+            # real run) silently falls back to a meaningless per-chunk
+            # fragment index for picking/selection.
+            arrays_present=["vertices", "object_index", "fragment_attributes"],
         )
         level_group = create_resolution_level(root, 0, level_meta)
         create_vertices_array(level_group, dtype=dtype)
