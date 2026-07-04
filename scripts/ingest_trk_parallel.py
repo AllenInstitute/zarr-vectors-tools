@@ -61,10 +61,10 @@ PYRAMID_COARSEN_MODE = "decimate"
 # sparsity_factor drops that fraction of streamlines (1.0 = keep all).
 PYRAMID_FACTORS = [
     (8.0, 1.0),   # level 1: stride-8 decimation, keep all streamlines
-    (2.0, 2.0),   # level 2: stride-8 decimation, keep all streamlines
-    (2.0, 8.0),   # level 3: stride-8 decimation, keep all streamlines
-    (2.0, 64.0),   # level 4: stride-8 decimation, keep all streamlines
-    (1.0, 512.0)
+    (2.0, 2.0),   # level 2: stride-2 (16 total) decimation, keep half of total streamlines
+    (2.0, 8.0),   # level 3: stride-2 (32 total) decimation, keep 1/8 of total streamlines
+    (2.0, 64.0),  # level 4: stride-2 (64 total) decimation, keep 1/64 of total streamlines
+    (1.0, 512.0)  # level 5: no decimation, keep only 1/512 of total streamlines
 ]
 
 # PYRAMID_FACTORS = [
