@@ -337,78 +337,6 @@ class GraphHeader(Header):
 
 
 # ===================================================================
-# Neuroglancer Precomputed
-# ===================================================================
-
-@dataclass
-class NeuroglancerHeader(Header):
-    """Neuroglancer Precomputed source metadata.
-
-    Captures the parts of the precomputed ``info`` JSON needed to
-    reconstruct an equivalent layer on export and to preserve the
-    original segment-ID space across a round trip.
-
-    ``segment_ids`` is stored as ``list[str]`` because precomputed uses
-    uint64 IDs that exceed JSON's safe integer range. Cast back to
-    ``int`` on read.
-    """
-
-    format_name: str = "neuroglancer"
-    data_type: str = ""  # "mesh" | "skeleton" | "annotation"
-    annotation_type: str = ""  # "POINT" | "LINE" (annotations only)
-    source_url: str = ""
-    resolution: tuple[float, float, float] = (1.0, 1.0, 1.0)
-    transform: list[float] | None = None  # flattened 4×4 (12 or 16 floats)
-    mesh_metadata: dict[str, Any] = field(default_factory=dict)
-    skeleton_metadata: dict[str, Any] = field(default_factory=dict)
-    annotation_properties: list[dict[str, Any]] = field(default_factory=list)
-    relationships: list[dict[str, Any]] = field(default_factory=list)
-    segment_ids: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "format_name": self.format_name,
-            "data_type": self.data_type,
-            "annotation_type": self.annotation_type,
-            "source_url": self.source_url,
-            "resolution": list(self.resolution),
-            "transform": self.transform,
-            "mesh_metadata": self.mesh_metadata,
-            "skeleton_metadata": self.skeleton_metadata,
-            "annotation_properties": self.annotation_properties,
-            "relationships": self.relationships,
-            "segment_ids": self.segment_ids,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> NeuroglancerHeader:
-        return cls(
-            data_type=d.get("data_type", ""),
-            annotation_type=d.get("annotation_type", ""),
-            source_url=d.get("source_url", ""),
-            resolution=tuple(d.get("resolution", [1.0, 1.0, 1.0])),
-            transform=d.get("transform"),
-            mesh_metadata=d.get("mesh_metadata", {}),
-            skeleton_metadata=d.get("skeleton_metadata", {}),
-            annotation_properties=d.get("annotation_properties", []),
-            relationships=d.get("relationships", []),
-            segment_ids=d.get("segment_ids", []),
-        )
-
-    @property
-    def transform_matrix(self) -> np.ndarray | None:
-        """Return the transform as a 4×4 numpy array (or None)."""
-        if self.transform is None:
-            return None
-        arr = np.array(self.transform, dtype=np.float64)
-        if arr.size == 12:
-            mat = np.eye(4, dtype=np.float64)
-            mat[:3, :] = arr.reshape(3, 4)
-            return mat
-        return arr.reshape(4, 4)
-
-
-# ===================================================================
 # Dispatch helper
 # ===================================================================
 
@@ -420,7 +348,6 @@ HEADER_CLASSES: dict[str, type[Header]] = {
     "obj": OBJHeader,
     "csv": CSVHeader,
     "graph": GraphHeader,
-    "neuroglancer": NeuroglancerHeader,
 }
 
 

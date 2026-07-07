@@ -17,7 +17,7 @@ class TestPointCloudPipeline:
     def test_full_pipeline(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors.validate import validate
-        from zarr_vectors.multiresolution.coarsen import build_pyramid
+        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
         from zarr_vectors.core.store import list_resolution_levels, open_store
         from zarr_vectors_tools.export.csv_points import export_csv
 
@@ -99,7 +99,7 @@ class TestSkeletonPipeline:
     def test_swc_pipeline(self, tmp_path: Path) -> None:
         from zarr_vectors.types.graphs import read_graph
         from zarr_vectors.validate import validate
-        from zarr_vectors.multiresolution.strategies.graphs import prune_skeleton
+        from zarr_vectors_tools.multiresolution.strategies.graphs import prune_skeleton
         from zarr_vectors_tools.ingest.swc import ingest_swc
         from zarr_vectors_tools.export.swc import export_swc
 
@@ -153,7 +153,7 @@ class TestMeshPipeline:
     def test_obj_pipeline(self, tmp_path: Path) -> None:
         from zarr_vectors.types.meshes import read_mesh
         from zarr_vectors.validate import validate
-        from zarr_vectors.multiresolution.strategies.meshes import coarsen_mesh_cluster
+        from zarr_vectors_tools.multiresolution.strategies.meshes import coarsen_mesh_cluster
         from zarr_vectors_tools.ingest.obj import ingest_obj
         from zarr_vectors_tools.export.obj import export_obj
 
