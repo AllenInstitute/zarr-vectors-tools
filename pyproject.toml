@@ -27,10 +27,12 @@ classifiers = [
 dependencies = [
     # Core provides the read/write APIs, spatial/boundary helpers, and a basic
     # multi-scale layer; the rich coarsening/compute layer lives here in
-    # zarr_vectors_tools.multiresolution. Requires the core release that ships
-    # types.skeletons (AllenInstitute/zarr-vectors-py PR #26); finalize this pin
-    # to that release tag when it is cut.
-    "zarr-vectors>=0.3",
+    # zarr_vectors_tools.multiresolution. Tracks the post-0.2.0 dev line that
+    # carries PR #26 (types.skeletons + cells cross-chunk-link layout) and PR #27
+    # (plug-in strategy registry); the `.dev0` lower bound accepts the current
+    # setuptools-scm dev version (0.2.1.devN) and excludes the feature-less 0.2.0
+    # release. Bump to >=0.3 once core tags a v0.3.0 release.
+    "zarr-vectors>=0.2.1.dev0",
     "numpy>=1.24",
     "pandas>=2.0",
 ]
@@ -70,6 +72,9 @@ dev = [
     "ruff>=0.4",
     "jupyter>=1.0",
 ]
+
+[project.scripts]
+zvtools = "zarr_vectors_tools.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["zarr_vectors_tools*"]
