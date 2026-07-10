@@ -88,3 +88,9 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # ZVF stores every per-chunk array as Zarr's variable-length-bytes dtype,
+    # which has no stable Zarr v3 spec yet — the warning fires on every array
+    # and drowns the test output.  Silence just that one category.
+    "ignore::zarr.errors.UnstableSpecificationWarning",
+]

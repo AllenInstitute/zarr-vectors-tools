@@ -753,6 +753,11 @@ def _per_object_coarsen(
                 storage=cross_level_storage,
             )
 
+    # This coarsener writes serially (no cross-process manifest race), but
+    # re-derive the per-array ``nonempty_chunks`` manifests from disk anyway for
+    # uniformity with the parallel coarseners and idempotence.
+    level_group.rebuild_nonempty_manifests()
+
     return {
         "vertex_count": int(n_metavertices),
         "object_count": len(keep_oids),

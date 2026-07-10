@@ -713,6 +713,13 @@ def run_ingest(
                 cc_links.append((la, lb))
             sk.write_skeleton_cross_chunk_links(lg, cc_links, ndim=ndim)
 
+        # In aligned mode the level-0 per-chunk cells are written from parallel
+        # worker processes (``ex(_l0_extract_write, ...)`` above), whose per-array
+        # ``nonempty_chunks`` manifest RMWs race and can under-report.  Re-derive
+        # the manifests from the on-disk cells so the object-index build, store
+        # finalize, and the coarsening source scan below enumerate every chunk.
+        lg.rebuild_nonempty_manifests()
+
         _t2 = _time.perf_counter()
         oid_of = build_object_index(lg, records, ndim=ndim)
         sk.finalize_skeleton_store(root)
