@@ -17,7 +17,6 @@ Phase 6  Build multiscale pyramid via coarsen.build_pyramid.
 
 from __future__ import annotations
 
-import math
 import os
 import struct
 import tempfile
@@ -32,6 +31,7 @@ from zarr_vectors.core.arrays import (
     create_fragment_attribute_array,
     create_object_index_array,
     create_vertices_array,
+    level_grid_layout,
     write_chunk_fragment_attributes,
     write_chunk_vertices,
     write_cross_chunk_links,
@@ -242,6 +242,8 @@ def _phase_a_worker(
     trk_path = shared["trk_path"]
     header = shared["header"]
     chunk_shape = shared["chunk_shape"]
+    grid_shape = shared["grid_shape"]
+    grid_origin = shared["grid_origin"]
     intermediate_dir = shared["intermediate_dir"]
     dtype = shared["dtype"]
     compute_length = shared["compute_length"]
@@ -300,9 +302,22 @@ def _phase_a_worker(
                 verts_mm[write_cursor:write_cursor + n] = seg_verts
                 write_cursor += n
                 seg_poly_ids.append(poly_id)
-                seg_chunk_x.append(cc[0])
-                seg_chunk_y.append(cc[1])
-                seg_chunk_z.append(cc[2])
+                # Clamp the chunk assignment to the array grid derived from the
+                # TRK header bbox.  Vertices can sit fractionally outside that
+                # bbox (a point at z = -epsilon floors to chunk z = -1), which
+                # the single-array layout's grid bounds-check rejects.  Clamping
+                # the *assignment* (not the stored position) folds such boundary
+                # points into the edge chunk while keeping their exact
+                # coordinates, so no StoreError and no geometry change.
+                seg_chunk_x.append(
+                    min(max(int(cc[0]), grid_origin[0]), grid_origin[0] + grid_shape[0] - 1)
+                )
+                seg_chunk_y.append(
+                    min(max(int(cc[1]), grid_origin[1]), grid_origin[1] + grid_shape[1] - 1)
+                )
+                seg_chunk_z.append(
+                    min(max(int(cc[2]), grid_origin[2]), grid_origin[2] + grid_shape[2] - 1)
+                )
                 seg_vertex_counts.append(n)
 
             if compute_length:
@@ -604,12 +619,13 @@ def ingest_trk_parallel(
     bounds = _compute_bounds_from_header(header)
     chunk_shape = _compute_chunk_shape(bounds, num_chunks)
     lo, hi = bounds
-    extent = [hi[i] - lo[i] for i in range(3)]
-    grid_shape = (
-        max(1, math.ceil(extent[0] / chunk_shape[0])),
-        max(1, math.ceil(extent[1] / chunk_shape[1])),
-        max(1, math.ceil(extent[2] / chunk_shape[2])),
-    )
+    # Use the SAME (origin, grid_shape) the single-array layout derives for the
+    # on-disk arrays (floor-based, +1 to hold a point exactly on the max
+    # boundary) so the chunk-assignment clamp in Phase A matches the array grid
+    # exactly.  A ceil-based grid is one cell short on axes whose extent is an
+    # exact multiple of the chunk size (e.g. 189/9 = 21 cells can't hold the
+    # boundary chunk 21, which needs a grid of 22).
+    grid_origin, grid_shape = level_grid_layout(bounds, chunk_shape)
     _log(f"  bounds: {lo} → {hi} mm")
     _log(f"  chunk_shape: {chunk_shape}")
     _log(f"  grid: {grid_shape} = {grid_shape[0]*grid_shape[1]*grid_shape[2]} chunks")
@@ -705,6 +721,8 @@ def ingest_trk_parallel(
             "trk_path": str(input_path),
             "header": header,
             "chunk_shape": chunk_shape,
+            "grid_shape": grid_shape,
+            "grid_origin": grid_origin,
             "intermediate_dir": _intermediate_dir,
             "dtype": dtype,
             "compute_length": compute_length,
@@ -748,6 +766,14 @@ def ingest_trk_parallel(
             phase_b_results = executor(_phase_b_worker, chunk_list, shared=shared_b)
         else:
             phase_b_results = [_phase_b_worker(cc, shared_b) for cc in chunk_list]
+
+        # Phase B workers each read-modify-write the shared per-chunk arrays'
+        # ``nonempty_chunks`` manifest from separate processes, so those RMWs
+        # race and can under-report even though every cell file is on disk.
+        # Re-derive the manifests single-process from the on-disk cells before
+        # anything downstream enumerates chunks (coarsening source scan,
+        # algorithms readers).
+        level_group.rebuild_nonempty_manifests()
 
         # --- Coordinator: manifests + cross-chunk links -------------------
         _log("Coordinator: building manifests and cross-chunk links...")

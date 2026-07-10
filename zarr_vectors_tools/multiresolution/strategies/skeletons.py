@@ -410,6 +410,7 @@ def _build_local_plan(
     boundary_off: npt.NDArray,
     target_cs: npt.NDArray,
     source_cs: npt.NDArray,
+    ccl_cells: list | None = None,
 ) -> tuple[list[dict], dict, dict]:
     """Build ONE target chunk's coarsen plan by reading only its source children.
 
@@ -542,7 +543,6 @@ def _build_local_plan(
     # unlike geometric coincidence, handles BOTH coincident boundary vertices
     # AND phase-split (distinct-vertex) cross edges.
     from zarr_vectors_tools.multiresolution._ccl_compat import (
-        list_cross_chunk_link_leaves,
         read_cross_chunk_link_leaf,
     )
 
@@ -552,37 +552,30 @@ def _build_local_plan(
         for _m in _mems:
             oid_of_frag[_m] = _oid
     conns_by_oid: dict = defaultdict(list)
-    seen_cells: set = set()
-    for scc in child_ranges:
+    # ``ccl_cells`` are the source cross-chunk-link cells touching this target's
+    # children (enumerated once by the coordinator and bucketed per target).
+    for cell in (ccl_cells or ()):
         try:
-            cells = list_cross_chunk_link_leaves(src, delta=0, involves=scc)
+            recs = read_cross_chunk_link_leaf(src, cell, delta=0)
         except Exception:
-            cells = []
-        for cell in cells:
-            if cell in seen_cells:
+            continue
+        for rec in recs:
+            if len(rec) != 2:
                 continue
-            seen_cells.add(cell)
-            try:
-                recs = read_cross_chunk_link_leaf(src, cell, delta=0)
-            except Exception:
+            (ccA, viA), (ccB, viB) = rec
+            ccA = tuple(int(x) for x in ccA)
+            ccB = tuple(int(x) for x in ccB)
+            if ccA not in child_set or ccB not in child_set:
+                continue  # one endpoint outside this target chunk → cross-target
+            rA = _resolve(ccA, int(viA))
+            rB = _resolve(ccB, int(viB))
+            if rA is None or rB is None:
                 continue
-            for rec in recs:
-                if len(rec) != 2:
-                    continue
-                (ccA, viA), (ccB, viB) = rec
-                ccA = tuple(int(x) for x in ccA)
-                ccB = tuple(int(x) for x in ccB)
-                if ccA not in child_set or ccB not in child_set:
-                    continue  # one endpoint outside this target chunk → cross-target
-                rA = _resolve(ccA, int(viA))
-                rB = _resolve(ccB, int(viB))
-                if rA is None or rB is None:
-                    continue
-                oa = oid_of_frag.get((ccA, rA[0]))
-                ob = oid_of_frag.get((ccB, rB[0]))
-                if oa is None or oa != ob:
-                    continue
-                conns_by_oid[oa].append((ccA, rA[0], rA[1], ccB, rB[0], rB[1]))
+            oa = oid_of_frag.get((ccA, rA[0]))
+            ob = oid_of_frag.get((ccB, rB[0]))
+            if oa is None or oa != ob:
+                continue
+            conns_by_oid[oa].append((ccA, rA[0], rA[1], ccB, rB[0], rB[1]))
 
     groups: list[dict] = []
     for oid in sorted(members_by_oid):
@@ -711,6 +704,7 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
         src, tcc, scale=scale, ndim=ndim, attr_names=attr_names,
         attr_dtypes=attr_dtypes, keep_mask=keep_mask,
         boundary_off=boundary_off, target_cs=target_cs, source_cs=source_cs,
+        ccl_cells=payload.get("ccl_cells"),
     )
     input_fragments = int(len(vcache))
     input_vertices = int(sum(len(v) for v in vcache.values()))
@@ -1255,7 +1249,27 @@ def coarsen_skeleton_level(
         "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
         "sidecar_tmp_dir": str(sidecar_tmp_dir),
     }
-    payloadsA = [{"tcc": list(tcc)} for tcc in target_chunks]
+    # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
+    # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
+    # a per-target-per-child list_cross_chunk_link_leaves() scan
+    # (O(target_chunks × children × cells)) with a single O(cells) pass; workers
+    # then read only their bucket's cells.
+    from zarr_vectors_tools.multiresolution._ccl_compat import (
+        list_cross_chunk_link_leaves,
+    )
+    cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
+    for cell in list_cross_chunk_link_leaves(src, delta=0):
+        seen_t: set = set()
+        for c in cell:
+            t = tuple(int(c[a]) // scale[a] for a in range(ndim))
+            if t in seen_t:
+                continue
+            seen_t.add(t)
+            cells_by_target[t].append(cell)
+    payloadsA = [
+        {"tcc": list(tcc), "ccl_cells": cells_by_target.get(tuple(tcc), [])}
+        for tcc in target_chunks
+    ]
     _timings["setup"] = _time.perf_counter() - _t0
     _progress(f"phase A start: target_chunks={len(payloadsA)}")
     _tmap = _time.perf_counter()
@@ -1366,6 +1380,14 @@ def coarsen_skeleton_level(
         write_object_attributes(level_group, aname, out, present_mask=mask)
     _timings["object_attrs"] = _time.perf_counter() - _tattrs
     _progress(f"object attrs done: dt={_timings['object_attrs']:.2f}s")
+
+    # Phase A wrote the vertices / links / attribute cells from separate
+    # processes, whose per-array ``nonempty_chunks`` manifest RMWs race and can
+    # under-report.  Re-derive them single-process from the on-disk cells so the
+    # next level's coarsening source scan and the algorithms readers see every
+    # chunk.  (Phase B below only touches the per-cell cross-chunk-link group,
+    # which carries no such manifest.)
+    level_group.rebuild_nonempty_manifests()
 
     # --- Phase B: cross-target links, decentralized per ccl shard -------
     # Each adjacent target-chunk pair's k2 cell falls in one outer shard; group

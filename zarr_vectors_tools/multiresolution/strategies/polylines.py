@@ -356,6 +356,7 @@ def _build_local_polyline_plan(
     scale: tuple[int, ...],
     ndim: int,
     keep_mask: npt.NDArray[np.uint8] | None,
+    ccl_cells: list | None = None,
 ) -> tuple[list[dict], dict]:
     """Build ONE target chunk's coarsen plan by reading only its source children.
 
@@ -383,7 +384,6 @@ def _build_local_polyline_plan(
         read_chunk_vertices,
     )
     from zarr_vectors_tools.multiresolution._ccl_compat import (
-        list_cross_chunk_link_leaves,
         read_cross_chunk_link_leaf,
     )
     from zarr_vectors.exceptions import ArrayError
@@ -462,54 +462,47 @@ def _build_local_polyline_plan(
     intra_next: dict = {}
     cross_out: dict = {}  # member -> (partner tcc, link_key) its LAST vertex exits via
     cross_in: dict = {}   # member -> (partner tcc, link_key) its FIRST vertex entered via
-    seen_cells: set = set()
-    for scc in child_ranges:
+    # ``ccl_cells`` are the source cross-chunk-link cells touching this target's
+    # children (enumerated once by the coordinator and bucketed per target).
+    for cell in (ccl_cells or ()):
         try:
-            cells = list_cross_chunk_link_leaves(src, delta=0, involves=scc)
+            recs = read_cross_chunk_link_leaf(src, cell, delta=0)
         except Exception:
-            cells = []
-        for cell in cells:
-            if cell in seen_cells:
+            continue
+        for rec in recs:
+            if len(rec) != 2:
                 continue
-            seen_cells.add(cell)
-            try:
-                recs = read_cross_chunk_link_leaf(src, cell, delta=0)
-            except Exception:
+            (ccA, viA), (ccB, viB) = rec
+            ccA = tuple(int(x) for x in ccA)
+            ccB = tuple(int(x) for x in ccB)
+            viA = int(viA)
+            viB = int(viB)
+            inA = ccA in child_set
+            inB = ccB in child_set
+            if not inA and not inB:
                 continue
-            for rec in recs:
-                if len(rec) != 2:
+            rA = _resolve(ccA, viA) if inA else None
+            rB = _resolve(ccB, viB) if inB else None
+            memberA = (ccA, rA[0]) if rA is not None else None
+            memberB = (ccB, rB[0]) if rB is not None else None
+            if memberA is not None and memberA not in vcache:
+                memberA = None
+            if memberB is not None and memberB not in vcache:
+                memberB = None
+            if memberA is None and memberB is None:
+                continue
+            if memberA is not None and memberB is not None:
+                if fragoid.get(memberA) != fragoid.get(memberB):
                     continue
-                (ccA, viA), (ccB, viB) = rec
-                ccA = tuple(int(x) for x in ccA)
-                ccB = tuple(int(x) for x in ccB)
-                viA = int(viA)
-                viB = int(viB)
-                inA = ccA in child_set
-                inB = ccB in child_set
-                if not inA and not inB:
-                    continue
-                rA = _resolve(ccA, viA) if inA else None
-                rB = _resolve(ccB, viB) if inB else None
-                memberA = (ccA, rA[0]) if rA is not None else None
-                memberB = (ccB, rB[0]) if rB is not None else None
-                if memberA is not None and memberA not in vcache:
-                    memberA = None
-                if memberB is not None and memberB not in vcache:
-                    memberB = None
-                if memberA is None and memberB is None:
-                    continue
-                if memberA is not None and memberB is not None:
-                    if fragoid.get(memberA) != fragoid.get(memberB):
-                        continue
-                    intra_next[memberA] = memberB
-                elif memberA is not None:
-                    partner_tcc = tuple(int(ccB[a]) // scale[a] for a in range(ndim))
-                    link_key = (ccA, viA, ccB, viB)
-                    cross_out[memberA] = (partner_tcc, link_key)
-                else:
-                    partner_tcc = tuple(int(ccA[a]) // scale[a] for a in range(ndim))
-                    link_key = (ccA, viA, ccB, viB)
-                    cross_in[memberB] = (partner_tcc, link_key)
+                intra_next[memberA] = memberB
+            elif memberA is not None:
+                partner_tcc = tuple(int(ccB[a]) // scale[a] for a in range(ndim))
+                link_key = (ccA, viA, ccB, viB)
+                cross_out[memberA] = (partner_tcc, link_key)
+            else:
+                partner_tcc = tuple(int(ccA[a]) // scale[a] for a in range(ndim))
+                link_key = (ccA, viA, ccB, viB)
+                cross_in[memberB] = (partner_tcc, link_key)
 
     members_by_oid: dict[int, list] = defaultdict(list)
     for m, oid in fragoid.items():
@@ -592,6 +585,7 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
 
     groups, vcache = _build_local_polyline_plan(
         src, tcc, scale=scale, ndim=ndim, keep_mask=keep_mask,
+        ccl_cells=payload.get("ccl_cells"),
     )
     input_fragments = int(len(vcache))
     input_vertices = int(sum(len(v) for v in vcache.values()))
@@ -1028,7 +1022,27 @@ def coarsen_polyline_level(
         "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
         "sidecar_tmp_dir": str(sidecar_tmp_dir),
     }
-    payloadsA = [{"tcc": list(tcc)} for tcc in target_chunks]
+    # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
+    # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
+    # a per-target-per-child list_cross_chunk_link_leaves() scan
+    # (O(target_chunks × children × cells)) with a single O(cells) pass; workers
+    # then read only their bucket's cells.
+    from zarr_vectors_tools.multiresolution._ccl_compat import (
+        list_cross_chunk_link_leaves,
+    )
+    cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
+    for cell in list_cross_chunk_link_leaves(src, delta=0):
+        seen_t: set = set()
+        for c in cell:
+            t = tuple(int(c[a]) // scale[a] for a in range(ndim))
+            if t in seen_t:
+                continue
+            seen_t.add(t)
+            cells_by_target[t].append(cell)
+    payloadsA = [
+        {"tcc": list(tcc), "ccl_cells": cells_by_target.get(tuple(tcc), [])}
+        for tcc in target_chunks
+    ]
 
     manifest_blobs: list[bytes] = []
     empty_blob = b"\x00\x00\x00\x00"
@@ -1109,6 +1123,14 @@ def coarsen_polyline_level(
             out[present_oids] = src_data[present_oids]
         create_object_attributes_array(level_group, aname, dtype=str(src_data.dtype))
         write_object_attributes(level_group, aname, out, present_mask=mask)
+
+    # Phase A wrote the vertices / fragment-attribute cells from separate
+    # processes, whose per-array ``nonempty_chunks`` manifest RMWs race and can
+    # under-report.  Re-derive them single-process from the on-disk cells so the
+    # next level's coarsening source scan and the algorithms readers see every
+    # chunk.  (Phase B below only touches the per-cell cross-chunk-link group,
+    # which carries no such manifest.)
+    level_group.rebuild_nonempty_manifests()
 
     # --- Phase B: cross-target links, decentralized per ccl shard ---------
     # ``cross_target_pairs`` (gathered above from Phase A's actual reports)
