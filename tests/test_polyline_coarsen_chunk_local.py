@@ -42,8 +42,23 @@ from zarr_vectors.core.arrays import (
     read_cross_chunk_links,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors.types.polylines import write_polylines
+from zarr_vectors.types.polylines import write_polylines as _write_polylines_raw
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
+
+from .conftest import stamp_segment_id_from_manifests
+
+
+def write_polylines(store_path, polylines, **kwargs):
+    """``write_polylines`` + derive ``fragment_attributes/segment_id``.
+
+    zarr-vectors-py 0.8.1's ``write_polylines`` no longer auto-writes
+    ``segment_id`` (see ``stamp_segment_id_from_manifests``), which
+    ``coarsen_polyline_level`` hard-requires on its source level.
+    """
+    summary = _write_polylines_raw(store_path, polylines, **kwargs)
+    root = open_store(str(store_path), mode="r+")
+    stamp_segment_id_from_manifests(get_resolution_level(root, 0))
+    return summary
 
 
 # ===================================================================

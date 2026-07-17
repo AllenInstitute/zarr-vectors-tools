@@ -10,10 +10,13 @@ Importing this package registers the multi-scale coordinators with core:
 
 - the coarsener registry (``register_coarsener("skeleton"/"per_object", ...)``)
   is populated by importing ``...multiresolution.coarsen``, so
-  ``coarsen_level`` / ``build_pyramid`` dispatch works; and
-- the pyramid-refresh hook is filled via
-  ``zarr_vectors.ops.register_pyramid_refresher`` so
-  ``EditSession(refresh_pyramid=...)`` can re-coarsen after edits.
+  ``coarsen_level`` / ``build_pyramid`` dispatch works.
+
+Under zarr-vectors-py 0.8.1, pyramid refresh after ``zarr_vectors.ops.edit``
+edits is handled natively by ``zarr_vectors.ops.refresh``/
+``rebuild_pyramid_from_level`` — the ``register_pyramid_refresher``
+injection slot this package used to fill on 0.8.0 no longer exists, so
+there is nothing to wire here for that feature.
 """
 
 
@@ -21,10 +24,6 @@ def _register_multiscale_with_core() -> None:
     """Wire the tools coordination layer into core's injection slots (idempotent)."""
     # Importing coarsen runs its bottom-of-module register_coarsener(...) calls.
     from zarr_vectors_tools.multiresolution import coarsen as _coarsen  # noqa: F401
-    from zarr_vectors.ops import register_pyramid_refresher
-    from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
-
-    register_pyramid_refresher(rebuild_pyramid_from_level)
 
 
 _register_multiscale_with_core()

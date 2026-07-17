@@ -80,6 +80,15 @@ class TestStreamlinesWithSparsity:
             chunk_shape=(200., 200., 200.),
             bin_shape=(50., 50., 50.),
         )
+        # zarr-vectors-py 0.8.1's write_polylines no longer auto-writes
+        # fragment_attributes/segment_id, which coarsen_polyline_level
+        # hard-requires on its source level.
+        from tests.conftest import stamp_segment_id_from_manifests
+        from zarr_vectors.core.store import get_resolution_level, open_store
+
+        stamp_segment_id_from_manifests(
+            get_resolution_level(open_store(store, mode="r+"), 0)
+        )
 
         summary = build_pyramid(store, factors=[(2.0, 2.0)])
         assert summary["levels_created"] == 1
@@ -233,14 +242,19 @@ class TestOMEZarrMetadata:
         assert "type" not in ms[0]
         assert len(ms[0]["datasets"]) == 3
 
-        # Verify scales
+        # Verify scales — cumulative across levels: factors=[2.0, 4.0]
+        # means level 1's scale is 2.0 relative to level 0, and level 2's
+        # is 2.0 * 4.0 = 8.0 relative to level 0 (not 4.0 — that would be
+        # only the level-1→2 step's own factor, ignoring the level-0→1
+        # step already baked into it).
         assert get_level_scale(root, 0) == [1.0, 1.0, 1.0]
         assert get_level_scale(root, 1) == [2.0, 2.0, 2.0]
-        assert get_level_scale(root, 2) == [4.0, 4.0, 4.0]
+        assert get_level_scale(root, 2) == [8.0, 8.0, 8.0]
 
-        # Translation = bin_shape / 2
+        # Translation = bin_shape / 2, where bin_shape is likewise
+        # cumulative: level 1 = 50*2 = 100 → 50; level 2 = 100*4 = 400 → 200.
         assert get_level_translation(root, 1) == [50.0, 50.0, 50.0]
-        assert get_level_translation(root, 2) == [100.0, 100.0, 100.0]
+        assert get_level_translation(root, 2) == [200.0, 200.0, 200.0]
 
         # Round-trip
         ms_read = read_multiscale_metadata(root)

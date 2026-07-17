@@ -87,12 +87,20 @@ class TestLazyDaskParallel:
 
 
 class TestShardReshardChain:
-    """Shard → reshard → unshard round-trip with data integrity."""
+    """Shard → reshard → unshard round-trip with data integrity.
+
+    zarr-vectors-py 0.8.1 dropped the choosable curve-ordering shard
+    layouts (octree/snake/index_table — ``ShardLayout`` no longer takes a
+    ``layout=``/``shard_size=`` pair; there is exactly one native layout,
+    a Zarr v3 ``sharding_indexed`` codec addressed by ``shard_shape``).
+    ``reshard(store_path, shard_shape)`` replaces the old
+    ``reshard(store_path, ShardLayout.X, shard_size=N)`` — ``shard_shape``
+    (an int or per-axis tuple) shards, ``None`` unshards.
+    """
 
     def test_shard_chain(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors.sharding.io import reshard, is_sharded, get_shard_info
-        from zarr_vectors.sharding.layout import ShardLayout
         from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
@@ -101,21 +109,22 @@ class TestShardReshardChain:
         write_points(store, positions, chunk_shape=(100., 100., 100.))
         r_before = read_points(store)
 
-        # flat → octree
-        reshard(store, ShardLayout.OCTREE, shard_size=8)
+        # flat → sharded (shard_shape=8)
+        reshard(store, 8)
         assert is_sharded(store)
-        assert get_shard_info(store)["layout"] == "octree"
+        info = get_shard_info(store)
+        assert info["sharded"] is True
+        assert info["shard_count"] > 0
+        assert all(a["shard_shape"] == [8, 8, 8] for a in info["arrays"])
 
-        # octree → snake
-        reshard(store, ShardLayout.SNAKE, shard_size=16)
-        assert get_shard_info(store)["layout"] == "snake"
+        # re-shard with a different shard_shape (still sharded)
+        reshard(store, 16)
+        assert is_sharded(store)
+        info = get_shard_info(store)
+        assert all(a["shard_shape"] == [16, 16, 16] for a in info["arrays"])
 
-        # snake → index_table
-        reshard(store, ShardLayout.INDEX_TABLE, shard_size=4)
-        assert get_shard_info(store)["layout"] == "index_table"
-
-        # index_table → flat
-        reshard(store, ShardLayout.FLAT)
+        # sharded → flat
+        reshard(store, None)
         assert not is_sharded(store)
 
         # Data survives
@@ -138,7 +147,6 @@ class TestShardedPyramid:
         from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
         from zarr_vectors.sharding.io import reshard, is_sharded
-        from zarr_vectors.sharding.layout import ShardLayout
         from zarr_vectors.core.store import open_store, list_resolution_levels
         from zarr_vectors.validate import validate
 
@@ -152,12 +160,12 @@ class TestShardedPyramid:
         build_pyramid(store, factors=[(2.0, 1.0), (2.0, 1.0)])
         levels_before = list_resolution_levels(open_store(store))
 
-        # Shard
-        reshard(store, ShardLayout.OCTREE, shard_size=8)
+        # Shard (shard_shape=8)
+        reshard(store, 8)
         assert is_sharded(store)
 
         # Unshard
-        reshard(store, ShardLayout.FLAT)
+        reshard(store, None)
         levels_after = list_resolution_levels(open_store(store))
         assert levels_after == levels_before
 

@@ -147,7 +147,7 @@ class PlainPrecomputedReader:
     # ------------------------------------------------------------------
     # Internal helpers
 
-    def _read_info(self) -> dict[str, Any]:
+    def _read_json(self, relpath: str) -> dict[str, Any] | None:
         from cloudfiles import CloudFiles
 
         # Strip the "precomputed://" scheme that cloud-volume uses but
@@ -155,22 +155,36 @@ class PlainPrecomputedReader:
         url = self.base_url
         if url.startswith("precomputed://"):
             url = url[len("precomputed://"):]
-        cf = CloudFiles(url)
-        info = cf.get_json("info")
+        return CloudFiles(url).get_json(relpath)
+
+    def _read_info(self) -> dict[str, Any]:
+        info = self._read_json("info")
         if info is None:
             raise FileNotFoundError(f"no info at {self.base_url}/info")
         return info
 
     def _build_info(self) -> PlainSkeletonInfo:
         raw = self._raw_info
-        transform_raw = raw.get("transform", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0])
+        # `vertex_attributes` and the skeleton `transform` live in the
+        # SKELETON sub-info (`<skeletons>/info`), NOT the top-level layer
+        # info — the layer info only points at the skeletons directory
+        # (`skeletons`) and the segment-properties directory.  Reading them
+        # from the layer info yields an empty attribute list, silently
+        # dropping per-vertex data such as Mouselight's `vertex_types`
+        # (axon/dendrite compartment code) and `radius`.
+        skeletons_dir = raw.get("skeletons", "skeleton")
+        skel_info = self._read_json(f"{skeletons_dir}/info") or {}
+        transform_raw = skel_info.get(
+            "transform",
+            raw.get("transform", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]),
+        )
         transform = _parse_4x3_transform(transform_raw)
         return PlainSkeletonInfo(
             base_url=self.base_url,
             transform=transform,
-            vertex_attributes=raw.get("vertex_attributes", []) or [],
+            vertex_attributes=skel_info.get("vertex_attributes", []) or [],
             seg_props_path=raw.get("segment_properties"),
-            sharding=raw.get("sharding"),
+            sharding=skel_info.get("sharding", raw.get("sharding")),
         )
 
     # ------------------------------------------------------------------
@@ -420,6 +434,7 @@ def run_ingest_plain(
     progress: bool = True,
     read_workers: int = 8,
     pyramid_workers: int | None = None,
+    shard_shape: int | tuple[int, ...] | None = 2,
 ) -> dict[str, Any]:
     """Ingest a plain precomputed skeleton layer to a multiscale zarr-vectors store.
 
@@ -563,6 +578,7 @@ def run_ingest_plain(
         attribute_dtypes=attribute_dtypes,
         backend=backend,
         coordinate_offset=coord_off,
+        shard_shape=shard_shape,
     )
 
     # ------------------------------------------------------------------
@@ -612,12 +628,35 @@ def run_ingest_plain(
     records: list[tuple[int, ChunkCoords, int]] = []
     gid_loc: dict[int, tuple[ChunkCoords, int]] = {}
 
-    for cc, pieces in sorted(pieces_by_cc.items()):
-        recs, alocs = sk.write_skeleton_chunk(
-            lg, cc, pieces, attr_dtypes=np_attr_dtypes,
+    # Per-chunk writes must happen inside a native-sharded write session with
+    # the SAME shard_shape/bounds/chunk_shape used to create the arrays in
+    # init_skeleton_store, so each chunk lands in its sharded cell (rather
+    # than an unsharded per-chunk file neuroglancer can't read).  Serial, so
+    # no cross-writer shard race.
+    from contextlib import nullcontext
+
+    from zarr_vectors.core.arrays import open_write_session
+
+    _shard_eff = shard_shape
+    if _shard_eff is not None and any(float(b) < 0 for b in store_bounds[0]):
+        _shard_eff = None
+    _write_session = (
+        open_write_session(
+            lg,
+            shard_shape=_shard_eff,
+            bounds=store_bounds,
+            chunk_shape=chunk_shape_nm,
         )
-        records.extend(recs)
-        gid_loc.update(alocs)
+        if _shard_eff is not None
+        else nullcontext()
+    )
+    with _write_session:
+        for cc, pieces in sorted(pieces_by_cc.items()):
+            recs, alocs = sk.write_skeleton_chunk(
+                lg, cc, pieces, attr_dtypes=np_attr_dtypes,
+            )
+            records.extend(recs)
+            gid_loc.update(alocs)
 
     if progress:
         print(f"  [plain-ingest] {len(records)} fragments written", flush=True)
@@ -733,6 +772,7 @@ def run_ingest_plain(
                         sparsity_strategy=sparsity_strategy,
                         drop_interior_below=int(drop_interior_below or 0),
                         executor=None,
+                        shard_shape=shard_shape,
                     )
                 else:
                     with dask_executor(level_workers) as level_ex:
@@ -744,6 +784,7 @@ def run_ingest_plain(
                             sparsity_strategy=sparsity_strategy,
                             drop_interior_below=int(drop_interior_below or 0),
                             executor=level_ex,
+                            shard_shape=shard_shape,
                         )
                 summary.setdefault("pyramid", {"levels": [], "num_levels": 0})
                 summary["pyramid"]["levels"].append(lv)
@@ -757,6 +798,7 @@ def run_ingest_plain(
                 sparsity_strategy=sparsity_strategy,
                 drop_interior_below=int(drop_interior_below or 0),
                 executor=None,
+                shard_shape=shard_shape,
             )
 
     return summary

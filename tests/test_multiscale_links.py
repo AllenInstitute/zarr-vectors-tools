@@ -388,17 +388,30 @@ def test_build_pyramid_implicit_only_plus(tmp_path: Path) -> None:
 # ===================================================================
 
 class TestShardedLayoutV1:
-    """Cover the on-disk shape introduced by the v0.8 kN-array layout.
+    """Cover cross_chunk_links behavior that survives the 0.8.1 layout swap.
 
-    Sharding is a recommended writer-side codec choice, not a
-    format-level mandate; readers detect the v0.8 layout structurally
-    (presence of ``kK`` sub-arrays) rather than via a discriminator
-    attribute.
+    zarr-vectors-py main replaced the v0.8 ``sharded_v1`` kN-array layout
+    (per-K multidim vlen arrays, addressed by lex-sorted chunk-set shard
+    coordinates) with a flat per-cell-key layout (one small array per
+    canonical-sorted chunk tuple, endpoint order recovered via a
+    Lehmer-coded ``perm_idx`` — see ``write_cross_chunk_links``'s
+    docstring). That on-disk structure is no longer reachable through any
+    public API (``read_cross_chunk_link_leaf``, ``list_cross_chunk_link_leaves``,
+    and the kK sub-array structure itself are gone), so the tests that used
+    to assert it directly (kK array existence, ``chunk_origin`` attrs,
+    per-leaf lookup, lex-canonicalized delta=0 read-back) were removed
+    rather than adapted — main also changed the *behavior* they tested:
+    endpoint order is now always preserved on read-back (never
+    lex-canonicalized), even for undirected delta=0 families.
+
+    The two tests below still exercise real, current behavior through the
+    public API only. Coverage for the streamline pipeline's actual use
+    (directed order preservation, canonical cell addressing) lives in
+    ``test_polyline_coarsen_chunk_local.py``.
     """
 
     def test_no_layout_attr_written_on_group(self, tmp_path: Path) -> None:
-        # The format no longer stamps a ``layout`` discriminator — the
-        # presence of ``kK`` Array children is the structural signal.
+        # The format no longer stamps a ``layout`` discriminator.
         lg = _make_level_group(tmp_path)
         create_cross_chunk_links_array(lg, delta=0)
         write_cross_chunk_links(
@@ -406,85 +419,6 @@ class TestShardedLayoutV1:
         )
         meta = lg.read_array_meta(cross_chunk_links_path(0))
         assert "layout" not in meta
-
-    def test_structural_detection_of_legacy_blob(self, tmp_path: Path) -> None:
-        # Synthesize a legacy single-blob layout and confirm the reader
-        # raises with a migration hint when it encounters one.
-        import zarr
-        from zarr_vectors.core.arrays import read_cross_chunk_links
-        from zarr_vectors.core.group import Group
-        from zarr_vectors.exceptions import ArrayError
-
-        store_path = tmp_path / "legacy.zarrvectors"
-        root = zarr.open_group(store=str(store_path), mode="w")
-        level = root.require_group("0")
-        ccl_group = level.require_group("cross_chunk_links").require_group("0")
-        data_arr = ccl_group.create_array(
-            name="data", shape=(8,), chunks=(8,), dtype="uint8",
-        )
-        data_arr.attrs.update({
-            "zv_array": "cross_chunk_links",
-            "sid_ndim": 3,
-            "level_delta": 0,
-            "link_width": 2,
-        })
-        lg = Group._from_zarr(level)
-        with pytest.raises(ArrayError, match="legacy.*data.*blob"):
-            read_cross_chunk_links(lg, delta=0)
-
-    def test_kN_arrays_exist_per_distinct_K(self, tmp_path: Path) -> None:
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0, link_width=3)
-        records = [
-            # K=2 face: two distinct chunks among three vertices
-            [((0, 0, 0), 1), ((1, 0, 0), 2), ((0, 0, 0), 3)],
-            # K=3 face: three distinct chunks
-            [((0, 0, 0), 4), ((1, 0, 0), 5), ((0, 1, 0), 6)],
-        ]
-        write_cross_chunk_links(
-            lg, records, sid_ndim=3, link_width=3,
-        )
-        # Both k2 and k3 should exist on disk.
-        parent = cross_chunk_links_path(0)
-        children = list(lg.zarr_group[parent])
-        assert "k2" in children
-        assert "k3" in children
-        # k1 should NOT exist (no records had K=1).
-        assert "k1" not in children
-
-    def test_per_leaf_lookup_round_trips(self, tmp_path: Path) -> None:
-        from zarr_vectors.core.arrays import read_cross_chunk_link_leaf
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        records = [
-            (((0, 0, 0), 5), ((1, 0, 0), 2)),
-            (((0, 0, 0), 7), ((2, 0, 0), 3)),
-        ]
-        write_cross_chunk_links(lg, records, sid_ndim=3)
-        # Direct cell read: chunks (0,0,0) + (1,0,0) → 1 record back.
-        leaf = read_cross_chunk_link_leaf(
-            lg, ((0, 0, 0), (1, 0, 0)), delta=0,
-        )
-        assert len(leaf) == 1
-        assert (tuple(leaf[0][0][0]), leaf[0][0][1]) == ((0, 0, 0), 5)
-        assert (tuple(leaf[0][1][0]), leaf[0][1][1]) == ((1, 0, 0), 2)
-
-    def test_canonical_ci_for_l2_delta0(self, tmp_path: Path) -> None:
-        """A record written with the larger chunk first comes back with
-        the smaller chunk as endpoint 0 (ci=[0,1] canonicalization)."""
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        # B > A in lex order; pass B first.
-        a, b = (0, 0, 0), (1, 0, 0)
-        write_cross_chunk_links(
-            lg, [(((b, 5)), ((a, 2)))], sid_ndim=3,
-        )
-        out = read_cross_chunk_links(lg, delta=0)
-        assert len(out) == 1
-        # Endpoint 0 (smaller chunk by lex) should be ((0,0,0), 2),
-        # endpoint 1 should be ((1,0,0), 5).
-        assert tuple(out[0][0][0]) == a and out[0][0][1] == 2
-        assert tuple(out[0][1][0]) == b and out[0][1][1] == 5
 
     def test_delta_plus_one_preserves_endpoint_order(
         self, tmp_path: Path,
@@ -503,33 +437,3 @@ class TestShardedLayoutV1:
         # Endpoint 0 must still be the (1,0,0) side — no canonicalization.
         assert tuple(out[0][0][0]) == (1, 0, 0) and out[0][0][1] == 7
         assert tuple(out[0][1][0]) == (0, 0, 0) and out[0][1][1] == 3
-
-    def test_chunk_origin_attr_present_on_kK_arrays(
-        self, tmp_path: Path,
-    ) -> None:
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        write_cross_chunk_links(
-            lg, [(((0, 0, 0), 1), ((1, 0, 0), 2))], sid_ndim=3,
-        )
-        kN_arr = lg.zarr_group[cross_chunk_links_path(0)]["k2"]
-        assert "chunk_origin" in kN_arr.attrs
-
-    def test_list_leaves_enumerates_populated_cells(
-        self, tmp_path: Path,
-    ) -> None:
-        from zarr_vectors.core.arrays import list_cross_chunk_link_leaves
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        records = [
-            (((0, 0, 0), 1), ((1, 0, 0), 2)),
-            (((0, 0, 0), 3), ((2, 0, 0), 4)),
-        ]
-        write_cross_chunk_links(lg, records, sid_ndim=3)
-        leaves = list_cross_chunk_link_leaves(lg, delta=0)
-        # Two cells, both K=2.
-        assert len(leaves) == 2
-        assert all(len(L) == 2 for L in leaves)
-        # Each cell's chunk-tuple list is sorted lex.
-        for L in leaves:
-            assert L == tuple(sorted(L))

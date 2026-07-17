@@ -39,7 +39,22 @@ from zarr_vectors.core.store import (
 from zarr_vectors.lazy.store import open_zv
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
 from zarr_vectors.spatial.chunking import neighbouring_chunk_keys
-from zarr_vectors.types.polylines import write_polylines
+from zarr_vectors.types.polylines import write_polylines as _write_polylines_raw
+
+from .conftest import stamp_segment_id_from_manifests
+
+
+def write_polylines(store_path, polylines, **kwargs):
+    """``write_polylines`` + derive ``fragment_attributes/segment_id``.
+
+    zarr-vectors-py 0.8.1's ``write_polylines`` no longer auto-writes
+    ``segment_id`` (see ``stamp_segment_id_from_manifests``), which
+    ``coarsen_polyline_level`` hard-requires on its source level.
+    """
+    summary = _write_polylines_raw(store_path, polylines, **kwargs)
+    root = open_store(str(store_path), mode="r+")
+    stamp_segment_id_from_manifests(get_resolution_level(root, 0))
+    return summary
 
 
 # ===================================================================
@@ -314,9 +329,13 @@ def test_object_attribute_present_mask_roundtrip(tmp_path):
     mask = read_object_attribute_present_mask(lvl1, "score")
     assert mask is not None
     assert mask.shape == (20,)
-    # Present rows have their source value; absent rows are zero.
+    # Present rows have their source value; absent rows carry the 0.8.1
+    # default "absent" sentinel (NaN for floats — write_object_attributes
+    # overwrites present_mask=0 rows with fill_value in-band; the old
+    # data+present_mask sibling-array layout left them as whatever the
+    # caller's zero-filled array already had).
     for oid in range(20):
         if mask[oid]:
             assert out[oid] == oid
         else:
-            assert out[oid] == 0
+            assert np.isnan(out[oid])

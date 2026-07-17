@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import math
 import os
+import pickle
+import shutil
 import struct
 import tempfile
 from pathlib import Path
@@ -27,16 +29,21 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from zarr_vectors.constants import CAP_MULTISCALE_LINKS, FRAGMENT_ATTRIBUTES, VERTICES
 from zarr_vectors.core.arrays import (
+    OBJECT_INDEX,
+    OBJECT_INDEX_LAYOUT_V1,
+    _write_object_index_manifests,
     create_cross_chunk_links_array,
     create_fragment_attribute_array,
     create_object_index_array,
     create_vertices_array,
-    write_chunk_fragment_attributes,
-    write_chunk_vertices,
-    write_cross_chunk_links,
-    write_object_index,
+    open_write_session,
+    write_chunk_fragment_attributes_batch,
+    write_chunk_vertices_batch,
+    write_cross_chunk_links_bulk,
 )
+from zarr_vectors.encoding.fragments import encode_object_manifest_blocks
 from zarr_vectors.core.metadata import LevelMetadata
 from zarr_vectors.core.store import create_resolution_level, create_store, open_store
 from zarr_vectors.spatial.boundary import (
@@ -45,7 +52,10 @@ from zarr_vectors.spatial.boundary import (
 )
 from zarr_vectors.typing import ChunkShape
 
-from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+from zarr_vectors_tools.multiresolution.coarsen import (
+    _stamp_root_capability,
+    build_pyramid,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -343,61 +353,108 @@ def _phase_a_worker(
 # Phase B worker: assemble one spatial chunk from all N parts
 # ---------------------------------------------------------------------------
 
-def _phase_b_worker(
-    chunk_coords: tuple[int, int, int],
-    shared: dict[str, Any],
-) -> dict[str, Any]:
-    """Write one spatial chunk's level-0 data from all part .npz files.
+def _load_part_chunk_index(npz_path: str) -> dict[str, Any]:
+    """Load one part's segment-index arrays ONCE and group them by spatial
+    chunk coordinate, for reuse across every chunk a Phase-B task handles.
 
-    Loads this chunk's segments from every part file in ascending
-    (part_index, poly_id, seg_idx_within_poly) order — the determinism pin.
-
-    Returns a dict mapping (part_index, poly_id, seg_idx_within_poly) →
-    (chunk_coords, fragment_idx, first_local_row, last_local_row).
+    ``.npz`` is a zip archive: each array access on a freshly-``np.load``ed
+    file decompresses it again from disk. Loading + grouping once per
+    (part, task) — instead of once per (part, chunk) — matters now that a
+    single task owns every chunk in one shard (see the shard-batching
+    comment on :func:`_phase_b_worker`): a shard can hold dozens of
+    occupied chunks, and reloading every part file from scratch for each
+    one was observed to build up several GiB of "unmanaged" worker memory
+    (repeated zip-decompression garbage the allocator didn't return to the
+    OS fast enough) under real multi-worker runs, triggering dask worker
+    restarts.
     """
-    part_npz_paths = shared["part_npz_paths"]
-    store_path = shared["store_path"]
-    dtype = shared["dtype"]
-    out_dtype = np.dtype(dtype)
+    data = np.load(npz_path)
+    px = data["seg_chunk_x"]
+    py = data["seg_chunk_y"]
+    pz = data["seg_chunk_z"]
+    seg_poly_ids = data["seg_poly_ids"]
+    seg_vtx_counts = data["seg_vertex_counts"]
+    vtx_starts = np.concatenate([[0], np.cumsum(seg_vtx_counts)])[:-1]
 
+    # Vectorised within_poly_idx: position of each segment within its polyline.
+    # seg_poly_ids is monotonically non-decreasing within each part (Phase A
+    # writes segments in poly_id order), so group boundaries are diff > 0.
+    change_pts = np.concatenate([[0], np.where(np.diff(seg_poly_ids))[0] + 1])
+    group_id = np.searchsorted(change_pts, np.arange(len(seg_poly_ids)), side="right") - 1
+    within_poly_idx_arr = np.arange(len(seg_poly_ids)) - change_pts[group_id]
+    del data  # release the npz handle; derived arrays above are independent copies
+
+    # Group every segment's index by its chunk coordinate, once, via a
+    # single lexsort — replaces an O(all_segments) boolean mask per chunk.
+    n = len(px)
+    chunk_to_match_idx: dict[tuple[int, int, int], npt.NDArray] = {}
+    if n > 0:
+        order = np.lexsort((pz, py, px))
+        px_s, py_s, pz_s = px[order], py[order], pz[order]
+        changed = np.empty(n, dtype=bool)
+        changed[0] = True
+        changed[1:] = (
+            (px_s[1:] != px_s[:-1]) | (py_s[1:] != py_s[:-1]) | (pz_s[1:] != pz_s[:-1])
+        )
+        group_starts = np.flatnonzero(changed)
+        group_ends = np.append(group_starts[1:], n)
+        for s, e in zip(group_starts, group_ends):
+            key = (int(px_s[s]), int(py_s[s]), int(pz_s[s]))
+            chunk_to_match_idx[key] = order[s:e]
+
+    return {
+        "chunk_to_match_idx": chunk_to_match_idx,
+        "seg_poly_ids": seg_poly_ids,
+        "within_poly_idx_arr": within_poly_idx_arr,
+        "vtx_starts": vtx_starts,
+        "seg_vtx_counts": seg_vtx_counts,
+        "verts_npy_path": npz_path.replace(".npz", ".verts.npy"),
+    }
+
+
+def _phase_b_assemble_one_chunk(
+    chunk_coords: tuple[int, int, int],
+    per_part: list[dict[str, Any]],
+    out_dtype: np.dtype,
+) -> tuple[
+    list[npt.NDArray],
+    npt.NDArray,
+    npt.NDArray,
+] | None:
+    """Assemble (but do not write) one spatial chunk's level-0 data from a
+    PRE-SLICED per-part payload (built by the coordinator for this chunk;
+    see the per-shard spill in :func:`ingest_trk_parallel`).
+
+    ``per_part`` is a list of dicts, one per contributing part, each with
+    the segment rows already restricted to THIS chunk:
+    ``{part_idx, verts_npy_path, poly_ids, within, vtx_starts, vtx_counts}``.
+    Segments are taken in ascending (part_index, poly_id, seg_within_poly)
+    order — the determinism pin. Writing is deferred to the caller
+    (:func:`_phase_b_worker`), which batches every chunk in the task into
+    one write per array.
+
+    Returns ``None`` if this chunk has no records, else
+    ``(vert_groups, seg_ids, seg_rows)`` where ``seg_rows`` is a compact
+    ``(n_segments, 9)`` int64 array with columns
+    ``[part_idx, poly_id, within, cx, cy, cz, frag_idx, first_row, last_row]``.
+    A dense array (rather than a dict-of-tuples) keeps the coordinator's
+    fragment map O(segments) *dense* instead of paying Python dict+tuple
+    overhead (~14x), which was the dominant coordinator-RSS term at scale.
+    """
     # Records for this chunk across all parts, in (part, poly_id, seg_within_poly) order
     # We collect: (part_idx, poly_id, seg_idx_within_poly, vertex_array)
     records: list[tuple[int, int, int, npt.NDArray]] = []
 
-    for part_idx, npz_path in enumerate(part_npz_paths):
-        data = np.load(npz_path)
-        px = data["seg_chunk_x"]
-        py = data["seg_chunk_y"]
-        pz = data["seg_chunk_z"]
-        mask = (px == chunk_coords[0]) & (py == chunk_coords[1]) & (pz == chunk_coords[2])
-        if not np.any(mask):
-            del data
-            continue
+    for pp in per_part:
+        part_idx = int(pp["part_idx"])
+        m_poly_ids = pp["poly_ids"]
+        m_within = pp["within"]
+        m_vtx_starts = pp["vtx_starts"]
+        m_vtx_counts = pp["vtx_counts"]
 
-        seg_poly_ids = data["seg_poly_ids"]
-        seg_vtx_counts = data["seg_vertex_counts"]
-        vtx_starts = np.concatenate([[0], np.cumsum(seg_vtx_counts)])[:-1]
+        vertices = np.load(pp["verts_npy_path"], mmap_mode="r")
 
-        # Vectorised within_poly_idx: position of each segment within its polyline.
-        # seg_poly_ids is monotonically non-decreasing within each part (Phase A
-        # writes segments in poly_id order), so group boundaries are diff > 0.
-        change_pts = np.concatenate([[0], np.where(np.diff(seg_poly_ids))[0] + 1])
-        group_id = np.searchsorted(change_pts, np.arange(len(seg_poly_ids)), side="right") - 1
-        within_poly_idx_arr = np.arange(len(seg_poly_ids)) - change_pts[group_id]
-
-        # Restrict all arrays to matching segments — avoids O(all_segments) Python loop.
-        match_idx = np.where(mask)[0]
-        m_poly_ids    = seg_poly_ids[match_idx]
-        m_within      = within_poly_idx_arr[match_idx]
-        m_vtx_starts  = vtx_starts[match_idx]
-        m_vtx_counts  = seg_vtx_counts[match_idx]
-
-        del data  # release npz arrays before opening mmap
-
-        verts_npy_path = npz_path.replace(".npz", ".verts.npy")
-        vertices = np.load(verts_npy_path, mmap_mode="r")
-
-        for i in range(len(match_idx)):
+        for i in range(len(m_poly_ids)):
             vs = int(m_vtx_starts[i])
             vc = int(m_vtx_counts[i])
             # np.array() forces a copy: releases the mmap reference so pages can
@@ -410,118 +467,218 @@ def _phase_b_worker(
         del vertices  # close mmap; OS can evict pages immediately
 
     if not records:
-        return {}
+        return None
 
     # Sort: (part_idx, poly_id, seg_within_poly) — the determinism pin
     records.sort(key=lambda r: (r[0], r[1], r[2]))
-
-    # Write to zarr-vectors store
-    root = open_store(str(store_path), mode="r+")
-    # Level group must already exist (created in coordinator pre-phase-B)
-    from zarr_vectors.core.store import get_resolution_level
-    level_group = get_resolution_level(root, 0)
 
     # Reference the arrays already held in `records` (they are already
     # `out_dtype`) instead of copying — avoids a full duplicate of the whole
     # chunk's vertices and a second set of per-segment array objects.
     vert_groups = [r[3] for r in records]
-    write_chunk_vertices(level_group, chunk_coords, vert_groups, dtype=out_dtype)
 
-    # Write per-fragment segment id (global poly_id = streamline index in file).
+    # Per-fragment segment id (global poly_id = streamline index in file).
     # One uint64 per fragment, same order as vert_groups.  Neuroglancer uses this
     # to map a picked spatial fragment back to the full streamline for pass-2 fetch.
     seg_ids = np.array([r[1] for r in records], dtype=np.uint64)
-    write_chunk_fragment_attributes(level_group, "segment_id", chunk_coords, seg_ids, dtype=np.uint64)
 
-    # Build fragment result map: key = (part_idx, poly_id, seg_within_poly)
-    result: dict[tuple[int, int, int], tuple[tuple[int, int, int], int, int, int]] = {}
+    # Build compact fragment-map rows for this chunk:
+    #   [part_idx, poly_id, within, cx, cy, cz, frag_idx, first_row, last_row]
+    # one int64 row per fragment, in the same (part, poly, within) order.
+    cx, cy, cz = chunk_coords
+    seg_rows = np.empty((len(records), 9), dtype=np.int64)
     cum_row = 0
     for frag_idx, (part_idx, poly_id, seg_within, seg_verts) in enumerate(records):
         first_row = cum_row
         last_row = cum_row + len(seg_verts) - 1
-        result[(part_idx, poly_id, seg_within)] = (chunk_coords, frag_idx, first_row, last_row)
+        seg_rows[frag_idx] = (part_idx, poly_id, seg_within, cx, cy, cz,
+                              frag_idx, first_row, last_row)
         cum_row += len(seg_verts)
 
-    return result
+    return vert_groups, seg_ids, seg_rows
 
 
-# ---------------------------------------------------------------------------
-# Coordinator: reconstruct manifests and cross-chunk links
-# ---------------------------------------------------------------------------
+def _phase_b_worker(
+    batch: dict[str, Any],
+    shared: dict[str, Any],
+) -> npt.NDArray:
+    """Write ONE shard's worth of chunks from a coordinator-spilled,
+    PRE-SLICED per-chunk payload.
 
-def _build_manifests_and_cross_links(
-    part_npz_paths: list[str],
-    phase_b_results: list[dict[str, Any]],
-    n_total_streamlines: int,
-) -> tuple[dict[int, list], list]:
-    """Build object_manifests and cross_chunk_links from Phase B fragment maps.
+    ``batch`` = ``{"chunks": [chunk_coords, ...], "spill_path": <path>}``.
+    ``chunks`` is every occupied chunk mapping to ONE shard file — a single
+    worker owns the whole shard so two processes never read-modify-write
+    the same native-sharded shard file (the "missing blocks" write-race
+    fix). The spill file holds, per chunk, the segment rows for that chunk
+    already sliced out of each part's index.
 
-    Returns:
-        object_manifests  dict[poly_id → list[(chunk_coords, fragment_idx)]]
-        cross_chunk_links  list[CrossChunkLink]
+    The per-chunk data is read from the spill file on LOCAL DISK — it is
+    NOT broadcast to every worker. Scattering the whole (all-parts,
+    all-chunks) index via dask (the previous approach) broadcast an
+    O(total-segments) object to every worker and exhausted OS socket
+    buffers at 5M streamlines (``OSError: No buffer space available``);
+    the per-shard spill sends each worker only its shard's slice, once,
+    over disk. Vertex floats never enter the spill — they stay on the
+    mmap'd ``.verts.npy`` and are read lazily by chunk.
+
+    Returns one compact ``(n_segments, 9)`` int64 array covering every
+    fragment written by this shard, columns
+    ``[part_idx, poly_id, within, cx, cy, cz, frag_idx, first_row, last_row]``.
+    The coordinator concatenates these dense arrays (see
+    :func:`_build_manifests_and_cross_links`) instead of merging O(segments)
+    Python dicts — the dominant coordinator-RSS term at scale.
     """
-    # Merge all Phase B result dicts into one global map
-    global_map: dict[tuple[int, int, int], tuple[tuple[int, int, int], int, int, int]] = {}
-    for d in phase_b_results:
-        global_map.update(d)
+    import pickle
+    store_path = shared["store_path"]
+    dtype = shared["dtype"]
+    out_dtype = np.dtype(dtype)
 
-    # For each poly_id, rebuild the ordered segment list from part npz files
-    # We need: for each poly_id, the ordered segments (part, poly_id, within_poly_idx)
-    # We reconstruct this by scanning the npz files in part order.
+    chunk_coords_batch = [tuple(int(x) for x in c) for c in batch["chunks"]]
+    spill_path = batch.get("spill_path")
+    batch_data: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    if spill_path:
+        with open(spill_path, "rb") as fh:
+            batch_data = pickle.load(fh)
 
-    # Build poly_id → sorted list of (part_idx, within_poly_idx, chunk_coords)
-    poly_segments: dict[int, list[tuple[int, int, tuple[int, int, int]]]] = {}
+    root = open_store(str(store_path), mode="r+")
+    # Level group must already exist (created in coordinator pre-phase-B)
+    from zarr_vectors.core.store import get_resolution_level
+    level_group = get_resolution_level(root, 0)
 
-    for part_idx, npz_path in enumerate(part_npz_paths):
-        data = np.load(npz_path)
-        seg_poly_ids = data["seg_poly_ids"]
-        seg_chunk_x = data["seg_chunk_x"]
-        seg_chunk_y = data["seg_chunk_y"]
-        seg_chunk_z = data["seg_chunk_z"]
-
-        prev_poly = -1
-        within_poly_idx = 0
-        for i in range(len(seg_poly_ids)):
-            poly_id = int(seg_poly_ids[i])
-            if poly_id != prev_poly:
-                within_poly_idx = 0
-                prev_poly = poly_id
-            cc = (int(seg_chunk_x[i]), int(seg_chunk_y[i]), int(seg_chunk_z[i]))
-            poly_segments.setdefault(poly_id, []).append((part_idx, within_poly_idx, cc))
-            within_poly_idx += 1
-
-    object_manifests: dict[int, list] = {}
-    cross_chunk_links: list = []
-
-    for poly_id in range(n_total_streamlines):
-        segs = poly_segments.get(poly_id)
-        if not segs:
-            object_manifests[poly_id] = []
+    # Assemble every chunk in this batch first, then write each array with
+    # ONE batched call covering the whole shard — see
+    # write_chunk_vertices_batch's docstring for why that's not just an
+    # optimization: sequential per-chunk writes to a native-sharded array
+    # each pay a full shard read-modify-write, and with a whole shard's
+    # worth of chunks now landing in one task (the "missing blocks" write-
+    # race fix), that repeated cost was observed to build up several GiB
+    # of worker memory and trigger dask worker restarts on a real run.
+    seg_row_blocks: list[npt.NDArray] = []
+    coords_to_groups: dict[tuple[int, int, int], list[npt.NDArray]] = {}
+    coords_to_seg_ids: dict[tuple[int, int, int], npt.NDArray] = {}
+    for chunk_coords in chunk_coords_batch:
+        per_part = batch_data.get(chunk_coords)
+        if not per_part:
             continue
+        assembled = _phase_b_assemble_one_chunk(chunk_coords, per_part, out_dtype)
+        if assembled is None:
+            continue
+        vert_groups, seg_ids, seg_rows = assembled
+        coords_to_groups[chunk_coords] = vert_groups
+        coords_to_seg_ids[chunk_coords] = seg_ids
+        seg_row_blocks.append(seg_rows)
 
-        manifest: list[tuple[tuple[int, int, int], int]] = []
-        manifest_with_indices: list[tuple[tuple[int, int, int], int, int, int]] = []
+    if coords_to_groups:
+        write_chunk_vertices_batch(level_group, coords_to_groups, dtype=out_dtype)
+        write_chunk_fragment_attributes_batch(
+            level_group, "segment_id", coords_to_seg_ids, dtype=np.uint64,
+        )
+    if seg_row_blocks:
+        return np.concatenate(seg_row_blocks, axis=0)
+    return np.empty((0, 9), dtype=np.int64)
 
-        for part_idx, within_poly_idx, cc in segs:
-            key = (part_idx, poly_id, within_poly_idx)
-            info = global_map.get(key)
-            if info is None:
-                continue
-            out_cc, frag_idx, first_row, last_row = info
-            manifest.append((out_cc, frag_idx))
-            manifest_with_indices.append((out_cc, frag_idx, first_row, last_row))
 
-        object_manifests[poly_id] = manifest
+# ---------------------------------------------------------------------------
+# Coordinator: shard-reduce object index + cross-chunk links by streamline id
+# ---------------------------------------------------------------------------
 
-        # Cross-chunk links: consecutive segments in different chunks
-        if len(manifest_with_indices) > 1:
-            for i in range(len(manifest_with_indices) - 1):
-                cc_a, _, _, last_a = manifest_with_indices[i]
-                cc_b, _, first_b, _ = manifest_with_indices[i + 1]
-                if cc_a != cc_b:
-                    cross_chunk_links.append(((cc_a, last_a), (cc_b, first_b)))
+def _sort_seg_rows(phase_b_results: list[npt.NDArray]) -> npt.NDArray:
+    """Concatenate Phase B's per-shard ``(n, 9)`` int64 arrays and order by
+    ``(poly, part, within)`` — reproduces the old part-order / npz
+    file-order determinism pin (``within`` is unique per ``(part, poly)``).
 
-    return object_manifests, cross_chunk_links
+    Columns: ``[part, poly, within, cx, cy, cz, frag_idx, first_row, last_row]``.
+    Sorting by ``poly`` first (as the PRIMARY key) also makes every
+    streamline's rows a contiguous run, which is what lets
+    :func:`_reduce_level0_oid_shard` be dispatched on arbitrary contiguous
+    row ranges without ever splitting one streamline's segments across two
+    shards.
+    """
+    blocks = [a for a in phase_b_results if a is not None and len(a)]
+    if not blocks:
+        return np.empty((0, 9), dtype=np.int64)
+    seg = np.concatenate(blocks, axis=0)
+    del blocks
+    order = np.lexsort((seg[:, 2], seg[:, 0], seg[:, 1]))
+    return seg[order]
+
+
+def _reduce_level0_oid_shard(
+    payload: dict[str, Any], shared: dict[str, Any],
+) -> dict[str, Any]:
+    """Reduce one contiguous streamline-id (OID) range's segment rows into
+    encoded object-index manifest blobs and this shard's local cross-chunk
+    links.
+
+    ``payload["seg_path"]`` is a coordinator-spilled slice of the globally
+    sorted (by poly, part, within) segment-row array from
+    :func:`_sort_seg_rows` — sliced on a streamline-id BOUNDARY, so every
+    streamline's rows land entirely within one shard. Because a
+    cross-chunk link only ever connects two CONSECUTIVE segments of the
+    SAME streamline, this means links can't straddle two shards either —
+    no cross-shard merge step is needed for either output.
+
+    Both outputs are returned in compact form: manifest blobs as already-
+    encoded bytes (O(streamlines) in this shard, not O(fragments) Python
+    tuples), and cross-chunk links as one dense int64 array spilled to
+    disk (not Python tuples). This is the fix for the coordinator holding
+    O(total-fragments)/O(total-links) Python objects at once, which
+    dominated RSS at 5M+ streamlines (~200+ bytes of pure Python-object
+    overhead per record, measured).
+    """
+    sid_ndim = int(shared["sid_ndim"])
+    seg = np.load(payload["seg_path"], allow_pickle=False)
+    if len(seg) == 0:
+        return {
+            "oid": np.empty(0, dtype=np.int64),
+            "blobs": pickle.dumps([], protocol=pickle.HIGHEST_PROTOCOL),
+            "link_path": None,
+            "n_links": 0,
+        }
+
+    poly_col = seg[:, 1]
+    chunks = seg[:, 3:6]
+    frags = seg[:, 6]
+
+    boundaries = np.flatnonzero(np.diff(poly_col)) + 1
+    starts = np.concatenate(([0], boundaries))
+    ends = np.concatenate((boundaries, [len(seg)]))
+
+    oids = np.empty(len(starts), dtype=np.int64)
+    blobs: list[bytes] = []
+    for i, (s, e) in enumerate(zip(starts.tolist(), ends.tolist())):
+        oids[i] = int(poly_col[s])
+        blocks = [
+            ((int(chunks[k, 0]), int(chunks[k, 1]), int(chunks[k, 2])), int(frags[k]))
+            for k in range(s, e)
+        ]
+        blobs.append(encode_object_manifest_blocks(blocks, sid_ndim=sid_ndim))
+
+    # Vectorized cross-link derivation: a link exists at row i when row i
+    # and row i+1 share a poly_id but land in different chunks.
+    same_poly = poly_col[1:] == poly_col[:-1]
+    diff_chunk = np.any(chunks[1:] != chunks[:-1], axis=1)
+    idxs = np.flatnonzero(same_poly & diff_chunk)
+
+    link_path = None
+    n_links = int(len(idxs))
+    if n_links:
+        first_rows = seg[:, 7]
+        last_rows = seg[:, 8]
+        link_rows = np.empty((n_links, 8), dtype=np.int64)
+        link_rows[:, 0:3] = chunks[idxs]
+        link_rows[:, 3] = last_rows[idxs]
+        link_rows[:, 4:7] = chunks[idxs + 1]
+        link_rows[:, 7] = first_rows[idxs + 1]
+        link_path = payload["link_spill_path"]
+        np.save(link_path, link_rows)
+
+    return {
+        "oid": oids,
+        "blobs": pickle.dumps(blobs, protocol=pickle.HIGHEST_PROTOCOL),
+        "link_path": link_path,
+        "n_links": n_links,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +698,7 @@ def ingest_trk_parallel(
     compute_length: bool = False,
     compute_endpoints: bool = False,
     preserve_header: bool = True,
+    shard_shape: int | tuple[int, int, int] | None = 2,
     build_multiscale: bool = True,
     pyramid_factors: list[tuple[float, float]] | None = None,
     chunk_scale_factors: list[int] | None = None,
@@ -574,6 +732,15 @@ def ingest_trk_parallel(
         compute_length: Write per-streamline path length to object_attributes.
         compute_endpoints: Write start/end points to object_attributes.
         preserve_header: Store TRKHeader (affine, dims) in the zarr store.
+        shard_shape: Outer-chunk shape (in spatial-chunk units) for the
+            level's native-sharded per-chunk arrays (``vertices``,
+            ``vertex_fragments``, ``fragment_attributes/segment_id``),
+            passed to :func:`zarr_vectors.core.arrays.open_write_session`.
+            ``vertices`` cells are written uncompressed (``compress=False``)
+            so a reader can byte-range-read one fragment's rows within a
+            cell; the other per-chunk arrays keep the default codec. Pass
+            ``None`` to fall back to the legacy per-chunk-array-per-object
+            layout (no sharding, vertices compressed).
         build_multiscale: Build coarser pyramid levels after level 0.
         pyramid_factors: List of (coarsen_factor, sparsity_factor) per level.
             Default: [(8.0, 1.0), (8.0, 1.0)] for two coarser levels. In
@@ -693,10 +860,28 @@ def ingest_trk_parallel(
             arrays_present=["vertices", "object_index", "fragment_attributes"],
         )
         level_group = create_resolution_level(root, 0, level_meta)
-        create_vertices_array(level_group, dtype=dtype)
-        create_object_index_array(level_group)
-        create_cross_chunk_links_array(level_group, delta=0, sid_ndim=3)
-        create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
+        # main's native-sharding grid math anchors chunk coord 0 at the
+        # global origin and cannot represent a negative chunk coordinate;
+        # bounds here are always non-negative (voxmm space, lo=[0,0,0] by
+        # convention — see _compute_bounds_from_header) but guard anyway
+        # rather than let a future convention change write out-of-grid
+        # coordinates main's Group.write_bytes rejects.
+        level_shard_shape = shard_shape
+        if level_shard_shape is not None and any(b < 0 for b in bounds[0]):
+            level_shard_shape = None
+        with open_write_session(
+            level_group,
+            shard_shape=level_shard_shape,
+            bounds=bounds,
+            chunk_shape=chunk_shape,
+        ):
+            # compress=False: sharded vertices cells are written raw so a
+            # reader can byte-range-read one fragment's rows within a cell
+            # instead of fetching and decompressing the whole chunk.
+            create_vertices_array(level_group, dtype=dtype, compress=False)
+            create_object_index_array(level_group)
+            create_cross_chunk_links_array(level_group, delta=0, sid_ndim=3)
+            create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
 
         # --- Phase A: per-part spatial binning ---------------------------
         _log(f"Phase A: binning streamlines ({len(part_specs)} parts)...")
@@ -724,52 +909,220 @@ def ingest_trk_parallel(
 
         _log(f"  wrote {len(part_npz_paths)} intermediate files")
 
-        # Enumerate all occupied chunk coords across all parts
+        # Build each part's chunk-grouping index ONCE here (one lexsort per
+        # part), then SPILL each shard's slice to a temp file the workers
+        # read from local disk. The grouping is NOT scattered whole to every
+        # worker: at 5M streamlines the all-parts index is hundreds of MB,
+        # and `client.scatter(broadcast=True)` shipping it to every worker
+        # at once exhausted OS socket send buffers (`OSError: No buffer
+        # space available`). Per-shard spill sends each worker only its
+        # shard's slice, once, over disk. Vertex floats never enter the
+        # spill — they stay on the mmap'd `.verts.npy`. (The grouping keys
+        # also give the occupied-chunk set for free, avoiding a separate
+        # O(all_segments) scan.)
+        part_indices = [_load_part_chunk_index(p) for p in part_npz_paths]
         all_chunk_coords: set[tuple[int, int, int]] = set()
-        for npz_path in part_npz_paths:
-            data = np.load(npz_path)
-            xs, ys, zs = data["seg_chunk_x"], data["seg_chunk_y"], data["seg_chunk_z"]
-            for x, y, z in zip(xs.tolist(), ys.tolist(), zs.tolist()):
-                all_chunk_coords.add((int(x), int(y), int(z)))
+        for pidx in part_indices:
+            all_chunk_coords.update(pidx["chunk_to_match_idx"].keys())
         _log(f"  {len(all_chunk_coords)} occupied spatial chunks")
 
-        # --- Phase B: per-chunk level-0 write ----------------------------
+        # --- Phase B: per-shard level-0 write -----------------------------
         _log(f"Phase B: writing level-0 ({len(all_chunk_coords)} chunks)...")
 
         shared_b = {
-            "part_npz_paths": part_npz_paths,
             "store_path": str(output_path),
             "dtype": dtype,
         }
 
-        chunk_list = sorted(all_chunk_coords)
-
-        if executor is not None:
-            phase_b_results = executor(_phase_b_worker, chunk_list, shared=shared_b)
+        # Batch chunks by shard address: the vertices/fragment_attributes
+        # arrays are native-sharded (when level_shard_shape is set), and a
+        # partial write to a shard reads-modifies-writes the WHOLE shard
+        # file with no cross-process coordination — two workers racing on
+        # the same shard silently drop whichever one loses. Dispatching one
+        # task per shard (instead of per chunk) makes that impossible: each
+        # shard is written by exactly one worker. Unsharded stores have no
+        # such collision (one file per chunk), so keep the finer per-chunk
+        # dispatch there.
+        if level_shard_shape is not None:
+            shard_shape_3 = (
+                (level_shard_shape,) * 3
+                if isinstance(level_shard_shape, int)
+                else tuple(level_shard_shape)
+            )
+            shard_groups: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
+            for cc in sorted(all_chunk_coords):
+                shard_addr = (
+                    cc[0] // shard_shape_3[0],
+                    cc[1] // shard_shape_3[1],
+                    cc[2] // shard_shape_3[2],
+                )
+                shard_groups.setdefault(shard_addr, []).append(cc)
+            chunk_lists = [shard_groups[k] for k in sorted(shard_groups)]
         else:
-            phase_b_results = [_phase_b_worker(cc, shared_b) for cc in chunk_list]
+            chunk_lists = [[cc] for cc in sorted(all_chunk_coords)]
 
-        # --- Coordinator: manifests + cross-chunk links -------------------
-        _log("Coordinator: building manifests and cross-chunk links...")
-        object_manifests, cross_chunk_links = _build_manifests_and_cross_links(
-            part_npz_paths, phase_b_results, n_streamlines,
+        # Spill each batch's pre-sliced per-part segment rows to a temp file;
+        # pass the worker only chunk coords + the path (tiny graph payload).
+        import pickle as _pickle
+        phaseb_spill_dir = tempfile.mkdtemp(prefix="trk_phaseb_")
+        chunk_batches: list[dict[str, Any]] = []
+        for bi, chunks in enumerate(chunk_lists):
+            batch_data: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+            for cc in chunks:
+                per_part: list[dict[str, Any]] = []
+                for part_idx, pidx in enumerate(part_indices):
+                    mi = pidx["chunk_to_match_idx"].get(cc)
+                    if mi is None or len(mi) == 0:
+                        continue
+                    per_part.append({
+                        "part_idx": part_idx,
+                        "verts_npy_path": pidx["verts_npy_path"],
+                        "poly_ids": pidx["seg_poly_ids"][mi],
+                        "within": pidx["within_poly_idx_arr"][mi],
+                        "vtx_starts": pidx["vtx_starts"][mi],
+                        "vtx_counts": pidx["seg_vtx_counts"][mi],
+                    })
+                if per_part:
+                    batch_data[cc] = per_part
+            spill_path = None
+            if batch_data:
+                spill_path = os.path.join(phaseb_spill_dir, f"pb_{bi}.pkl")
+                with open(spill_path, "wb") as fh:
+                    _pickle.dump(batch_data, fh, protocol=_pickle.HIGHEST_PROTOCOL)
+            chunk_batches.append({"chunks": chunks, "spill_path": spill_path})
+        # Free the coordinator's full index now that slices are spilled.
+        del part_indices
+
+        try:
+            if executor is not None:
+                phase_b_results = executor(_phase_b_worker, chunk_batches, shared=shared_b)
+            else:
+                phase_b_results = [_phase_b_worker(batch, shared_b) for batch in chunk_batches]
+        finally:
+            shutil.rmtree(phaseb_spill_dir, ignore_errors=True)
+
+        if level_shard_shape is not None:
+            # Each Phase-B worker's write_bytes call also incrementally
+            # updates the array's own `nonempty_chunks` manifest attribute
+            # (a single shared zarr.json per array) — safe from one
+            # process, but racy across the concurrent workers dispatched
+            # above: two workers finishing their own zarr.json
+            # read-modify-write around the same time can each silently
+            # drop the other's additions, even though the chunk data
+            # itself (independent per-shard writes) is unaffected. Repair
+            # it once here from the coordinator's own already-known-
+            # correct occupied-chunk set.
+            level_group.set_nonempty_chunks(VERTICES, all_chunk_coords)
+            level_group.set_nonempty_chunks(
+                f"{FRAGMENT_ATTRIBUTES}/segment_id", all_chunk_coords
+            )
+
+        # --- Coordinator: shard-reduce object index + cross-chunk links ---
+        # Dispatched to workers by contiguous streamline-id (OID) range —
+        # each shard's manifest blobs come back already encoded (bytes,
+        # O(streamlines)) and its local cross-chunk links come back as one
+        # dense int64 array on disk (not Python tuples): the coordinator
+        # never materializes an O(total-fragments) dict-of-tuples or an
+        # O(total-links) list-of-tuples, which is what made RSS scale
+        # ~linearly with link count at 5M+ (measured ~200+ bytes of pure
+        # Python-object overhead per record).
+        _log("Coordinator: reducing object index + cross-chunk links "
+             "(sharded by streamline id)...")
+        seg = _sort_seg_rows(phase_b_results)
+        del phase_b_results
+
+        n_oid_shards = max(1, min(4096, -(-n_streamlines // 20_000))) if n_streamlines else 1
+        oid_bounds = np.linspace(0, n_streamlines, n_oid_shards + 1).astype(np.int64)
+        row_bounds = (
+            np.searchsorted(seg[:, 1], oid_bounds) if len(seg)
+            else np.zeros(n_oid_shards + 1, dtype=np.int64)
         )
 
-        _log(f"  writing object index ({n_streamlines} streamlines)...")
-        write_object_index(level_group, object_manifests, sid_ndim=3)
+        oid_reduce_dir = tempfile.mkdtemp(prefix="trk_oidreduce_")
+        link_spill_dir = tempfile.mkdtemp(prefix="trk_crosslink_")
+        try:
+            reduce_payloads: list[dict[str, Any]] = []
+            for i in range(n_oid_shards):
+                lo, hi = int(row_bounds[i]), int(row_bounds[i + 1])
+                if hi <= lo:
+                    continue
+                seg_path = os.path.join(oid_reduce_dir, f"seg_{i}.npy")
+                np.save(seg_path, seg[lo:hi])
+                reduce_payloads.append({
+                    "seg_path": seg_path,
+                    "link_spill_path": os.path.join(link_spill_dir, f"links_{i}.npy"),
+                })
+            del seg
 
-        if cross_chunk_links:
-            _log(f"  writing {len(cross_chunk_links)} cross-chunk links...")
-            write_cross_chunk_links(
-                level_group, cross_chunk_links, sid_ndim=3, delta=0, mode="replace",
-                directed=True,
-            )
-            # Stamp capability
-            try:
-                from zarr_vectors_tools.multiresolution.coarsen import stamp_ccl_capabilities
-                stamp_ccl_capabilities(root)
-            except ImportError:
-                pass
+            shared_reduce = {"sid_ndim": 3}
+            if executor is not None:
+                reduce_results = executor(
+                    _reduce_level0_oid_shard, reduce_payloads, shared=shared_reduce,
+                )
+            else:
+                reduce_results = [
+                    _reduce_level0_oid_shard(p, shared_reduce) for p in reduce_payloads
+                ]
+
+            empty_blob = encode_object_manifest_blocks([], sid_ndim=3)
+            manifest_blobs: list[bytes] = [empty_blob] * n_streamlines
+            link_paths: list[str] = []
+            cross_chunk_link_count = 0
+            for rc in reduce_results:
+                oids = rc["oid"]
+                if len(oids):
+                    blobs = pickle.loads(rc["blobs"])
+                    for i, oid in enumerate(oids.tolist()):
+                        manifest_blobs[int(oid)] = blobs[i]
+                if rc.get("link_path"):
+                    link_paths.append(rc["link_path"])
+                    cross_chunk_link_count += int(rc.get("n_links", 0))
+            del reduce_results
+        finally:
+            shutil.rmtree(oid_reduce_dir, ignore_errors=True)
+
+        _log(f"  writing object index ({n_streamlines} streamlines)...")
+        _write_object_index_manifests(level_group, manifest_blobs)
+        level_group.write_array_meta(OBJECT_INDEX, {
+            "zv_array": "object_index",
+            "num_objects": n_streamlines,
+            "sid_ndim": 3,
+            "layout": OBJECT_INDEX_LAYOUT_V1,
+        })
+        del manifest_blobs
+
+        try:
+            if cross_chunk_link_count:
+                _log(f"  writing {cross_chunk_link_count} cross-chunk links...")
+                link_row_blocks = [np.load(p, allow_pickle=False) for p in link_paths]
+                all_link_rows = np.concatenate(link_row_blocks, axis=0)
+                del link_row_blocks
+                # write_cross_chunk_links_bulk: numpy-native writer restricted
+                # to exactly this policy (link_width=2, directed, canonical,
+                # packed_sharded, replace) — the general write_cross_chunk_links
+                # rebuilds one Python tuple/dict per record internally
+                # (_normalise_cross_records -> partition_cross_records_by_tuple
+                # -> _write_cross_chunk_links_packed's merged dict), which both
+                # grows CPython's GC-scan cost with N and, at ~200-400 bytes of
+                # object overhead per record, pushes large runs into swap. The
+                # bulk path stays in dense int64 arrays throughout (measured
+                # 27.8x faster / ~3x lower peak RSS at 5M links) — the row
+                # layout the shard spill files already use, [chunk_a(3), vi_a,
+                # chunk_b(3), vi_b], is exactly its input format.
+                #
+                # layout="packed_sharded": stores all cells in ONE native-
+                # sharded 1-D array instead of thousands of tiny per-cell
+                # arrays — level 0 has by far the most cells, so packing it
+                # collapses both this write and the coarsener's
+                # read_cross_chunk_links(src=level 0) into a handful of shard
+                # files. Readers dispatch on the stored layout meta.
+                write_cross_chunk_links_bulk(
+                    level_group, all_link_rows, sid_ndim=3, delta=0,
+                )
+                del all_link_rows
+                _stamp_root_capability(root, CAP_MULTISCALE_LINKS)
+        finally:
+            shutil.rmtree(link_spill_dir, ignore_errors=True)
 
         # Object attributes
         obj_attrs_to_write: dict[str, npt.NDArray] = {}
@@ -869,7 +1222,7 @@ def ingest_trk_parallel(
             "streamline_count": n_streamlines,
             "vertex_count": total_vertices,
             "chunk_count": len(all_chunk_coords),
-            "cross_chunk_link_count": len(cross_chunk_links),
+            "cross_chunk_link_count": cross_chunk_link_count,
             "n_parts": len(part_specs),
             "chunk_shape": chunk_shape,
             "bounds": bounds,
