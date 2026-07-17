@@ -502,7 +502,7 @@ def test_coarsen_level_routes_to_skeleton(tmp_store):
     """The generic coarsen_level dispatches skeleton stores to the
     skeleton coarsener (coarsen_factor interpreted as tolerance)."""
     from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
-    from zarr_vectors_tools.multiresolution._ccl_compat import COARSEN_SKELETON
+    from zarr_vectors_tools.multiresolution.constants import COARSEN_SKELETON
     _build_random_skeleton_store(tmp_store, n_seg=15, seed=7)
     summary = coarsen_level(tmp_store, 0, 1, coarsen_factor=200.0,
                             chunk_scale_factor=2)

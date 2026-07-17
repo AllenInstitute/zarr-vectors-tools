@@ -26,9 +26,6 @@ from typing import Any
 import numpy as np
 
 from zarr_vectors.constants import (
-    CROSS_CHUNK_LINKS,
-    LINK_FRAGMENTS,
-    LINKS,
     VERTEX_FRAGMENTS,
     VERTICES,
 )
@@ -37,11 +34,17 @@ from zarr_vectors.core.arrays import (
     read_all_object_manifests,
     read_chunk_links,
     read_chunk_vertices,
-    read_cross_chunk_links,
     read_fragment,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store, read_root_metadata
 from zarr_vectors.typing import ChunkCoords
+
+from zarr_vectors_tools.algorithms._links import (
+    chunk_key_str,
+    link_prefetch_plan,
+    read_cross_links,
+    require_link_width,
+)
 
 
 def compute_mesh_summary(
@@ -90,20 +93,12 @@ def compute_mesh_summary(
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
 
-    try:
-        lmeta = level_group.read_array_meta("links/0")
-        link_width = int(lmeta.get("link_width", 3))
-    except Exception:
-        link_width = 3
-
-    if link_width != 3:
-        raise NotImplementedError(
-            f"compute_mesh_summary v0 supports triangle meshes only "
-            f"(link_width=3); store has link_width={link_width}."
-        )
+    link_width = require_link_width(
+        level_group, 3, what="compute_mesh_summary v0 (triangle meshes only)",
+    )
 
     chunk_keys = list_chunk_keys(level_group)
-    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    chunk_key_strs = [chunk_key_str(cc) for cc in chunk_keys]
 
     surface_area = 0.0
     volume = 0.0
@@ -121,9 +116,7 @@ def compute_mesh_summary(
     with level_group.batched_reads([
         (VERTICES, chunk_key_strs),
         (VERTEX_FRAGMENTS, chunk_key_strs),
-        (f"{LINKS}/0", chunk_key_strs),
-        (LINK_FRAGMENTS, chunk_key_strs),
-        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+        *link_prefetch_plan(level_group, chunk_keys),
     ]):
         for chunk_key in chunk_keys:
             try:
@@ -165,8 +158,11 @@ def compute_mesh_summary(
                             _edge_key((chunk_key, int(la)), (chunk_key, int(lb)))
                         )
 
+        # Cross-only: the per-chunk loop above already consumed every
+        # intra record via read_chunk_links, so the whole-family
+        # read_links would double-count them here.
         try:
-            cross_links = read_cross_chunk_links(level_group, delta=0)
+            cross_links = read_cross_links(level_group, delta=0)
         except Exception:
             cross_links = []
     excluded_cross_face_edges = 0
@@ -221,9 +217,7 @@ def _compute_per_object(
     referenced_chunks: set[ChunkCoords] = {
         chunk for manifest in manifests for chunk, _ in manifest
     }
-    referenced_chunk_strs = [
-        ".".join(str(c) for c in cc) for cc in referenced_chunks
-    ]
+    referenced_chunk_strs = [chunk_key_str(cc) for cc in referenced_chunks]
 
     chunk_link_cache: dict[ChunkCoords, list[np.ndarray]] = {}
     per_object: list[dict[str, Any]] = []
@@ -231,8 +225,7 @@ def _compute_per_object(
     with level_group.batched_reads([
         (VERTICES, referenced_chunk_strs),
         (VERTEX_FRAGMENTS, referenced_chunk_strs),
-        (f"{LINKS}/0", referenced_chunk_strs),
-        (LINK_FRAGMENTS, referenced_chunk_strs),
+        *link_prefetch_plan(level_group, referenced_chunks),
     ]):
         for oid, manifest in enumerate(manifests):
             area = 0.0

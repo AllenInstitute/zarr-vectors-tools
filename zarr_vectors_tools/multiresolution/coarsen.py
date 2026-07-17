@@ -15,6 +15,7 @@ between objects, and per-object OIDs are preserved across levels.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,12 +23,12 @@ import numpy as np
 import numpy.typing as npt
 
 from zarr_vectors.constants import (
+    CAP_MULTISCALE_LINKS,
     CAP_PRESERVED_OBJECT_IDS,
     CAP_SHARED_FRAGMENTS,
     COARSEN_PER_OBJECT,
     DEFAULT_CROSS_LEVEL_DEPTH,
     DEFAULT_CROSS_LEVEL_STORAGE,
-    LINKS,
     LINKS_IMPLICIT_BRANCHES,
     LINKS_IMPLICIT_SEQUENTIAL,
     OBJECT_ATTRIBUTES,
@@ -37,20 +38,20 @@ from zarr_vectors.constants import (
     VALID_XLEVEL_STORAGE,
 )
 from zarr_vectors.core.arrays import (
-    create_cross_chunk_links_array,
     create_links_array,
+    create_links_family,
     create_object_attributes_array,
     create_object_index_array,
     create_vertices_array,
+    finalize_links,
     list_chunk_keys,
     read_all_object_manifests,
-    read_chunk_links,
     read_chunk_vertices,
-    read_cross_chunk_links,
+    read_links,
     read_object_attributes,
     write_chunk_links,
     write_chunk_vertices,
-    write_cross_chunk_links,
+    write_links,
     write_object_attributes,
     write_object_index,
 )
@@ -66,17 +67,17 @@ from zarr_vectors.core.store import (
     read_level_metadata,
     read_root_metadata,
 )
-from zarr_vectors_tools.multiresolution._ccl_compat import stamp_ccl_capabilities
 from zarr_vectors.exceptions import ArrayError, CoarseningError
 from zarr_vectors_tools.multiresolution.coarsen_implicit import (
     coarse_chunks_of,
     positions_in_run,
     segment_object_by_coarse_chunk,
 )
+from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
+from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
 from zarr_vectors.spatial.boundary import (
     build_vertex_chunk_mapping,
-    cross_chunk_links_for_segments,
     partition_cross_level_edges,
 )
 from zarr_vectors.spatial.chunking import assign_chunks
@@ -146,6 +147,7 @@ def coarsen_level(
     sparsity_seed: int | None = None,
     cross_level_storage: str = XLEVEL_NONE,
     coarsen_mode: str = "rdp",
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Coarsen a single level and write it to the store.
@@ -184,6 +186,11 @@ def coarsen_level(
             ``"decimate"`` does uniform stride decimation, in which case
             ``coarsen_factor`` is interpreted as the stride. Ignored by the
             other coarseners.
+        compressor: Codec for the TARGET level's per-chunk arrays.  ``None``
+            (default) stores raw.  Each level's codec is independent — a
+            chunk array's pipeline is fixed when it is created — so pass the
+            same value the level-0 ingest used to keep a store uniform.
+            See :func:`zarr_vectors.encoding.compression.resolve_compressor`.
         executor: Optional ``map``-like ``(func, items, shared) ->
             list[result]`` callable (e.g. ``dask_executor``) used by the
             chunk-local skeleton and polyline coarseners to parallelize
@@ -219,6 +226,7 @@ def coarsen_level(
         sparsity_seed=sparsity_seed,
         cross_level_storage=cross_level_storage,
         coarsen_mode=coarsen_mode,
+        compressor=compressor,
         executor=executor,
     )
 
@@ -234,6 +242,7 @@ def _per_object_coarsen(
     sparsity_strategy: str,
     sparsity_seed: int | None,
     cross_level_storage: str = XLEVEL_NONE,
+    compressor: Any = None,
 ) -> dict[str, Any]:
     """Per-object pyramid: aggregate within-bin source vertices into
     shared metavertices, preserving each surviving object's OID and
@@ -339,6 +348,9 @@ def _per_object_coarsen(
             representative_points=None,
             bin_shape=base_bin,
             alive_mask=alive_mask,
+            # Cumulative per level: fraction of the surviving pool, not of
+            # the original count.  See apply_sparsity's `relative_to`.
+            relative_to="alive",
         )
         keep_oids = sorted(int(o) for o in kept)
     else:
@@ -419,7 +431,7 @@ def _per_object_coarsen(
     # so consecutive metavertices belong to the same fragment and their
     # implicit edges encode the connectivity.  Other conventions stay on
     # the legacy "one fragment per metavertex" layout where Step 9b
-    # records same-chunk bridges as ``cross_chunk_links/0`` rows.
+    # bridges consecutive manifest entries with explicit links/0 records.
     use_implicit_sequential = (
         root_meta.links_convention == LINKS_IMPLICIT_SEQUENTIAL
     )
@@ -601,9 +613,17 @@ def _per_object_coarsen(
         shared_fragments=shared_fragments_flag,
     )
     level_group = create_resolution_level(root, target_level, level_meta_initial)
-    create_vertices_array(level_group, dtype="float32")
-    if src_has_objects:
-        create_object_index_array(level_group)
+    # A chunk array's codec pipeline is fixed at creation; the writes below
+    # then encode to match.  Close the block before them so batched_writes'
+    # deferred metas are flushed first.
+    _codec_ctx = (
+        level_group.batched_writes(compressor=compressor)
+        if compressor else nullcontext()
+    )
+    with _codec_ctx:
+        create_vertices_array(level_group, dtype="float32")
+        if src_has_objects:
+            create_object_index_array(level_group)
 
     for cc, groups in sorted(per_chunk_groups.items()):
         write_chunk_vertices(level_group, cc, groups, dtype=np.float32)
@@ -636,13 +656,21 @@ def _per_object_coarsen(
             total_objects=n_src_objects,
         )
 
-    # --- Step 9b: cross_chunk_links/0 ----------------------------------
+    # --- Step 9b: boundary-spanning links at delta 0 --------------------
+    # ``directed`` is a family-wide, un-flippable policy per (level, delta):
+    # every offsets array under links/0 decodes against it.  The two
+    # branches below disagree on it deliberately — implicit-sequential
+    # records carry endpoint order as data (predecessor→successor), the
+    # legacy bridges do not — and they are mutually exclusive, so exactly
+    # one policy is ever stamped for a given level.  Anything that later
+    # writes links/0 at this level must match whichever ran.
     if use_implicit_sequential:
-        # Pass 2: remap source-level ``cross_chunk_links/0`` records to
-        # the new coarse-chunk-local indices.  Drop records whose
-        # endpoints both fell into the same coarsened chunk — those were
-        # absorbed by Pass 1's merged fragments.
-        src_cross_records = read_cross_chunk_links(src_group, delta=0)
+        # Pass 2: remap the source level's boundary-spanning records to the
+        # new coarse-chunk-local indices.  Drop records whose endpoints
+        # both fell into the same coarsened chunk — those were absorbed by
+        # Pass 1's merged fragments.  Cross-only: a source intra record is
+        # by definition already inside one chunk and has nothing to bridge.
+        src_cross_records = read_cross_links(src_group, delta=0)
         new_cross_links = []
         for record in src_cross_records:
             if len(record) != 2:
@@ -659,16 +687,22 @@ def _per_object_coarsen(
             new_cross_links.append(
                 ((new_cc_a, new_vi_a), (new_cc_b, new_vi_b)),
             )
-        create_cross_chunk_links_array(level_group, delta=0, sid_ndim=ndim)
+        create_links_family(
+            level_group, delta=0, link_width=2, sid_ndim=ndim, directed=True,
+        )
         if new_cross_links:
-            write_cross_chunk_links(
+            write_links(
                 level_group, new_cross_links, sid_ndim=ndim, delta=0,
                 directed=True,
             )
     else:
         # Legacy Step 9b: one fragment per metavertex, so consecutive
-        # same-chunk manifest entries are bridged via cross_chunk_links/0
-        # (with delta=0 same-chunk records being intentional).
+        # manifest entries are bridged with an explicit record.  Entries
+        # that share a chunk are bridged too, and that is intentional.
+        # Note such a record has all-zero offsets, so it now lands in the
+        # intra array (links/0/0.0.0) rather than a separate cross family —
+        # which also makes it visible to read_chunk_links, where before it
+        # was only reachable through the cross reader.
         cross_links = []
         for oid, manifest in new_manifests.items():
             if len(manifest) < 2:
@@ -678,9 +712,11 @@ def _per_object_coarsen(
                 cc_b, frag_b = manifest[i + 1]
                 # vi_a == frag_a, vi_b == frag_b (one metavertex per fragment).
                 cross_links.append(((cc_a, frag_a), (cc_b, frag_b)))
-        create_cross_chunk_links_array(level_group, delta=0, sid_ndim=ndim)
+        create_links_family(
+            level_group, delta=0, link_width=2, sid_ndim=ndim,
+        )
         if cross_links:
-            write_cross_chunk_links(
+            write_links(
                 level_group, cross_links, sid_ndim=ndim, delta=0,
             )
 
@@ -756,7 +792,7 @@ def _per_object_coarsen(
     # This coarsener writes serially (no cross-process manifest race), but
     # re-derive the per-array ``nonempty_chunks`` manifests from disk anyway for
     # uniformity with the parallel coarseners and idempotence.
-    level_group.rebuild_nonempty_manifests()
+    rebuild_nonempty_manifests(level_group)
 
     return {
         "vertex_count": int(n_metavertices),
@@ -783,7 +819,7 @@ def _emit_inline_cross_level_links(
     mv_first_row_chunk: dict[int, ChunkCoords] | None = None,
     mv_first_row_local: dict[int, int] | None = None,
 ) -> None:
-    """Emit ``±1`` link/cross_chunk_link arrays for one coarsen step.
+    """Emit the ``±1`` links family for one coarsen step.
 
     Re-walks the source level in chunk-major order, re-bins each
     vertex against ``bin_shape_arr``, and looks up the matching
@@ -974,38 +1010,21 @@ def _decode_parent_from_plus_one(
 ) -> npt.NDArray[np.int64] | None:
     """Decode a fine→coarse ``parent`` array from already-written ``+1`` arrays.
 
-    Reads ``links/<+1>/<chunk_key>`` (intra-chunk edges) and
-    ``cross_chunk_links/<+1>/`` (cross-chunk edges) at the fine level
-    and converts each ``(chunk, local_idx)`` pair to global flat indices
-    via the supplied chunk-assignment dicts.  Returns ``None`` when
-    neither array exists.
+    Reads every record under ``links/<+1>/`` at the fine level and
+    converts each ``(chunk, local_idx)`` pair to global flat indices via
+    the supplied chunk-assignment dicts.  Returns ``None`` when the
+    family holds nothing.
     """
     parent = np.full(n_fine, -1, dtype=np.int64)
     found_any = False
 
-    # Aligned (intra-chunk) edges: read each chunk in links/+1/.
+    # One family read covers both the chunk-aligned records (endpoints in
+    # the same chunk on both grids — all-zero offsets) and the ones that
+    # span chunks.  A cross-level record's endpoints are distinguished by
+    # level, so endpoint 0 is always the fine source and endpoint 1 the
+    # coarse target, in input order.
     try:
-        chunk_keys = list_chunk_keys(fine_lg, f"{LINKS}/+1")
-    except (ArrayError, KeyError):
-        chunk_keys = []
-    for cc in chunk_keys:
-        try:
-            link_groups = read_chunk_links(fine_lg, cc, delta=1)
-        except ArrayError:
-            continue
-        for rows in link_groups:
-            if rows is None or len(rows) == 0:
-                continue
-            local_src = rows[:, 0].astype(np.int64)
-            local_tgt = rows[:, 1].astype(np.int64)
-            fine_global = fine_assn[cc][local_src]
-            coarse_global = coarse_assn[cc][local_tgt]
-            parent[fine_global] = coarse_global
-            found_any = True
-
-    # Cross-chunk edges.
-    try:
-        records = read_cross_chunk_links(fine_lg, delta=1)
+        records = read_links(fine_lg, delta=1)
     except (ArrayError, KeyError):
         records = []
     for (cc_s, vi_s), (cc_t, vi_t) in records:
@@ -1045,7 +1064,14 @@ def _finalize_cross_level_for_store(
     if len(levels) < 2:
         return
 
-    stamp_ccl_capabilities(root)
+    # No capability stamp here.  The token marks the presence of delta != 0
+    # arrays, and this function does not know yet whether any will be
+    # written: ``max_delta < 2`` returns below without emitting, and a
+    # coarsener that never emits inline ±1 links (the polyline strategy does
+    # not) leaves the store with none at all.  _write_cross_level_edges is
+    # the single choke point that actually writes them and stamps there,
+    # once it knows.  Stamping optimistically here claimed cross-LEVEL links
+    # on stores that had none.
 
     # Build per-level chunk_assignments + total counts once.
     per_level: dict[int, tuple[dict[ChunkCoords, npt.NDArray[np.int64]], int]] = {}
@@ -1173,13 +1199,29 @@ def _write_cross_level_edges(
     )
 
     fine_lg = get_resolution_level(root_group, fine_level)
+    # Stamp the family policy once, up front: the aligned and spanning
+    # records land in different offsets arrays under the same <delta>
+    # group, and every array under it must agree on link_width / sid_ndim.
+    if aligned or cross:
+        create_links_family(fine_lg, delta=delta, link_width=2, sid_ndim=sid_ndim)
+        # delta != 0 by construction here, which is what the token marks.
+        _stamp_root_capability(root_group, CAP_MULTISCALE_LINKS)
     if aligned:
-        create_links_array(fine_lg, link_width=2, delta=delta)
+        create_links_array(
+            fine_lg, link_width=2, delta=delta, sid_ndim=sid_ndim,
+        )
         for cc, rows in aligned.items():
             write_chunk_links(fine_lg, cc, [rows], delta=delta)
     if cross:
-        create_cross_chunk_links_array(fine_lg, delta=delta)
-        write_cross_chunk_links(fine_lg, cross, sid_ndim=sid_ndim, delta=delta)
+        # Scopes its delete to the offsets segments these records land in,
+        # so the aligned (all-zero-offsets) array written above survives.
+        write_links(fine_lg, cross, sid_ndim=sid_ndim, delta=delta)
+    if aligned or cross:
+        # write_chunk_links is a per-cell writer and maintains no
+        # family-wide counts, so a delta whose records are ALL chunk-aligned
+        # would otherwise carry no num_links at all.  Reconcile last, once
+        # both writers are done.
+        finalize_links(fine_lg, delta=delta)
 
     if storage == XLEVEL_EXPLICIT:
         # Mirror at the coarse level under -delta: swap endpoint roles.
@@ -1193,15 +1235,22 @@ def _write_cross_level_edges(
             coarse_vchunks, coarse_vlocal, coarse_chunk_list,
             fine_vchunks, fine_vlocal, fine_chunk_list,
         )
+        if rev_aligned or rev_cross:
+            create_links_family(
+                coarse_lg, delta=-delta, link_width=2, sid_ndim=sid_ndim,
+            )
         if rev_aligned:
-            create_links_array(coarse_lg, link_width=2, delta=-delta)
+            create_links_array(
+                coarse_lg, link_width=2, delta=-delta, sid_ndim=sid_ndim,
+            )
             for cc, rows in rev_aligned.items():
                 write_chunk_links(coarse_lg, cc, [rows], delta=-delta)
         if rev_cross:
-            create_cross_chunk_links_array(coarse_lg, delta=-delta)
-            write_cross_chunk_links(
+            write_links(
                 coarse_lg, rev_cross, sid_ndim=sid_ndim, delta=-delta,
             )
+        if rev_aligned or rev_cross:
+            finalize_links(coarse_lg, delta=-delta)
 
 
 # ===================================================================
@@ -1218,6 +1267,7 @@ def build_pyramid(
     cross_level_depth: int = DEFAULT_CROSS_LEVEL_DEPTH,
     cross_level_storage: str = DEFAULT_CROSS_LEVEL_STORAGE,
     coarsen_mode: str = "rdp",
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Build a multi-resolution pyramid for an existing store.
@@ -1297,9 +1347,18 @@ def build_pyramid(
             sparsity_factor=sf,
             chunk_scale_factor=chunk_scale,
             sparsity_strategy=sparsity_strategy,
-            sparsity_seed=sparsity_seed,
+            # Advance the seed per level so "random" sparsity picks a
+            # different survivor subset at each level; a constant seed would
+            # otherwise apply the same selection to a nested candidate pool.
+            sparsity_seed=(
+                None if sparsity_seed is None else int(sparsity_seed) + i
+            ),
             cross_level_storage=cross_level_storage,
             coarsen_mode=coarsen_mode,
+            # Every level's codec is fixed at its own array creation, so the
+            # compressor has to be forwarded per level — level 0's codec does
+            # not propagate to the coarser ones.
+            compressor=compressor,
             executor=executor,
         ))
 
@@ -1337,6 +1396,7 @@ def _skeleton_coarsener(
     sparsity_seed: int | None,
     cross_level_storage: str,
     coarsen_mode: str = "rdp",
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Skeleton stores: route to the skeleton-aware decimator.  ``coarsen_factor``
@@ -1357,6 +1417,7 @@ def _skeleton_coarsener(
             sparsity_strategy if sparsity_strategy != "random" else "length"
         ),
         sparsity_seed=sparsity_seed,
+        compressor=compressor,
         executor=executor,
     )
 
@@ -1373,6 +1434,7 @@ def _per_object_coarsener(
     sparsity_seed: int | None,
     cross_level_storage: str,
     coarsen_mode: str = "rdp",
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Default geometries: per-object metavertex aggregation.
@@ -1388,6 +1450,7 @@ def _per_object_coarsener(
         sparsity_strategy=sparsity_strategy,
         sparsity_seed=sparsity_seed,
         cross_level_storage=cross_level_storage,
+        compressor=compressor,
     )
 
 
@@ -1403,6 +1466,7 @@ def _polyline_coarsener(
     sparsity_seed: int | None,
     cross_level_storage: str,
     coarsen_mode: str = "rdp",
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Geometry-preserving polyline/streamline coarsener (RDP simplification
@@ -1425,6 +1489,7 @@ def _polyline_coarsener(
         sparsity_strategy=sparsity_strategy,
         sparsity_seed=sparsity_seed,
         coarsen_mode=coarsen_mode,
+        compressor=compressor,
         executor=executor,
     )
 

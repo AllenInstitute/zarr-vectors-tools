@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Ingest and export workflows for the Zarr Vector Format (ZVF). Wraps third-party readers/writers (nibabel, laspy, plyfile, networkx, trx-python) on top of zarr-vectors."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Andrew Keenlyside"},
     {name = "Forrest Collman"},
@@ -19,7 +19,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
@@ -27,12 +26,21 @@ classifiers = [
 dependencies = [
     # Core provides the read/write APIs, spatial/boundary helpers, and a basic
     # multi-scale layer; the rich coarsening/compute layer lives here in
-    # zarr_vectors_tools.multiresolution. Tracks the post-0.2.0 dev line that
-    # carries PR #26 (types.skeletons + cells cross-chunk-link layout) and PR #27
-    # (plug-in strategy registry); the `.dev0` lower bound accepts the current
-    # setuptools-scm dev version (0.2.1.devN) and excludes the feature-less 0.2.0
-    # release. Bump to >=0.3 once core tags a v0.3.0 release.
+    # zarr_vectors_tools.multiresolution.
+    #
+    # This package requires the merged links/<delta>/<offsets>/ layout (on-disk
+    # FORMAT 0.9.0): connectivity is one family and there is no cross_chunk_links/
+    # to fall back to.  That format ships in the current core dev line, whose
+    # PACKAGE version is still 0.2.x (setuptools-scm: 0.2.1.devN) -- format
+    # version and package version are independent, so the pin tracks the package.
+    # The pin can only exclude the feature-less 0.2.0 release; it cannot by
+    # itself guarantee the merged-links core, since that is unreleased. The real
+    # guarantee is an editable install of the core working tree that carries it.
     "zarr-vectors>=0.2.1.dev0",
+    # Inherited transitively from core (format 0.9.0 is zarr v3 only), but
+    # declared here because this package imports zarr semantics through core's
+    # group/array layer and would otherwise resolve against a v2 install.
+    "zarr>=3.0",
     "numpy>=1.24",
     "pandas>=2.0",
 ]

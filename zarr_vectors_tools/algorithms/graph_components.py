@@ -17,19 +17,12 @@ from typing import Any
 
 import numpy as np
 
-from zarr_vectors.constants import (
-    CROSS_CHUNK_LINKS,
-    LINK_FRAGMENTS,
-    LINKS,
-)
-from zarr_vectors.core.arrays import (
-    list_chunk_keys,
-    read_chunk_links,
-    read_cross_chunk_links,
-)
+from zarr_vectors.core.arrays import list_chunk_keys, read_links
 from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.lazy import open_zv
 from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
+
+from zarr_vectors_tools.algorithms._links import link_prefetch_plan
 
 
 class _DSU:
@@ -95,33 +88,18 @@ def compute_connected_components(
 
     dsu = _DSU(n_vertices)
 
-    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
-    with level_group.batched_reads([
-        (f"{LINKS}/0", chunk_key_strs),
-        (LINK_FRAGMENTS, chunk_key_strs),
-        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
-    ]):
-        # Intra-chunk edges: local indices within the chunk become global
-        # indices by adding the chunk's start offset.
-        for chunk_key in chunk_keys:
-            try:
-                link_groups = read_chunk_links(level_group, chunk_key)
-            except Exception:
-                continue
-            base = offsets[chunk_key]
-            for edges in link_groups:
-                if len(edges) == 0:
-                    continue
-                arr = np.asarray(edges, dtype=np.int64)
-                for u_local, v_local in arr:
-                    dsu.union(int(u_local) + base, int(v_local) + base)
-
-        # Cross-chunk edges: each endpoint is (chunk_key, local_index).
+    # Connectivity is one family: every record is a tuple of
+    # (chunk_coords, local_index) endpoints, and an intra-chunk edge is
+    # just one whose endpoints share a chunk.  So a single whole-family
+    # read replaces the old per-chunk intra loop PLUS the separate cross
+    # read — doing both against read_links would union every intra edge
+    # twice and silently double its degree.
+    with level_group.batched_reads(link_prefetch_plan(level_group, chunk_keys)):
         try:
-            cross_links = read_cross_chunk_links(level_group, delta=0)
+            records = read_links(level_group, delta=0)
         except Exception:
-            cross_links = []
-    for (chunk_a, vi_a), (chunk_b, vi_b) in cross_links:
+            records = []
+    for (chunk_a, vi_a), (chunk_b, vi_b) in records:
         dsu.union(offsets[chunk_a] + int(vi_a), offsets[chunk_b] + int(vi_b))
 
     # Compact roots into 0-indexed labels.

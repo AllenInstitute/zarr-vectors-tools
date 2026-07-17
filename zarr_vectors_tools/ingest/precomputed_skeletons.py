@@ -37,6 +37,7 @@ import numpy.typing as npt
 
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
+from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
@@ -472,7 +473,14 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
                     (int(p["segment_id"]),
                      tuple(int(c) for c in coord[vidx]), tag)
                 )
-        recs, alocs = sk.write_skeleton_chunk(lg, cc, pieces, attr_dtypes=attr_dtypes)
+        # record_presence=False: _l0_extract_write is dispatched one task per
+        # chunk across worker PROCESSES.  ``nonempty_chunks`` is array-wide, so
+        # stamping it per chunk is a read-modify-write that concurrent workers
+        # race on (a Windows atomic-rename hard-fail).  run_ingest re-derives
+        # every manifest with rebuild_nonempty_manifests once Phase A is done.
+        recs, alocs = sk.write_skeleton_chunk(
+            lg, cc, pieces, attr_dtypes=attr_dtypes, record_presence=False,
+        )
         records.extend(recs)
         for seg, coordt, tag in tag_meta:
             loc = alocs.get(tag)
@@ -718,7 +726,7 @@ def run_ingest(
         # ``nonempty_chunks`` manifest RMWs race and can under-report.  Re-derive
         # the manifests from the on-disk cells so the object-index build, store
         # finalize, and the coarsening source scan below enumerate every chunk.
-        lg.rebuild_nonempty_manifests()
+        rebuild_nonempty_manifests(lg)
 
         _t2 = _time.perf_counter()
         oid_of = build_object_index(lg, records, ndim=ndim)

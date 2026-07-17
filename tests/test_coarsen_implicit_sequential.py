@@ -20,8 +20,8 @@ from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_all_object_manifests,
     read_chunk_vertices,
-    read_cross_chunk_links,
 )
+from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors.core.store import (
     get_resolution_level,
     open_store,
@@ -234,7 +234,7 @@ def test_boundary_crossing_streamline_has_exactly_one_xclink(tmp_path):
     assert len(s1_manifest) == 2
 
     # No same-chunk cross_chunk_links/0 records should be emitted.
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
     same_chunk = [r for r in records if r[0][0] == r[1][0]]
     assert same_chunk == [], (
         f"Expected zero same-chunk delta=0 records but got: {same_chunk}"
@@ -264,7 +264,7 @@ def test_shared_boundary_yields_multiple_cross_chunk_records(tmp_path):
 
     root = open_store(str(store))
     lvl1 = get_resolution_level(root, 1)
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
 
     # Two streamlines each cross the (0,0,0)→(1,0,0) boundary.
     # Expect at least two cross-chunk records spanning that pair.
@@ -292,7 +292,7 @@ def test_no_same_chunk_x_links_on_implicit_path(tmp_path):
 
     root = open_store(str(store))
     lvl1 = get_resolution_level(root, 1)
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
     same = [r for r in records if r[0][0] == r[1][0]]
     assert same == []
 
@@ -336,7 +336,7 @@ def test_cross_chunk_link_endpoints_resolve_to_valid_rows(tmp_path):
 
     root = open_store(str(store))
     lvl1 = get_resolution_level(root, 1)
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
 
     chunk_row_counts: dict = {}
     for cc in list_chunk_keys(lvl1):

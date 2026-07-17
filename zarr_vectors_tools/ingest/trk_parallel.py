@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import struct
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -27,24 +28,22 @@ import numpy as np
 import numpy.typing as npt
 
 from zarr_vectors.core.arrays import (
-    create_cross_chunk_links_array,
     create_fragment_attribute_array,
+    create_links_family,
     create_object_index_array,
     create_vertices_array,
     level_grid_layout,
     write_chunk_fragment_attributes,
     write_chunk_vertices,
-    write_cross_chunk_links,
+    write_links,
     write_object_index,
 )
 from zarr_vectors.core.metadata import LevelMetadata
 from zarr_vectors.core.store import create_resolution_level, create_store, open_store
-from zarr_vectors.spatial.boundary import (
-    cross_chunk_links_for_segments,
-    split_polyline_at_boundaries,
-)
+from zarr_vectors.spatial.boundary import split_polyline_at_boundaries
 from zarr_vectors.typing import ChunkShape
 
+from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
 
@@ -354,6 +353,20 @@ def _phase_a_worker(
     return npz_path
 
 
+def _close_memmap(arr: Any) -> None:
+    """Release a ``np.load(..., mmap_mode=...)`` mapping's file handle.
+
+    Dropping the last Python reference is not enough on Windows: the handle
+    survives until GC runs, and until it does the backing file cannot be
+    deleted — which is what makes the intermediate-dir cleanup blow up at
+    the very end of an otherwise successful ingest.  ``np.memmap`` exposes
+    the mapping as ``._mmap``; a plain ndarray (no mmap) has none.
+    """
+    mm = getattr(arr, "_mmap", None)
+    if mm is not None:
+        mm.close()
+
+
 # ---------------------------------------------------------------------------
 # Phase B worker: assemble one spatial chunk from all N parts
 # ---------------------------------------------------------------------------
@@ -380,49 +393,65 @@ def _phase_b_worker(
     records: list[tuple[int, int, int, npt.NDArray]] = []
 
     for part_idx, npz_path in enumerate(part_npz_paths):
-        data = np.load(npz_path)
-        px = data["seg_chunk_x"]
-        py = data["seg_chunk_y"]
-        pz = data["seg_chunk_z"]
-        mask = (px == chunk_coords[0]) & (py == chunk_coords[1]) & (pz == chunk_coords[2])
-        if not np.any(mask):
-            del data
-            continue
+        # ``with``: NpzFile holds an open zipfile handle until closed, and
+        # ``del`` only drops a reference — on Windows a surviving handle makes
+        # the intermediate dir undeletable and the whole ingest fails in
+        # cleanup, long after the data is safely written.
+        with np.load(npz_path) as data:
+            px = data["seg_chunk_x"]
+            py = data["seg_chunk_y"]
+            pz = data["seg_chunk_z"]
+            mask = (
+                (px == chunk_coords[0])
+                & (py == chunk_coords[1])
+                & (pz == chunk_coords[2])
+            )
+            if not np.any(mask):
+                continue
 
-        seg_poly_ids = data["seg_poly_ids"]
-        seg_vtx_counts = data["seg_vertex_counts"]
-        vtx_starts = np.concatenate([[0], np.cumsum(seg_vtx_counts)])[:-1]
+            seg_poly_ids = data["seg_poly_ids"]
+            seg_vtx_counts = data["seg_vertex_counts"]
+            vtx_starts = np.concatenate([[0], np.cumsum(seg_vtx_counts)])[:-1]
 
-        # Vectorised within_poly_idx: position of each segment within its polyline.
-        # seg_poly_ids is monotonically non-decreasing within each part (Phase A
-        # writes segments in poly_id order), so group boundaries are diff > 0.
-        change_pts = np.concatenate([[0], np.where(np.diff(seg_poly_ids))[0] + 1])
-        group_id = np.searchsorted(change_pts, np.arange(len(seg_poly_ids)), side="right") - 1
-        within_poly_idx_arr = np.arange(len(seg_poly_ids)) - change_pts[group_id]
+            # Vectorised within_poly_idx: position of each segment within its
+            # polyline.  seg_poly_ids is monotonically non-decreasing within
+            # each part (Phase A writes segments in poly_id order), so group
+            # boundaries are diff > 0.
+            change_pts = np.concatenate(
+                [[0], np.where(np.diff(seg_poly_ids))[0] + 1]
+            )
+            group_id = np.searchsorted(
+                change_pts, np.arange(len(seg_poly_ids)), side="right"
+            ) - 1
+            within_poly_idx_arr = np.arange(len(seg_poly_ids)) - change_pts[group_id]
 
-        # Restrict all arrays to matching segments — avoids O(all_segments) Python loop.
-        match_idx = np.where(mask)[0]
-        m_poly_ids    = seg_poly_ids[match_idx]
-        m_within      = within_poly_idx_arr[match_idx]
-        m_vtx_starts  = vtx_starts[match_idx]
-        m_vtx_counts  = seg_vtx_counts[match_idx]
-
-        del data  # release npz arrays before opening mmap
+            # Restrict all arrays to matching segments — avoids an
+            # O(all_segments) Python loop.
+            match_idx = np.where(mask)[0]
+            m_poly_ids    = seg_poly_ids[match_idx]
+            m_within      = within_poly_idx_arr[match_idx]
+            m_vtx_starts  = vtx_starts[match_idx]
+            m_vtx_counts  = seg_vtx_counts[match_idx]
 
         verts_npy_path = npz_path.replace(".npz", ".verts.npy")
         vertices = np.load(verts_npy_path, mmap_mode="r")
-
-        for i in range(len(match_idx)):
-            vs = int(m_vtx_starts[i])
-            vc = int(m_vtx_counts[i])
-            # np.array() forces a copy: releases the mmap reference so pages can
-            # be evicted once we close `vertices` below.  Create it directly in
-            # the output dtype so the write path needs no further copy (a no-op
-            # cast from the float32 mmap when out_dtype is float32).
-            seg_verts = np.array(vertices[vs:vs + vc], dtype=out_dtype)
-            records.append((part_idx, int(m_poly_ids[i]), int(m_within[i]), seg_verts))
-
-        del vertices  # close mmap; OS can evict pages immediately
+        try:
+            for i in range(len(match_idx)):
+                vs = int(m_vtx_starts[i])
+                vc = int(m_vtx_counts[i])
+                # np.array() forces a copy: releases the mmap reference so pages
+                # can be evicted once the mapping closes below.  Create it
+                # directly in the output dtype so the write path needs no
+                # further copy (a no-op cast when out_dtype is float32).
+                seg_verts = np.array(vertices[vs:vs + vc], dtype=out_dtype)
+                records.append(
+                    (part_idx, int(m_poly_ids[i]), int(m_within[i]), seg_verts)
+                )
+        finally:
+            # Close the mapping explicitly: `del` drops a reference but leaves
+            # the file handle open until GC, which on Windows is long enough to
+            # block cleanup of the intermediate dir.
+            _close_memmap(vertices)
 
     if not records:
         return {}
@@ -440,13 +469,25 @@ def _phase_b_worker(
     # `out_dtype`) instead of copying — avoids a full duplicate of the whole
     # chunk's vertices and a second set of per-segment array objects.
     vert_groups = [r[3] for r in records]
-    write_chunk_vertices(level_group, chunk_coords, vert_groups, dtype=out_dtype)
+    # record_presence=False: Phase B runs one task per spatial chunk, across
+    # worker PROCESSES.  ``nonempty_chunks`` is an array-wide attribute living
+    # in the array's zarr.json, so stamping it per cell is a read-modify-write
+    # that concurrent workers collide on (a Windows atomic-rename hard-fail).
+    # The coordinator re-derives every manifest once, after Phase B, via
+    # rebuild_nonempty_manifests.
+    write_chunk_vertices(
+        level_group, chunk_coords, vert_groups, dtype=out_dtype,
+        record_presence=False,
+    )
 
     # Write per-fragment segment id (global poly_id = streamline index in file).
     # One uint64 per fragment, same order as vert_groups.  Neuroglancer uses this
     # to map a picked spatial fragment back to the full streamline for pass-2 fetch.
     seg_ids = np.array([r[1] for r in records], dtype=np.uint64)
-    write_chunk_fragment_attributes(level_group, "segment_id", chunk_coords, seg_ids, dtype=np.uint64)
+    write_chunk_fragment_attributes(
+        level_group, "segment_id", chunk_coords, seg_ids, dtype=np.uint64,
+        record_presence=False,
+    )
 
     # Build fragment result map: key = (part_idx, poly_id, seg_within_poly)
     result: dict[tuple[int, int, int], tuple[tuple[int, int, int], int, int, int]] = {}
@@ -488,11 +529,11 @@ def _build_manifests_and_cross_links(
     poly_segments: dict[int, list[tuple[int, int, tuple[int, int, int]]]] = {}
 
     for part_idx, npz_path in enumerate(part_npz_paths):
-        data = np.load(npz_path)
-        seg_poly_ids = data["seg_poly_ids"]
-        seg_chunk_x = data["seg_chunk_x"]
-        seg_chunk_y = data["seg_chunk_y"]
-        seg_chunk_z = data["seg_chunk_z"]
+        with np.load(npz_path) as data:
+            seg_poly_ids = data["seg_poly_ids"]
+            seg_chunk_x = data["seg_chunk_x"]
+            seg_chunk_y = data["seg_chunk_y"]
+            seg_chunk_z = data["seg_chunk_z"]
 
         prev_poly = -1
         within_poly_idx = 0
@@ -552,6 +593,7 @@ def ingest_trk_parallel(
     workers: int | None = None,
     executor: Any = None,
     dtype: str = "float32",
+    compressor: Any = None,
     max_streamlines: int | None = None,
     compute_length: bool = False,
     compute_endpoints: bool = False,
@@ -583,6 +625,17 @@ def ingest_trk_parallel(
         executor: Injected executor (func, items, shared) callable. If None,
             either uses dask_executor (when workers>1) or runs serially.
         dtype: Numpy dtype for vertex positions.
+        compressor: Codec for the level-0 per-chunk arrays.  ``None``
+            (default) stores raw — vertices then cost exactly
+            ``n_vertices * ndim * itemsize`` bytes, the same payload a .trk
+            holds.  ``"zstd"`` / ``"blosc"`` roughly halve that (measured
+            ~2.4x on HCP tract coordinates) at the cost of a slower,
+            sync codec-encoding write path.  See
+            :func:`zarr_vectors.encoding.compression.resolve_compressor`
+            for accepted values (a full codec list also works).  The codec
+            pipeline is fixed when each array is created, so every later
+            per-cell write — including from parallel workers — encodes to
+            match automatically.
         max_streamlines: If set, only ingest the first N streamlines from the
             file (in on-disk order). Useful for quick test runs on a subset
             of a large tractogram; leave None to ingest all streamlines.
@@ -660,7 +713,14 @@ def ingest_trk_parallel(
     # --- Setup intermediate directory -------------------------------------
     _own_tempdir = intermediate_dir is None
     if _own_tempdir:
-        _tmpdir_obj = tempfile.TemporaryDirectory(prefix="trk_parallel_")
+        # ignore_cleanup_errors: by the time cleanup runs the store is written
+        # and the summary returned, so a straggling intermediate file must
+        # never fail the ingest.  Every read site closes its handle explicitly
+        # (see _close_memmap and the `with np.load(...)` blocks); this is the
+        # backstop, and it costs temp space rather than correctness.
+        _tmpdir_obj = tempfile.TemporaryDirectory(
+            prefix="trk_parallel_", ignore_cleanup_errors=True,
+        )
         _intermediate_dir = _tmpdir_obj.name
     else:
         _intermediate_dir = str(intermediate_dir)
@@ -681,6 +741,10 @@ def ingest_trk_parallel(
             str(output_path),
             bounds=bounds,
             chunk_shape=chunk_shape,
+            # create_store warm-creates vertices/vertex_fragments, and a chunk
+            # array's codecs are fixed at creation — so the compressor has to
+            # be set HERE or the store's largest arrays stay raw forever.
+            compressor=compressor,
             axes=[
                 {"name": "x", "type": "space", "unit": "mm"},
                 {"name": "y", "type": "space", "unit": "mm"},
@@ -709,10 +773,30 @@ def ingest_trk_parallel(
             arrays_present=["vertices", "object_index", "fragment_attributes"],
         )
         level_group = create_resolution_level(root, 0, level_meta)
-        create_vertices_array(level_group, dtype=dtype)
-        create_object_index_array(level_group)
-        create_cross_chunk_links_array(level_group, delta=0, sid_ndim=3)
-        create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
+        # A chunk array's codec pipeline is fixed when the array is CREATED
+        # (it lands in the array's zarr.json), and every later write — the
+        # Phase B workers included, in their own processes — encodes to match
+        # it via zarr's array API.  So the compressor only has to be active
+        # here, around creation; there is nothing to thread into the workers.
+        # ``nullcontext`` when no compressor is asked for, so the default path
+        # is byte-for-byte what it was before this option existed.
+        _codec_ctx = (
+            level_group.batched_writes(compressor=compressor)
+            if compressor else nullcontext()
+        )
+        with _codec_ctx:
+            create_vertices_array(level_group, dtype=dtype)
+            create_object_index_array(level_group)
+            # Stamp the family policy only; streamline connectivity is
+            # implicit-sequential within a fragment, so there are no intra
+            # records and the only arrays that should appear under links/0 are
+            # the ones the boundary-crossing records actually land in.
+            create_links_family(
+                level_group, delta=0, link_width=2, sid_ndim=3, directed=True,
+            )
+            create_fragment_attribute_array(
+                level_group, "segment_id", dtype="uint64",
+            )
 
         # --- Phase A: per-part spatial binning ---------------------------
         _log(f"Phase A: binning streamlines ({len(part_specs)} parts)...")
@@ -745,9 +829,11 @@ def ingest_trk_parallel(
         # Enumerate all occupied chunk coords across all parts
         all_chunk_coords: set[tuple[int, int, int]] = set()
         for npz_path in part_npz_paths:
-            data = np.load(npz_path)
-            xs, ys, zs = data["seg_chunk_x"], data["seg_chunk_y"], data["seg_chunk_z"]
-            for x, y, z in zip(xs.tolist(), ys.tolist(), zs.tolist()):
+            with np.load(npz_path) as data:
+                xs = data["seg_chunk_x"].tolist()
+                ys = data["seg_chunk_y"].tolist()
+                zs = data["seg_chunk_z"].tolist()
+            for x, y, z in zip(xs, ys, zs):
                 all_chunk_coords.add((int(x), int(y), int(z)))
         _log(f"  {len(all_chunk_coords)} occupied spatial chunks")
 
@@ -773,7 +859,7 @@ def ingest_trk_parallel(
         # Re-derive the manifests single-process from the on-disk cells before
         # anything downstream enumerates chunks (coarsening source scan,
         # algorithms readers).
-        level_group.rebuild_nonempty_manifests()
+        rebuild_nonempty_manifests(level_group)
 
         # --- Coordinator: manifests + cross-chunk links -------------------
         _log("Coordinator: building manifests and cross-chunk links...")
@@ -786,36 +872,34 @@ def ingest_trk_parallel(
 
         if cross_chunk_links:
             _log(f"  writing {len(cross_chunk_links)} cross-chunk links...")
-            write_cross_chunk_links(
-                level_group, cross_chunk_links, sid_ndim=3, delta=0, mode="replace",
-                directed=True,
+            # No capability stamp: these are cross-CHUNK links at delta 0.
+            # Since the links merge that is just a non-zero offsets segment
+            # in the ordinary links/0 family, and multiscale_links marks the
+            # presence of delta != 0 (cross-LEVEL) arrays only.
+            write_links(
+                level_group, cross_chunk_links, sid_ndim=3, delta=0,
+                mode="replace", directed=True,
             )
-            # Stamp capability
-            try:
-                from zarr_vectors_tools.multiresolution.coarsen import stamp_ccl_capabilities
-                stamp_ccl_capabilities(root)
-            except ImportError:
-                pass
 
         # Object attributes
         obj_attrs_to_write: dict[str, npt.NDArray] = {}
         if compute_length:
             length_parts = []
             for npz_path in part_npz_paths:
-                d = np.load(npz_path)
-                if "lengths" in d:
-                    length_parts.append(d["lengths"])
+                with np.load(npz_path) as d:
+                    if "lengths" in d:
+                        length_parts.append(d["lengths"])
             if length_parts:
                 obj_attrs_to_write["length"] = np.concatenate(length_parts, axis=0)
 
         if compute_endpoints:
             start_parts, end_parts = [], []
             for npz_path in part_npz_paths:
-                d = np.load(npz_path)
-                if "starts" in d:
-                    start_parts.append(d["starts"])
-                if "ends" in d:
-                    end_parts.append(d["ends"])
+                with np.load(npz_path) as d:
+                    if "starts" in d:
+                        start_parts.append(d["starts"])
+                    if "ends" in d:
+                        end_parts.append(d["ends"])
             if start_parts:
                 obj_attrs_to_write["start"] = np.concatenate(start_parts, axis=0)
             if end_parts:
@@ -861,13 +945,18 @@ def ingest_trk_parallel(
                 chunk_scale_factors=_chunk_scale_factors,
                 sparsity_strategy=sparsity_strategy,
                 coarsen_mode=pyramid_coarsen_mode,
+                # Coarser levels create their own arrays, so they need the
+                # same compressor to keep the store uniform — level 0's codec
+                # does not propagate.
+                compressor=compressor,
                 executor=executor,
             )
 
         # Count total vertices written (seg_vertex_counts is always in the npz)
-        total_vertices = int(sum(
-            int(np.load(p)["seg_vertex_counts"].sum()) for p in part_npz_paths
-        ))
+        total_vertices = 0
+        for p in part_npz_paths:
+            with np.load(p) as d:
+                total_vertices += int(d["seg_vertex_counts"].sum())
 
         # Stamp level-0 metadata now that we know the true vertex count and
         # which arrays are present (create_resolution_level runs before Phase B
@@ -881,7 +970,7 @@ def ingest_trk_parallel(
                 _lvl0_attrs["zarr_vectors_level"]["vertex_count"] = total_vertices
                 _lvl0_attrs["zarr_vectors_level"]["arrays_present"] = [
                     k for k in ["vertices", "vertex_fragments", "object_index",
-                                 "cross_chunk_links", "object_attributes",
+                                 "links", "object_attributes",
                                  "fragment_attributes"]
                     if k in _lvl0_z
                 ]
@@ -895,6 +984,11 @@ def ingest_trk_parallel(
             "streamline_count": n_streamlines,
             "vertex_count": total_vertices,
             "chunk_count": len(all_chunk_coords),
+            # Matches the key core's write_polylines returns, so the CLI
+            # prints the same field whichever ingest path produced it.
+            # "cross-chunk link" still names the concept (a record whose
+            # endpoints span chunks); the merge changed where it is stored,
+            # not what it counts.
             "cross_chunk_link_count": len(cross_chunk_links),
             "n_parts": len(part_specs),
             "chunk_shape": chunk_shape,

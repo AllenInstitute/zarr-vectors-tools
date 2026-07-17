@@ -51,7 +51,7 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
     """Build a sparsity pyramid on the just-written level-0 store."""
     from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
-    with executor_ctx(args.workers) as ex:
+    with executor_ctx(args.workers, args.workers_backend) as ex:
         result = build_pyramid(
             str(args.output),
             factors=factors,
@@ -67,7 +67,7 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     """Streamlines via the memory-bounded parallel ingester (inline pyramid)."""
     from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
 
-    with executor_ctx(args.workers) as ex:
+    with executor_ctx(args.workers, args.workers_backend) as ex:
         summary = ingest_trk_parallel(
             str(args.input),
             str(args.output),
@@ -76,6 +76,10 @@ def _convert_trk(args, factors, chunk_scale) -> int:
             workers=(args.workers or 1),
             executor=ex,
             dtype=args.dtype,
+            # "none" is the argparse spelling of "store raw"; resolve_compressor
+            # accepts it, but pass None so the no-compressor path stays the
+            # byte-for-byte default it has always been.
+            compressor=(None if args.compressor == "none" else args.compressor),
             compute_length=args.compute_length,
             compute_endpoints=args.compute_endpoints,
             build_multiscale=factors is not None,

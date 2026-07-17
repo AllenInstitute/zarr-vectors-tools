@@ -133,6 +133,15 @@ def test_monotone_oid_drop_across_levels(tmp_path):
 
     present_sets = {L: set(zv[L].present_oids.tolist()) for L in levels}
     assert present_sets[2] <= present_sets[1] <= present_sets[0]
+    # Sparsity is CUMULATIVE per level: each level keeps 1/2 of the PREVIOUS
+    # surviving count, not 1/2 of the original.  A <= subset check alone
+    # passes even when level 2 == level 1 (the "identical copies" bug); pin
+    # the strict geometric drop.  n=30, factor 2.0: 30 -> 15 -> 8 (round).
+    n0, n1, n2 = len(present_sets[0]), len(present_sets[1]), len(present_sets[2])
+    assert n0 == 30
+    assert n1 == round(n0 / 2), f"level 1: {n1} != {round(n0 / 2)}"
+    assert n2 == round(n1 / 2), f"level 2: {n2} != {round(n1 / 2)} (cumulative)"
+    assert n2 < n1, "level 2 must be strictly sparser than level 1"
     # Object_levels for any surviving level-2 OID is a contiguous prefix.
     for oid in present_sets[2]:
         visible = zv.object_levels(oid)

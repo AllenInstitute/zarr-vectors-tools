@@ -101,8 +101,17 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--overwrite", action="store_true",
                    help="replace an existing output store")
     _add_pyramid_args(c)
+    c.add_argument("--compressor", choices=("none", "zstd", "blosc"),
+                   default="none",
+                   help="codec for per-chunk arrays (default: none = raw). "
+                        "zstd/blosc roughly halve streamline stores (~2.4x on "
+                        "HCP tracts) at the cost of a slower write path")
     c.add_argument("--workers", type=int, default=None,
-                   help="dask worker processes (needs [parallel] extra)")
+                   help="parallel worker processes (default backend needs no extra)")
+    c.add_argument("--workers-backend", dest="workers_backend",
+                   choices=("process", "dask"), default="process",
+                   help="parallel backend: 'process' (stdlib, default) or "
+                        "'dask' (needs the [parallel] extra)")
     c.add_argument("--n-parts", type=int, dest="n_parts", default=None,
                    help="trk: file-split granularity")
     c.add_argument("--compute-length", action="store_true", dest="compute_length",
@@ -125,8 +134,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cross-level-storage", dest="cross_level_storage",
                    choices=("none", "implicit", "explicit"), default=None)
     p.add_argument("--cross-level-depth", dest="cross_level_depth", type=int, default=None)
+    p.add_argument("--compressor", choices=("none", "zstd", "blosc"),
+                   default="none",
+                   help="codec for the coarser levels' per-chunk arrays "
+                        "(default: none = raw). Match the value level 0 was "
+                        "written with to keep the store uniform")
     p.add_argument("--workers", type=int, default=None,
-                   help="dask worker processes (needs [parallel] extra)")
+                   help="parallel worker processes (default backend needs no extra)")
+    p.add_argument("--workers-backend", dest="workers_backend",
+                   choices=("process", "dask"), default="process",
+                   help="parallel backend: 'process' (stdlib, default) or "
+                        "'dask' (needs the [parallel] extra)")
     p.set_defaults(func=_pyramid.run_pyramid)
 
     # ---- validate ----------------------------------------------------------

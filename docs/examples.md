@@ -31,6 +31,7 @@ pip install -e ".[all,dev]"
 jupyter notebook examples/
 ```
 
-A small `tracts.zarrvectors` sample store ships alongside the
-notebooks so several of them run end-to-end without downloading any
-external data.
+The notebooks build the stores they need as they run, so none of them
+depend on a committed sample store or on downloading external data.
+`tractogram_to_zarrvectors.ipynb` writes `tracts.zarrvectors` from
+scratch; run it first if you want that store on disk.

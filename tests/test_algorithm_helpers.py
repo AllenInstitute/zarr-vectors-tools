@@ -1,10 +1,11 @@
 """Tests for tools-side helpers that wrap core APIs.
 
-After the migration to the multiscale-links layout the per-chunk vertex
-offset table and per-chunk cross-link index moved into core; these tests
-exercise the public replacements (``chunk_local_to_global_offsets`` and
-``read_cross_chunk_links``) the same way the retired tools-side
-workarounds used to.
+The per-chunk vertex offset table moved into core
+(``chunk_local_to_global_offsets``).  The per-chunk cross-link index has
+no core equivalent since the links merge — connectivity is one family and
+``read_links`` returns all of it — so the cross-only view is a tools-side
+filter (``_links.read_cross_links``).  These exercise both the same way
+the retired tools-side workarounds used to.
 """
 
 from __future__ import annotations
@@ -13,11 +14,11 @@ from pathlib import Path
 
 import numpy as np
 
-from zarr_vectors.core.arrays import read_cross_chunk_links
 from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 from zarr_vectors.types.points import write_points
 from zarr_vectors_tools.algorithms._chunk_neighbours import neighbouring_chunk_keys
+from zarr_vectors_tools.algorithms._links import read_cross_links
 
 
 # ---------------------------------------------------------------------
@@ -112,7 +113,7 @@ class TestChunkLocalToGlobalOffsets:
 
 
 # ---------------------------------------------------------------------
-# read_cross_chunk_links — public core reader
+# read_cross_links — tools-side cross-only filter over read_links
 # ---------------------------------------------------------------------
 
 class TestReadCrossChunkLinks:
@@ -123,7 +124,7 @@ class TestReadCrossChunkLinks:
         root = open_store(str(store))
         level = get_resolution_level(root, 0)
         try:
-            links = read_cross_chunk_links(level, delta=0)
+            links = read_cross_links(level, delta=0)
         except Exception:
             links = []
         assert links == []
@@ -145,7 +146,7 @@ class TestReadCrossChunkLinks:
 
         root = open_store(str(store))
         level = get_resolution_level(root, 0)
-        links = read_cross_chunk_links(level, delta=0)
+        links = read_cross_links(level, delta=0)
 
         assert len(links) == 1
         (chunk_a, _), (chunk_b, _) = links[0]
