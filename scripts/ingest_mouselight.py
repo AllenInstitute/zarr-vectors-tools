@@ -11,6 +11,28 @@ across the 1 mm chunk grid, and written to a zarr-vectors store.  Segment
 properties from the layer's segment_properties sub-directory are converted
 to object attributes in the store.
 
+The skeleton's per-vertex attributes (declared in ``skeleton/info``'s
+``vertex_attributes``) are carried through to the store's ``vertex_attributes/``
+arrays and exposed in neuroglancer as ``prop_<name>()`` in the skeleton
+shader.  For Mouselight these are:
+
+    - ``radius``       — float32 per-vertex radius
+    - ``vertex_types`` — SWC compartment code: 1 = soma, 2 = axon,
+                         3 = (basal) dendrite, 4 = apical dendrite
+
+Example: keep the segment's own colour (hash / stated / segment-color user
+shader) but shade dendrite a bit darker than axon/soma, in the skeleton
+shader::
+
+    void main() {
+      vec4 color = segmentColor();
+      float t = prop_vertex_types();
+      if (t == 3.0 || t == 4.0) {
+        color.rgb *= 0.6;  // dendrite (basal=3, apical=4): darker
+      }
+      emitRGBA(color);
+    }
+
 Customisation:
     - OUT_STORE        : local or cloud output path
     - CHUNK_SHAPE_NM   : spatial chunk size in nm (default 1 mm per axis)

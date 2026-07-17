@@ -87,7 +87,16 @@ class TestLazyDaskParallel:
 
 
 class TestShardReshardChain:
-    """Shard → reshard → unshard round-trip with data integrity."""
+    """Shard → reshard → unshard round-trip with data integrity.
+
+    zarr-vectors-py 0.8.1 dropped the choosable curve-ordering shard
+    layouts (octree/snake/index_table — ``ShardLayout`` no longer takes a
+    ``layout=``/``shard_size=`` pair; there is exactly one native layout,
+    a Zarr v3 ``sharding_indexed`` codec addressed by ``shard_shape``).
+    ``reshard(store_path, shard_shape)`` replaces the old
+    ``reshard(store_path, ShardLayout.X, shard_size=N)`` — ``shard_shape``
+    (an int or per-axis tuple) shards, ``None`` unshards.
+    """
 
     def test_shard_chain(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points, read_points
@@ -103,15 +112,19 @@ class TestShardReshardChain:
         # Core migrated to Zarr v3 native sharding: reshard takes a shard shape
         # (int/tuple) or None to unshard; the old OCTREE/SNAKE/INDEX_TABLE
         # layouts are aliases for the single native-sharded mode.
-        # flat → sharded
-        reshard(store, 2)
+        # flat → sharded (shard_shape=8)
+        reshard(store, 8)
         assert is_sharded(store)
-        assert get_shard_info(store)["sharded"]
+        info = get_shard_info(store)
+        assert info["sharded"] is True
+        assert info["shard_count"] > 0
+        assert all(a["shard_shape"] == [8, 8, 8] for a in info["arrays"])
 
-        # reshard to a different shard shape (stays sharded)
-        reshard(store, 4)
+        # re-shard with a different shard_shape (still sharded)
+        reshard(store, 16)
         assert is_sharded(store)
-        assert get_shard_info(store)["sharded"]
+        info = get_shard_info(store)
+        assert all(a["shard_shape"] == [16, 16, 16] for a in info["arrays"])
 
         # sharded → flat
         reshard(store, None)
@@ -151,7 +164,7 @@ class TestShardedPyramid:
         levels_before = list_resolution_levels(open_store(store))
 
         # Shard (native Zarr v3 sharding: shard shape int, None to unshard)
-        reshard(store, 2)
+        reshard(store, 8)
         assert is_sharded(store)
 
         # Unshard

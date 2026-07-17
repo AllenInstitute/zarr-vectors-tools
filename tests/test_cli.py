@@ -96,6 +96,21 @@ def _levels(store: Path) -> list[int]:
     return list_resolution_levels(open_store(str(store)))
 
 
+def _codec_names(codecs: list[dict]) -> list[str]:
+    """Flatten codec names, descending into ``sharding_indexed``'s own
+    inner ``codecs`` list — a compressor applied under native sharding
+    (the CLI's/ingest's default) lands there, not as a top-level sibling,
+    since ``sharding_indexed`` wraps the per-shard codec pipeline rather
+    than sitting alongside it."""
+    names: list[str] = []
+    for c in codecs:
+        name = c.get("name")
+        names.append(name)
+        if name == "sharding_indexed":
+            names.extend(_codec_names(c.get("configuration", {}).get("codecs", [])))
+    return names
+
+
 # ===================================================================
 # _args unit tests
 # ===================================================================
@@ -290,9 +305,9 @@ class TestTrk:
             ])
             assert rc == 0
             meta = json.loads((out / "0" / "vertices" / "zarr.json").read_text())
-            names = [c.get("name") for c in meta["codecs"]]
+            names = _codec_names(meta["codecs"])
             if comp == "none":
-                assert names == ["vlen-bytes"], names
+                assert "zstd" not in names, names
             else:
                 assert "zstd" in names, names
             sizes[comp] = sum(
@@ -346,7 +361,7 @@ class TestTrk:
             meta = json.loads(
                 (out / str(lvl) / "vertices" / "zarr.json").read_text()
             )
-            names = [c.get("name") for c in meta["codecs"]]
+            names = _codec_names(meta["codecs"])
             assert "zstd" in names, f"level {lvl} left uncompressed: {names}"
 
 

@@ -36,7 +36,6 @@ import pickle
 import shutil
 import tempfile
 from collections import defaultdict
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -436,8 +435,6 @@ def _build_local_plan(
     ``intra_extra``/``forced``), and ``vcache``/``acache`` are the per-fragment
     vertex/attribute reads (reused by that loop, no double read).
     """
-    from itertools import product
-
     from zarr_vectors.core.arrays import (
         read_chunk_attributes,
         read_chunk_fragment_attributes,
@@ -445,12 +442,12 @@ def _build_local_plan(
         read_chunk_vertices,
     )
     from zarr_vectors.exceptions import ArrayError
+    from zarr_vectors_tools.multiresolution.strategies.polylines import (
+        _child_chunks_of,
+    )
 
     tcc = tuple(int(x) for x in tcc)
-    child_ccs = [
-        tuple(tcc[a] * scale[a] + d[a] for a in range(ndim))
-        for d in product(*[range(scale[a]) for a in range(ndim)])
-    ]
+    child_ccs = _child_chunks_of(tcc, scale, ndim)
 
     vcache: dict = {}
     acache: dict = {name: {} for name in attr_names}
@@ -693,9 +690,19 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     source_cs = np.asarray(shared["source_cs"], dtype=np.float64)
     drop_below = int(shared.get("drop_interior_below", 0) or 0)
 
-    root = open_store(shared["store_path"], mode="r+")
-    src = get_resolution_level(root, shared["source_level"])
-    level_group = get_resolution_level(root, shared["target_level"])
+    # `_open` (root/src/level_group) is injected in-process by
+    # `_coarsen_target_shard_batch` so every target chunk in one shard is
+    # written through the SAME level_group instance inside one native-sharded
+    # write session (never pickled across processes — set locally per worker).
+    _open = shared.get("_open")
+    if _open is not None:
+        root, src, level_group = (
+            _open["root"], _open["src"], _open["level_group"],
+        )
+    else:
+        root = open_store(shared["store_path"], mode="r+")
+        src = get_resolution_level(root, shared["source_level"])
+        level_group = get_resolution_level(root, shared["target_level"])
 
     # Self-plan + read children locally — no coordinator plan (kills the per-fragment
     # central state). ``forced`` here = vertices on the target chunk's OUTER faces.
@@ -866,6 +873,48 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     }
 
 
+def _coarsen_target_shard_batch(
+    payload_batch: dict, shared: dict | None = None,
+) -> list[dict]:
+    """Coarsen every target chunk that maps to ONE native-shard, writing them
+    all inside ONE :func:`open_write_session`.
+
+    The target level's per-chunk arrays are native-sharded, so a partial
+    write reads/merges/rewrites the WHOLE shard file with no cross-process
+    coordination — two workers racing on the same shard silently drop
+    whichever loses (see the trk_parallel.py Phase B / polylines notes).
+    Grouping every target chunk that maps to the same shard into one task
+    (see the shard-address grouping in :func:`coarsen_skeleton_level`)
+    guarantees exactly one worker ever touches that shard; writing all of
+    them within a single session means the shard file is flushed once with
+    every chunk's cell present.
+    """
+    from zarr_vectors.core.arrays import open_write_session
+    from zarr_vectors.core.store import get_resolution_level, open_store
+
+    shared = shared or {}
+    shard = shared["shard"]  # {"shard_shape", "bounds", "chunk_shape"}
+    root = open_store(shared["store_path"], mode="r+")
+    src = get_resolution_level(root, int(shared["source_level"]))
+    level_group = get_resolution_level(root, int(shared["target_level"]))
+    # Inject the open handles so each per-tcc call writes through THIS
+    # level_group instance (inside the session below) rather than reopening.
+    local_shared = {
+        **shared,
+        "_open": {"root": root, "src": src, "level_group": level_group},
+    }
+    results: list[dict] = []
+    with open_write_session(
+        level_group,
+        shard_shape=shard["shard_shape"],
+        bounds=shard["bounds"],
+        chunk_shape=shard["chunk_shape"],
+    ):
+        for payload in payload_batch["payloads"]:
+            results.append(_coarsen_target_chunk(payload, local_shared))
+    return results
+
+
 def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
     """Phase B worker: write the cross-target-chunk links for ONE task shard.
 
@@ -1011,6 +1060,7 @@ def coarsen_skeleton_level(
     boundary_offset_nm: Sequence[float] | None = None,
     compressor: Any = None,
     executor: Any = None,
+    shard_shape: int | tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     """Coarsen one skeleton level by uniform per-path decimation.
 
@@ -1043,9 +1093,14 @@ def coarsen_skeleton_level(
     """
     # Imports are local to avoid a module-load cycle
     # (coarsen.py imports this module).
+    from contextlib import nullcontext
+
     from zarr_vectors.core.arrays import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
+        VERTEX_ATTRIBUTES,
+        VERTEX_FRAGMENTS,
+        VERTICES,
         _write_object_index_manifests,
         create_attribute_array,
         create_fragment_attribute_array,
@@ -1053,12 +1108,14 @@ def coarsen_skeleton_level(
         create_object_attributes_array,
         create_object_index_array,
         create_vertices_array,
+        open_write_session,
         read_chunk_fragment_attributes,
         list_chunk_keys,
         read_all_object_manifests,
         read_object_attributes,
         write_object_attributes,
     )
+    from zarr_vectors.constants import FRAGMENT_ATTRIBUTES
     from zarr_vectors.core.arrays import create_links_family, finalize_links
     from zarr_vectors_tools.multiresolution.constants import (
         CROSS_LINK_TASK_SHARD_AXIS,
@@ -1125,7 +1182,15 @@ def coarsen_skeleton_level(
     attr_names: list[str] = []
     attr_dtypes: dict[str, np.dtype] = {}
     if VERTEX_ATTRIBUTES in src:
-        for name in src[VERTEX_ATTRIBUTES]:
+        # Iterate the underlying zarr group — `FsGroup.__iter__` does NOT
+        # enumerate sub-array members (returns empty), so `for n in
+        # src[VERTEX_ATTRIBUTES]` silently found nothing and every coarser
+        # pyramid level dropped the per-vertex attributes (radius/vertex_types).
+        try:
+            member_names = list(src.zarr_group[VERTEX_ATTRIBUTES])
+        except Exception:
+            member_names = []
+        for name in member_names:
             try:
                 meta = src.read_array_meta(f"{VERTEX_ATTRIBUTES}/{name}")
                 attr_dtypes[name] = np.dtype(meta.get("dtype", "float32"))
@@ -1136,9 +1201,11 @@ def coarsen_skeleton_level(
     # --- object space (O(objects), not O(fragments)) --------------------
     # The dense OID space comes from object_attributes/segment_id, while worker
     # grouping requires per-fragment object_id on the source level.
+    from zarr_vectors.exceptions import StoreError
+
     try:
         seg_array = np.asarray(read_object_attributes(src, "segment_id"))
-    except ArrayError:
+    except (ArrayError, StoreError):
         seg_array = None
     if seg_array is None or len(seg_array) == 0:
         return {"vertex_count": 0, "object_count": 0, "method": COARSEN_SKELETON}
@@ -1198,10 +1265,20 @@ def coarsen_skeleton_level(
         return {"vertex_count": 0, "object_count": 0, "method": COARSEN_SKELETON}
 
     # --- create target level + arrays (vertex_count patched after workers) -
+    # "fragment_attributes" MUST be listed: neuroglancer's spatially-indexed
+    # skeleton reader gates reading per-fragment segment ids on it; omitting
+    # it makes the reader fall back to each fragment's chunk-local index, so
+    # highlighting one object lights up scattered fragments from all objects.
+    _arrays_present = [
+        VERTICES, "vertex_fragments", "links", "object_index",
+        "fragment_attributes", "object_attributes",
+    ]
+    if attr_names:
+        _arrays_present.append("vertex_attributes")
     level_meta = LevelMetadata(
         level=target_level,
         vertex_count=0,
-        arrays_present=[VERTICES, "links", "object_index"],
+        arrays_present=_arrays_present,
         bin_shape=tuple(root_meta.effective_bin_shape),
         bin_ratio=tuple(1 for _ in range(ndim)),
         chunk_shape=chunk_shape_override,
@@ -1220,52 +1297,71 @@ def coarsen_skeleton_level(
             root, target_level, scale=[1.0] * ndim,
             translation=[float(x) for x in _offset],
         )
-    # A chunk array's codec pipeline is fixed when it is created, so the
-    # compressor only has to be active around the create_* calls — every later
-    # per-cell write (Phase A/B workers included) encodes to match.  The block
-    # must CLOSE before any worker dispatch: batched_writes defers array metas
-    # to its flush, and a worker reading an unflushed meta would see nothing.
-    _codec_ctx = (
-        level_group.batched_writes(compressor=compressor)
-        if compressor else nullcontext()
+    # Native sharding for the per-chunk arrays makes this level readable by
+    # neuroglancer (its reader requires a top-level `shape` + sharding_indexed
+    # codec on vertices/zarr.json).  Disabled on negative bounds (the origin-
+    # anchored chunk grid can't index negative coords).  `shard_meta` is
+    # threaded to the Phase-A workers so each shard's chunks are written in a
+    # single session.
+    level_shard_shape = shard_shape
+    if level_shard_shape is not None and any(
+        float(b) < 0 for b in root_meta.bounds[0]
+    ):
+        level_shard_shape = None
+    shard_meta = (
+        {
+            "shard_shape": level_shard_shape,
+            "bounds": (list(root_meta.bounds[0]), list(root_meta.bounds[1])),
+            "chunk_shape": tuple(target_chunk_shape),
+        }
+        if level_shard_shape is not None
+        else None
     )
-    with _codec_ctx:
+    with open_write_session(
+        level_group,
+        compressor=compressor,
+        shard_shape=level_shard_shape,
+        bounds=root_meta.bounds,
+        chunk_shape=target_chunk_shape,
+    ):
+        # No compress= kwarg: an array's on-disk codec is fixed by
+        # open_write_session's own compressor= (None here → raw, uncompressed
+        # cells, i.e. byte-range-readable — the same property compress=False
+        # used to achieve).
         create_vertices_array(level_group, dtype="float32")
         # directed=True is family-wide at (level, delta=0) and cannot be
         # flipped later, so the intra array created here and Phase B's cross
         # cells must agree.  True matches the level-0 skeleton family
         # (types.skeletons stamps it so parent->child order survives) and
-        # keeps a whole pyramid on one policy.
+        # keeps a whole pyramid on one policy.  Unlike polylines (implicit-
+        # sequential, no intra records), write_skeleton_chunk writes each
+        # chunk's branch links into the all-zero-offsets (intra-chunk) array
+        # as part of every Phase-A write, so it must exist up front — hence
+        # create_links_array here rather than create_links_family alone.
         create_links_array(
             level_group, link_width=2, delta=0, sid_ndim=ndim, directed=True,
         )
         create_object_index_array(level_group)
-        create_fragment_attribute_array(
-            level_group, "segment_id", dtype="uint64",
-        )
-        create_fragment_attribute_array(
-            level_group, "object_id", dtype="uint64",
-        )
+        create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
+        create_fragment_attribute_array(level_group, "object_id", dtype="uint64")
         for name in attr_names:
-            create_attribute_array(
-                level_group, name, dtype=str(attr_dtypes[name]),
-            )
+            create_attribute_array(level_group, name, dtype=str(attr_dtypes[name]))
 
-    # Pre-create the kN cross-chunk-link arrays with LEVEL-WIDE dims so Phase-B
-    # workers only WRITE cells (no create-race) and every writer agrees on the
-    # array shape + origin.  Grid bounds come from the target-chunk extent.
+        # Fix the family policy up front so the decentralized Phase B
+        # workers agree on it rather than racing to establish it.
+        # Idempotent/merging on top of the intra array's own stamp above.
+        create_links_family(
+            level_group, delta=0, link_width=2, sid_ndim=ndim, directed=True,
+        )
+
+    # Level-wide chunk-grid dims for the cross-link task/shard-address
+    # grouping below (Phase B dispatch).
     tc_arr = np.asarray(target_chunks, dtype=np.int64)
     cmin = tc_arr.min(axis=0)
     cmax = tc_arr.max(axis=0)
     chunk_origin = tuple(int(min(0, int(cmin[a]))) for a in range(ndim))
     chunk_grid_shape = tuple(
         int(max(1, int(cmax[a]) - chunk_origin[a] + 1)) for a in range(ndim)
-    )
-    # Fix the family policy up front so the decentralized Phase B workers
-    # agree on it rather than racing to establish it.  No offsets array is
-    # materialised here: which ones exist depends on where the records land.
-    create_links_family(
-        level_group, delta=0, link_width=2, sid_ndim=ndim, directed=True,
     )
 
     # --- Phase A: decimate each target chunk (workers self-plan locally) ---
@@ -1293,6 +1389,7 @@ def coarsen_skeleton_level(
         "oid_reduce_shards": int(oid_reduce_shards),
         "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
         "sidecar_tmp_dir": str(sidecar_tmp_dir),
+        "shard": shard_meta,
     }
     # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
     # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
@@ -1316,7 +1413,30 @@ def coarsen_skeleton_level(
     _timings["setup"] = _time.perf_counter() - _t0
     _progress(f"phase A start: target_chunks={len(payloadsA)}")
     _tmap = _time.perf_counter()
-    resultsA = list(executor(_coarsen_target_chunk, payloadsA, sharedA))
+    if shard_meta is not None:
+        # Native-sharded: group target chunks by shard address so exactly one
+        # worker ever touches each shard file, and write all of a shard's
+        # chunks inside one session (avoids the concurrent read-modify-write
+        # shard race that silently drops chunks).
+        assert level_shard_shape is not None  # implied by shard_meta
+        shard_shape_n = (
+            (level_shard_shape,) * ndim
+            if isinstance(level_shard_shape, int)
+            else tuple(int(x) for x in level_shard_shape)
+        )
+        by_shard: dict[tuple[int, ...], list[dict]] = defaultdict(list)
+        for p in payloadsA:
+            tcc = tuple(int(x) for x in p["tcc"])
+            addr = tuple(c // s for c, s in zip(tcc, shard_shape_n))
+            by_shard[addr].append(p)
+        batches = [{"payloads": ps} for _, ps in sorted(by_shard.items())]
+        resultsA = [
+            r
+            for batch in executor(_coarsen_target_shard_batch, batches, sharedA)
+            for r in batch
+        ]
+    else:
+        resultsA = list(executor(_coarsen_target_chunk, payloadsA, sharedA))
     _timings["map_phase_a"] = _time.perf_counter() - _tmap
     _progress(f"phase A done: dt={_timings['map_phase_a']:.2f}s")
     _tfin = _time.perf_counter()
@@ -1332,6 +1452,7 @@ def coarsen_skeleton_level(
     max_in_objects = 0
     sidecar_paths: dict[tuple[int, ...], str] = {}
     shard_entries: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    written_tccs: list[tuple[int, ...]] = []
     for res in resultsA:
         in_f = int(res.get("input_fragments", 0))
         in_v = int(res.get("input_vertices", 0))
@@ -1345,6 +1466,8 @@ def coarsen_skeleton_level(
         total_fragments += int(res["fragment_count"])
         total_out_vertices += int(res["vertex_count"])
         tcc = tuple(int(x) for x in res["tcc"])
+        if int(res["fragment_count"]) > 0:
+            written_tccs.append(tcc)
         sp = res.get("sidecar_path")
         if sp:
             sidecar_paths[tcc] = str(sp)
@@ -1354,6 +1477,24 @@ def coarsen_skeleton_level(
             )
     # Release phase-A result payloads as soon as we've compacted what we need.
     resultsA = []
+
+    # Repair the nonempty_chunks manifest once, from this single coordinator
+    # process: shard-batching removed the shard DATA race, but each parallel
+    # batch's write_bytes still races on the array's shared zarr.json
+    # attributes block, so the incrementally-maintained manifest can be
+    # incomplete.  (No-op/​harmless for serial executors.)
+    if shard_meta is not None:
+        from zarr_vectors_tools._manifests import stamp_nonempty_chunks_explicit
+
+        _repair_arrays = [
+            VERTICES,
+            VERTEX_FRAGMENTS,
+            f"{FRAGMENT_ATTRIBUTES}/segment_id",
+            f"{FRAGMENT_ATTRIBUTES}/object_id",
+        ]
+        _repair_arrays += [f"{VERTEX_ATTRIBUTES}/{n}" for n in attr_names]
+        for _an in _repair_arrays:
+            stamp_nonempty_chunks_explicit(level_group, _an, written_tccs)
 
     level_meta.vertex_count = int(total_out_vertices)
     create_resolution_level(root, target_level, level_meta)
@@ -1414,7 +1555,7 @@ def coarsen_skeleton_level(
     for aname in src_attr_names:
         try:
             src_data = read_object_attributes(src, aname)
-        except ArrayError:
+        except (ArrayError, StoreError):
             continue
         out = np.zeros_like(src_data)
         if len(present_oids):
@@ -1437,6 +1578,30 @@ def coarsen_skeleton_level(
     rebuild_nonempty_manifests(level_group)
 
     # --- Phase B: cross-target links, decentralized per ccl shard -------
+    # A cross-target pair is always adjacent along exactly one axis, so the
+    # only possible offsets are the ±unit vectors — a small, data-independent
+    # set.  Pre-create their offsets arrays serially, up front: the shard
+    # partition below gives each worker disjoint CELLS, but two workers in
+    # different shards can still land records in the SAME offsets array (same
+    # axis, opposite side), and create_links_array is not concurrency-safe on
+    # the array's zarr.json (a Windows atomic-rename hard-fail); creating them
+    # here means workers only ever WRITE cells, never create.
+    _link_codec_ctx = (
+        level_group.batched_writes(compressor=compressor)
+        if compressor else nullcontext()
+    )
+    with _link_codec_ctx:
+        for a in range(ndim):
+            off = tuple(1 if i == a else 0 for i in range(ndim))
+            create_links_array(
+                level_group, link_width=2, delta=0, sid_ndim=ndim,
+                offsets=(off,), directed=True,
+            )
+            create_links_array(
+                level_group, link_width=2, delta=0, sid_ndim=ndim,
+                offsets=(tuple(-x for x in off),), directed=True,
+            )
+
     # Each adjacent target-chunk pair's k2 cell falls in one outer shard; group
     # pairs by shard so every shard is written by exactly one task (the only
     # concurrency-safe partition for the sharded ccl store).  Workers match
@@ -1446,7 +1611,7 @@ def coarsen_skeleton_level(
         min(CROSS_LINK_TASK_SHARD_AXIS, chunk_grid_shape[i % ndim])
         for i in range(2 * ndim)
     )
-    shard_pairs: dict = defaultdict(list)
+    shard_pairs: dict[tuple[int, ...], list] = defaultdict(list)
     for tcc in target_chunks:
         for a in range(ndim):
             nb = tuple(tcc[i] + (1 if i == a else 0) for i in range(ndim))
@@ -1482,8 +1647,6 @@ def coarsen_skeleton_level(
                 "store_path": str(store_path),
                 "target_level": int(target_level),
                 "ndim": int(ndim),
-                "chunk_grid_shape": list(chunk_grid_shape),
-                "chunk_origin": list(chunk_origin),
             }
             for rb in executor(_cross_edge_shard, payloadsB, sharedB):
                 n_cross += int(rb.get("n_links", 0))
@@ -1539,6 +1702,7 @@ def build_skeleton_pyramid(
     boundary_offset_nm: Sequence[float] | None = None,
     compressor: Any = None,
     executor: Any = None,
+    shard_shape: int | tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     """Build a skeleton pyramid by repeated :func:`coarsen_skeleton_level`.
 
@@ -1578,5 +1742,6 @@ def build_skeleton_pyramid(
             # compressor is forwarded per level.
             compressor=compressor,
             executor=executor,
+            shard_shape=shard_shape,
         ))
     return {"levels": summaries, "num_levels": n + 1}

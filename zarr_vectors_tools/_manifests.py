@@ -40,7 +40,11 @@ from zarr_vectors.constants import (
 if TYPE_CHECKING:
     from zarr_vectors.core.store import FsGroup
 
-__all__ = ["rebuild_nonempty_manifests", "per_chunk_array_paths"]
+__all__ = [
+    "rebuild_nonempty_manifests",
+    "per_chunk_array_paths",
+    "stamp_nonempty_chunks_explicit",
+]
 
 
 def _is_per_chunk_array(name: str) -> bool:
@@ -121,3 +125,29 @@ def rebuild_nonempty_manifests(level_group: FsGroup) -> list[str]:
         level_group.derive_nonempty_chunks(name)
         rebuilt.append(name)
     return rebuilt
+
+
+def stamp_nonempty_chunks_explicit(
+    level_group: FsGroup,
+    array_name: str,
+    chunk_coords: list[tuple[int, ...]],
+) -> None:
+    """Set ``array_name``'s ``nonempty_chunks`` from an explicit coordinate list.
+
+    Companion to :func:`rebuild_nonempty_manifests` for the one case it
+    cannot cover: a **sharded** array's manifest can't be re-derived from
+    the store listing (``Group.derive_nonempty_chunks``'s own docstring —
+    a shard packs many cells into one object, so the listing finds nothing
+    and would overwrite a real manifest with an empty one). When the
+    coordinator already knows exactly which chunks a decentralized write
+    pass touched (e.g. from collecting every worker task's own report),
+    stamp the attribute directly instead of re-deriving it — this works
+    for a sharded array precisely because it never needs to list cells.
+
+    ``chunk_coords`` should be every chunk actually written (present),
+    not a full grid enumeration; this is a full replace, matching
+    ``derive_nonempty_chunks``'s semantics, not a merge.
+    """
+    arr = level_group.zarr_group[array_name]
+    keys = sorted({".".join(str(int(c)) for c in coords) for coords in chunk_coords})
+    arr.attrs["nonempty_chunks"] = keys

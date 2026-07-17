@@ -256,7 +256,6 @@ def _per_object_coarsen(
     root = open_store(str(store_path), mode="r+")
     root_meta = read_root_metadata(root)
     ndim = root_meta.sid_ndim
-    base_bin = root_meta.effective_bin_shape
 
     # Source level's chunk_shape — may itself be a per-level override.
     try:
@@ -264,6 +263,21 @@ def _per_object_coarsen(
     except Exception:
         src_level_meta = None
     source_chunk_shape = get_level_chunk_shape(root_meta, src_level_meta)
+    # bin_shape must be CUMULATIVE across the pyramid: this call only ever
+    # sees its own `coarsen_factor` (the stride from `source_level` to
+    # `target_level`), so the base to multiply it by must be the SOURCE
+    # level's own (already-cumulative) bin_shape — not the root's, which is
+    # always level 0's baseline. Using the root unconditionally makes every
+    # level's bin_shape a function of only that one step's factor instead
+    # of the product of every step up to it, producing a non-monotonic
+    # scale sequence across levels that breaks neuroglancer's
+    # multi-resolution level picker. See the identical fix in
+    # zarr_vectors_tools.multiresolution.strategies.polylines.
+    base_bin = (
+        src_level_meta.bin_shape
+        if src_level_meta is not None and src_level_meta.bin_shape is not None
+        else root_meta.effective_bin_shape
+    )
 
     # Target level's chunk_shape = source × chunk_scale_factor (per-axis).
     if isinstance(chunk_scale_factor, (tuple, list)):
@@ -602,8 +616,15 @@ def _per_object_coarsen(
         level=target_level,
         vertex_count=int(n_metavertices),
         arrays_present=arrays_present,
+        # No explicit bin_ratio: write_multiscale_metadata falls back to
+        # deriving it from bin_shape (compute_bin_ratio(base_bin,
+        # bin_shape), i.e. this level's bin_shape ÷ the ROOT's) — correctly
+        # cumulative now that bin_shape itself is. A per-step bin_ratio
+        # here (this level's coarsen_factor alone) would override that
+        # fallback with a non-cumulative value, reproducing the same bug
+        # for the on-disk NGFF scale that the bin_shape fix above fixes
+        # for bin_shape/translation.
         bin_shape=target_bin_shape,
-        bin_ratio=tuple(max(1, int(round(coarsen_factor))) for _ in range(ndim)),
         chunk_shape=target_chunk_shape_override,
         object_sparsity=(1.0 / sparsity_factor),
         coarsening_method=COARSEN_PER_OBJECT,
@@ -720,9 +741,21 @@ def _per_object_coarsen(
                 level_group, cross_links, sid_ndim=ndim, delta=0,
             )
 
+    # write_links only stamps num_links when it actually runs, so a level
+    # whose delta=0 family ends up with zero records (e.g. a fully
+    # collapsed coarsest level) would otherwise leave the family meta
+    # without the key entirely. finalize_links reconciles it either way —
+    # a no-op re-derivation when write_links already ran, the only writer
+    # when it didn't.
+    finalize_links(level_group, delta=0)
+
     # --- Step 10: per-object attributes with present_mask ---------------
     src_obj_attr_group_name = f"{OBJECT_ATTRIBUTES}"
     if src_obj_attr_group_name in src_group:
+        # .children(), not `for n in group`: under the 0.8.1 layout each
+        # object_attributes/<name> is a plain Array child, and Group's own
+        # __iter__ deliberately yields only Group children (legacy
+        # Option-G back-compat) — see Group.children()'s docstring.
         src_obj_attr_group = src_group[src_obj_attr_group_name]
         # Object attributes are flat arrays; enumerate via children() —
         # iterating the group yields only sub-group names (none here).
@@ -930,8 +963,9 @@ def _write_empty_preserve_level(
         level=target_level,
         vertex_count=0,
         arrays_present=[VERTICES, "object_index"],
+        # See the identical comment in _per_object_coarsen: no explicit
+        # bin_ratio, so it's derived cumulatively from bin_shape.
         bin_shape=target_bin_shape,
-        bin_ratio=tuple(max(1, int(round(coarsen_factor))) for _ in range(ndim)),
         object_sparsity=(1.0 / sparsity_factor),
         coarsening_method=COARSEN_PER_OBJECT,
         parent_level=source_level,
