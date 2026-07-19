@@ -1,102 +1,130 @@
 # Point clouds
 
-Three formats land here: comma-separated text (`ingest_csv`), the LAS /
-LAZ binary point-cloud format (`ingest_las`), and PLY (`ingest_ply`,
-points-only for v0; mesh PLY is a future addition). All three write to
-the **point cloud** ZVF geometry.
+Three source formats write the **points** ZVF geometry: delimited text
+(`ingest_csv`), LAS/LAZ (`ingest_las`), and PLY (`ingest_ply`,
+points-only — mesh PLY is not yet wired up). All three share the same
+`object_ids`, `knn_distance_k`, and `per_object_vertex_count` options.
 
 ## CSV / XYZ — `ingest_csv`
 
-Plain text with `delimiter`-separated coordinates and optional
-attribute columns. Headers are recognised by name; without a header the
-first `ndim` columns are positions and the rest are attributes.
+The worked example is a MERFISH-style transcript table: one row per
+detected transcript, with a position in micrometres, the gene it was
+called as, and the ID of the cell it was assigned to. Every transcript
+is a vertex; every cell is an object.
 
 ```python
-from zarr_vectors_tools.ingest import ingest_csv
+import numpy as np
+import pandas as pd
 
-ingest_csv(
-    input_path="lidar.csv",
-    output_path="lidar.zv",
-    chunk_shape=(50.0, 50.0, 50.0),
-    auto_detect_columns=True,
-    knn_distance_k=8,
+from zarr_vectors_tools.ingest.csv_points import ingest_csv
+
+# transcripts.csv:  x,y,z,gene_id,cell_id
+#                   1043.2,880.7,12.0,417,90211
+# object_ids is a separate (N,) array, not a CSV column — read it first,
+# in the same row order ingest_csv will parse.
+cell_ids = pd.read_csv("transcripts.csv")["cell_id"].to_numpy(dtype=np.int64)
+
+summary = ingest_csv(
+    "transcripts.csv",
+    "merfish.zv",
+    (100.0, 100.0, 10.0),           # chunk_shape in µm — thin in z (tissue sections)
+    auto_detect_columns=True,       # resolve x/y/z from the header row
+    attribute_columns=["gene_id"],  # per-transcript attribute; keeps cell_id out
+    object_ids=cell_ids,            # groups transcripts into per-cell objects
+    per_object_vertex_count=True,   # object_attributes["vertex_count"] = transcripts/cell
+    knn_distance_k=8,               # attributes["knn_distance"] — needs points-enrichment
+    drop_na=True,                   # discard rows with a NaN coordinate
 )
+print(summary["dropped_na"])
 ```
 
-**Notable options**
+`auto_detect_columns=True` only fires when `position_columns` is `None`.
+It matches header names case-insensitively against `x`/`pos_x`/`posx`/`px`
+(and the `y`/`z` equivalents), and picks up `r`/`g`/`b`, `intensity`,
+`label`, `class`, `tissue`, `confidence` as attributes. If it cannot
+resolve all `ndim` axes it returns nothing and the function falls back to
+"first `ndim` columns are positions" — silently. Pass `position_columns`
+explicitly when the header is unusual.
 
-`auto_detect_columns`
-: Heuristically resolve `x/y/z` plus `r/g/b`, `intensity`, `label`,
-  `confidence` from the header row. Falls back to positional inference
-  if names don't match.
+Setting `attribute_columns` yourself is what keeps `cell_id` from being
+duplicated as a per-vertex attribute: the default is *every* non-position
+column.
 
-`normalise`
-: Centre and rescale positions to `[-1, 1]`. The offset and scale are
-  stored on the [`CSVHeader`](../headers.md) so the export round-trip
-  recovers the original coordinates.
+:::{note}
+Attribute columns are read through `np.loadtxt` and cast to `float32`, so
+a gene *name* column fails the parse and raises `IngestError`. Map gene
+names to integer IDs before ingest and keep the lookup table beside the
+store.
+:::
 
-`drop_na`, `drop_duplicates`
-: Pre-filter rows.
+Other options worth knowing:
 
-`knn_distance_k`
-: When set, writes `attributes["knn_distance"]` — the mean Euclidean
-  distance to the `k` nearest neighbours. Requires `scipy`.
+| Option | Effect |
+| --- | --- |
+| `ndim` | Spatial dimensionality, default `3`. |
+| `delimiter`, `has_header`, `skip_rows` | Text parsing. |
+| `normalise` | Centre on the centroid and divide by the maximum absolute coordinate so positions sit in `[-1, 1]`. Offset and scale go to `CSVHeader` for round-trip export. |
+| `drop_duplicates` | Drop rows whose position triple repeats an earlier row. |
 
-`object_ids` + `per_object_vertex_count`
-: Supply a `(N,)` integer array of per-vertex object IDs. With
-  `per_object_vertex_count=True`, `object_attributes["vertex_count"]`
-  is also written.
+`knn_distance_k` writes each point's mean Euclidean distance to its `k`
+nearest neighbours. It needs `scipy` — `pip install
+"zarr-vectors-tools[points-enrichment]"`. On a transcript cloud that is a
+cheap local-density proxy: dense neighbourhoods give small values.
+
+`per_object_vertex_count=True` raises `IngestError` unless `object_ids`
+is supplied. Note that `drop_na` and `drop_duplicates` filter
+`object_ids` alongside the positions, so the counts stay consistent.
 
 ## LAS / LAZ — `ingest_las`
 
 ```python
-from zarr_vectors_tools.ingest import ingest_las
+from zarr_vectors_tools.ingest.las import ingest_las
 
 ingest_las(
-    input_path="scan.laz",
-    output_path="scan.zv",
-    chunk_shape=(10.0, 10.0, 10.0),
-    include_attributes=True,
+    "scan.laz",
+    "scan.zv",
+    (10.0, 10.0, 10.0),
+    include_attributes=True,   # default — pull the standard LAS fields
+    knn_distance_k=8,
 )
 ```
 
-Requires `laspy` (install with `pip install "zarr-vectors-tools[las]"`).
-`include_attributes=True` picks up every standard LAS field that's
-present in the file:
+Requires `laspy` — `pip install "zarr-vectors-tools[las]"`. LAZ goes
+through the same `laspy.read` call. With `include_attributes=True`, each
+standard field present in the file becomes a per-vertex attribute:
 
-| LAS field | ZVF attribute name | dtype |
+| LAS field | ZVF attribute | dtype on disk |
 | --- | --- | --- |
 | `intensity` | `intensity` | float32 |
-| `classification` | `classification` | float32 (cast from int) |
+| `classification` | `classification` | float32 (cast from int32) |
 | `red`, `green`, `blue` | `color` | float32, shape `(N, 3)` |
 | `gps_time` | `gps_time` | float32 |
 
-`knn_distance_k`, `object_ids`, and `per_object_vertex_count` work the
-same as for `ingest_csv`.
+There is no CSV-style column selection here — it is all fields or none.
 
 ## PLY (points) — `ingest_ply`
 
 ```python
-from zarr_vectors_tools.ingest import ingest_ply
+from zarr_vectors_tools.ingest.ply import ingest_ply
 
 ingest_ply(
-    input_path="cloud.ply",
-    output_path="cloud.zv",
-    chunk_shape=(1.0, 1.0, 1.0),
+    "cloud.ply",
+    "cloud.zv",
+    (1.0, 1.0, 1.0),
     include_attributes=True,
 )
 ```
 
-Requires `plyfile`. Positions are detected from `x/y/z` or `X/Y/Z`
-properties; the first three properties are used as a fallback. With
-`include_attributes=True`, every non-position vertex property is
-written as a per-vertex attribute under its PLY name.
-
-`knn_distance_k`, `object_ids`, and `per_object_vertex_count` behave
-identically to the other two ingesters.
+Requires `plyfile` — `pip install "zarr-vectors-tools[ply]"`. Positions
+come from the `vertex` element's `x`/`y`/`z` or `X`/`Y`/`Z` properties;
+failing both, the first three properties are used and `ndim` is inferred
+from them. With `include_attributes=True` every remaining vertex property
+is written under its own PLY name, cast to float32 — properties that will
+not cast are skipped rather than raising.
 
 ## See also
 
-- [Enrichments](../enrichments.md#point-clouds) — full attribute name list.
-- [Export → PLY / CSV](../export/point_clouds.md)
-- Parent: [Point cloud spec](https://zarr-vectors.readthedocs.io/en/latest/spec/geometry_types/point_cloud.html)
+- [Enrichments → point clouds](../enrichments.md#point-clouds)
+- [Export → point clouds](../export/point_clouds.md)
+- [Choosing chunk and bin shapes](../how_to/choose_chunk_and_bin.md)
+- [Ingest workflows](index.md)

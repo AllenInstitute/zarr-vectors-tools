@@ -1,48 +1,59 @@
 # Lines
 
 A **line** in ZVF is a single, independent two-endpoint segment — not a
-chain of segments (those are polylines). This package currently has one
-line ingest: `ingest_lines_csv`.
+chain of segments (those are polylines, see
+[Tractography](tractography.md)). One ingest covers it:
+`ingest_lines_csv`.
 
 ## CSV line segments — `ingest_lines_csv`
 
-Six-column (3D) or four-column (2D) CSV: first `2 * ndim` columns are
-endpoint coordinates `(x0, y0, z0, x1, y1, z1)`, remaining columns become
-per-line attributes.
+The first `2 * ndim` columns are endpoint coordinates in
+`x0,y0,z0,x1,y1,z1` order — six columns in 3D, four in 2D. Everything
+after them is a per-line attribute.
 
 ```python
-from zarr_vectors_tools.ingest import ingest_lines_csv
+from zarr_vectors_tools.ingest.lines import ingest_lines_csv
 
-ingest_lines_csv(
-    input_path="segments.csv",
-    output_path="segments.zv",
-    chunk_shape=(10.0, 10.0, 10.0),
-    compute_length=True,
+# segments.csv:  x0,y0,z0,x1,y1,z1,weight
+#                12.0,4.5,0.0,18.2,4.9,0.0,0.73
+summary = ingest_lines_csv(
+    "segments.csv",
+    "segments.zv",
+    (10.0, 10.0, 10.0),
+    attribute_columns=["weight"],  # header names; default is every non-position column
+    compute_length=True,           # object_attributes["length"], Euclidean endpoint distance
+    drop_zero_length=True,         # drop segments below 1e-9 long
+    drop_na=True,                  # drop rows with a NaN endpoint coordinate
+    drop_duplicates=True,          # drop rows whose full endpoint pair repeats
 )
+print(summary["dropped_zero_length"], summary["dropped_na"])
 ```
 
-**Notable options**
+The filters run in a fixed order — `drop_na`, then `drop_duplicates`,
+then `drop_zero_length` — and each writes its own `dropped_*` counter
+into the summary dict. `compute_length` reuses the lengths already
+computed for `drop_zero_length`, so enabling both costs nothing extra.
 
-`ndim`
-: 2 or 3 (default 3). Determines how many columns are positions.
+`attribute_columns` takes header *names*, so it only works with
+`has_header=True`. Without a header, non-position columns are named
+`col6`, `col7`, … by index.
 
-`attribute_columns`
-: Filter which non-position columns to keep. Default: all of them.
+:::{warning}
+`lines` registers no file extension. A `.csv` input auto-detects to
+`csv`, which ingests it as a **point cloud** using only the first three
+columns — no error, wrong store. On the CLI you must pass `--format
+lines` explicitly:
 
-`compute_length`
-: Writes `line_attributes["length"]` — the Euclidean distance between
-  each segment's endpoints.
+```bash
+zvtools convert segments.csv segments.zv --format lines --chunk-shape 10,10,10
+```
+:::
 
-`drop_zero_length`
-: Drop segments shorter than `1e-9` before writing.
-
-`drop_na`, `drop_duplicates`
-: Pre-filter rows.
-
-The returned summary dict includes a `dropped_*` counter for each
-filter that was active.
+If every row is filtered out, the function raises `IngestError` rather
+than writing an empty store.
 
 ## See also
 
-- [Enrichments](../enrichments.md#lines)
-- Parent: [Line spec](https://zarr-vectors.readthedocs.io/en/latest/spec/geometry_types/line.html)
+- [Enrichments → lines](../enrichments.md#lines)
+- [Tractography](tractography.md) — for connected vertex chains
+- [Ingest workflows](index.md)
