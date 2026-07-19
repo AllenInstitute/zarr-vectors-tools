@@ -18,7 +18,7 @@ reads are benchmarked.
 ## Notebooks
 
 Three notebooks live under
-[`benchmarks/`](https://github.com/Andrew-Keenlyside/zarr-vectors-tools/tree/main/benchmarks)
+[`benchmarks/`](https://github.com/AllenInstitute/zarr-vectors-tools/tree/main/benchmarks)
 in the source tree. Each follows the same shape (setup → build
 inputs → sweep → table → plot).
 
