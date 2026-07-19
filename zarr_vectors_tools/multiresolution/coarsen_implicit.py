@@ -105,6 +105,7 @@ def positions_in_run(
     """Return ``(run_idx_per_vertex, position_in_run_per_vertex)``.
 
     For each source vertex, report:
+
     * the index of the run it falls in (0-based, within the object's
       ordered run list), and
     * its position inside that run after consecutive-duplicate
