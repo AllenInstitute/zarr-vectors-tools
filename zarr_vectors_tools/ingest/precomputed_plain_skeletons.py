@@ -319,6 +319,7 @@ def parse_segment_properties(
         - ``seg_ids`` is a sorted list of ``int`` segment IDs.
         - ``props`` is a dict mapping ``prop_id → (type, values, meta)``
           where:
+
           - ``type`` is the precomputed property type string (``"label"``,
             ``"string"``, ``"description"``, ``"number"``, ``"tags"``).
           - ``values`` is a list of raw values aligned with ``seg_ids``.
