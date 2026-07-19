@@ -7,14 +7,21 @@
 
 ----
 
-**zarr-vectors-tools** is the file-format and algorithm companion to
-`zarr-vectors-py <https://github.com/Andrew-Keenlyside/zarr-vectors-py>`_.
-The core read/write APIs (chunking, sharding, multiresolution, spatial
-binning) live in the :mod:`zarr_vectors` package; this package adds the
-format-conversion workflows that wrap third-party readers and writers
-(``laspy``, ``plyfile``, ``nibabel``, ``trx-python``, ``networkx``) and
-the streaming graph / mesh algorithms that operate on chunked Zarr
-Vectors stores.
+**zarr-vectors-tools** is the file-format, algorithm, and multiresolution
+companion to `zarr-vectors-py
+<https://github.com/BRIDGE-Neuroscience/zarr-vectors-py>`_. The core
+read/write APIs — chunk encoding, the spatial index, links, lazy access —
+live in the :mod:`zarr_vectors` package. This package adds the three layers
+that sit on top of it: **conversion workflows** that wrap third-party
+readers and writers (``laspy``, ``plyfile``, ``nibabel``, ``trx-python``,
+``networkx``, ``cloud-volume``), **streaming graph and mesh algorithms**
+that never materialise a whole store, and the **rich multiresolution
+layer** — skeleton and polyline coarsening, spatial-coverage and
+length-ranked object selection, cross-level links.
+
+It targets the merged ``links/<delta>/<offsets>/`` layout, on-disk format
+version |zvf_version|. Connectivity is a single family at this version;
+there is no ``cross_chunk_links/`` group to fall back to.
 
 The library implements the `Zarr Vector Format
 <https://github.com/AllenInstitute/zarr_vectors>`_ originally specified
@@ -22,7 +29,22 @@ by Forrest Collman at the Allen Institute for Brain Sciences.
 
 ----
 
-| `Link to the GitHub repository <https://github.com/Andrew-Keenlyside/zarr-vectors-tools>`__
+Related sites
+-------------
+
+.. list-table::
+   :widths: 30 70
+
+   * - `Main library docs <https://zarr-vectors-py.readthedocs.io/en/latest>`__
+     - ``zarr-vectors-py`` — the core format, readers, writers, lazy access,
+       and Neuroglancer integration.
+   * - `Specification <https://alleninstitute.github.io/zarr_vectors/>`__
+     - The normative Zarr Vector Format spec: store structure, spatial
+       indexing, links, conformance levels.
+   * - `Schema <https://alleninstitute.github.io/zarr_vectors/08-metadata.html>`__
+     - The LinkML source and generated JSON Schema for ZVF metadata.
+   * - `GitHub repository <https://github.com/AllenInstitute/zarr-vectors-tools>`__
+     - Source, issues, and the notebooks under ``examples/``.
 
 Where to start
 --------------
@@ -30,18 +52,21 @@ Where to start
 .. list-table::
    :widths: 35 65
 
+   * - :doc:`getting_started/zarr_vectors`
+     - New to Zarr Vectors? Start here — what the format is, why chunked
+       vector geometry, and how the two packages divide the work.
    * - :doc:`getting_started/quickstart`
-     - Ingest a CSV point cloud, run a graph algorithm, export to PLY in
-       a few lines of Python.
-   * - :doc:`getting_started/concepts`
-     - How ingest, algorithm, and export workflows compose over a Zarr
-       Vectors store.
-   * - :doc:`ingest/index`
-     - File formats this package ingests, what each maps to in ZVF, and
-       which third-party deps each needs.
-   * - :doc:`algorithms/index`
-     - Graph search, components, clustering; mesh summary, attributes,
-       spatial queries — all streaming over chunked stores.
+     - Convert a file, build a pyramid, run an algorithm, export — from
+       the CLI and from Python.
+   * - :doc:`getting_started/cli`
+     - The ``zvtools`` command line: ``convert``, ``pyramid``,
+       ``validate``, ``info``.
+   * - :doc:`modules/index`
+     - Module-by-module summary of the package: what each subpackage owns
+       and where its entry points are.
+   * - :doc:`multiresolution/concepts`
+     - Coarsening versus sparsity — the two orthogonal axes of a pyramid,
+       and the one that most people get wrong first.
    * - :doc:`api/index`
      - Auto-generated reference for every public function.
 
@@ -51,9 +76,18 @@ Where to start
    :caption: Getting Started
    :hidden:
 
+   getting_started/zarr_vectors
    getting_started/installation
    getting_started/quickstart
    getting_started/concepts
+   getting_started/cli
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Modules
+   :hidden:
+
+   modules/index
 
 .. toctree::
    :maxdepth: 1
@@ -63,10 +97,25 @@ Where to start
    ingest/index
    ingest/point_clouds
    ingest/lines
-   ingest/polylines_streamlines
-   ingest/graphs
+   ingest/tractography
+   ingest/tractography_at_scale
    ingest/skeletons
+   ingest/em_skeletons
+   ingest/graphs
    ingest/meshes
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Multiresolution
+   :hidden:
+
+   multiresolution/index
+   multiresolution/concepts
+   multiresolution/building_pyramids
+   multiresolution/strategies
+   multiresolution/object_selection
+   multiresolution/cross_level_links
+   multiresolution/refresh
 
 .. toctree::
    :maxdepth: 1
@@ -94,12 +143,23 @@ Where to start
 
 .. toctree::
    :maxdepth: 1
+   :caption: How-To Guides
+   :hidden:
+
+   how_to/parallelism
+   how_to/compressors
+   how_to/choose_chunk_and_bin
+   how_to/large_scale_pipelines
+
+.. toctree::
+   :maxdepth: 1
    :caption: Reference
    :hidden:
 
    enrichments
    headers
    examples
+   upstream/links-merge-findings
 
 .. toctree::
    :maxdepth: 1
