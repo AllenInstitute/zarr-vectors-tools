@@ -62,16 +62,31 @@ nearest neighbours.
 | --- | --- | --- | --- | --- |
 | `radius` | per-node | float32 | SWC column 5 | `ingest_swc` (always) |
 | `compartment` | per-node | int32 | SWC column 2 (type code) | `ingest_swc` (always) |
-| `topological_depth` | per-node | uint16 | computed BFS depth from soma | `ingest_swc(compute_topological_depth=True)` |
-| `strahler` | per-node | uint8 | computed Strahler order | `ingest_swc(compute_strahler=True)` |
-| `node_kind` | per-node | uint8 | computed (0=soma, 1=branch, 2=continuation, 3=terminal) | `ingest_swc(compute_node_kind=True)` |
+| `topological_depth` | per-node | float32 | computed BFS depth from soma | `ingest_swc(compute_topological_depth=True)` |
+| `strahler` | per-node | float32 | computed Strahler order | `ingest_swc(compute_strahler=True)` |
+| `node_kind` | per-node | float32 | computed (0=soma, 1=branch, 2=continuation, 3=terminal) | `ingest_swc(compute_node_kind=True)` |
+
+:::{note}
+`ingest_swc`'s docstring advertises `uint16` / `uint8` / `uint8` for
+these three. The implementation casts all of them to `float32` before
+writing, which is what the table above reflects. Cast on read if you need
+the integer semantics.
+:::
 
 ## Meshes
 
 | Attribute | Slot | Type | Source | Triggered by |
 | --- | --- | --- | --- | --- |
 | `normal` | per-vertex | float32, `(N, 3)` | OBJ `vn` lines | `ingest_obj` (auto, when `vn` lines are present) |
-| *per-face normals* | per-face | float32, `(F, 3)` | STL face normals | `ingest_stl` (auto) |
+
+:::{warning}
+STL per-face normals are **parsed but not stored**. Both STL parsers
+return them, but `ingest_stl` assigns them to a local `face_normals` and
+never passes them to `write_mesh`, so they do not reach the store.
+Recompute them from the geometry with
+[`compute_vertex_normals`](algorithms/mesh_attributes.md) if you need
+them.
+:::
 
 Algorithms can also persist attributes via `write_back=True`:
 
