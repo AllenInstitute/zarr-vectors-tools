@@ -1,65 +1,113 @@
 # Streamlines
 
-Two export targets for the ZVF polyline / streamline geometry: TrackVis
-TRK and TRX. Both require neuroimaging libraries.
+Two targets for the ZVF `polylines` geometry: TrackVis TRK and TRX. Both
+need the `streamlines` extra:
+
+```bash
+pip install "zarr-vectors-tools[streamlines]"
+```
+
+Both exporters reassemble each object's stored segments into one
+contiguous vertex array before writing, and both raise `ExportError` if
+the filters leave nothing to export.
 
 ## TrackVis TRK — `export_trk`
 
 ```python
-from zarr_vectors_tools.export import export_trk
+import numpy as np
+from zarr_vectors_tools.export.trk import export_trk
 
-export_trk(
-    store_path="tracts.zv",
-    output_path="tracts.trk",
-    affine=None,                # uses identity if None
+summary = export_trk(
+    "tracts.zv",                # store_path
+    "tracts.trk",               # output_path
+    level=0,                    # resolution level to read
+    object_ids=[3, 5, 17],      # keep only these streamlines
+    group_ids=None,             # keep only these groupings
+    chunks=None,                # chunk whitelist — see the warning below
+    affine=np.eye(4),           # 4x4 vox->RAS; None also means identity
 )
+summary["streamline_count"]     # → int
+summary["vertex_count"]         # → int
 ```
 
-Requires `nibabel` (install with `pip install "zarr-vectors-tools[streamlines]"`).
+### Recovering the affine
 
-Returns `{"streamline_count": int, "vertex_count": int}`.
+`affine=None` writes an **identity** matrix — it does not consult the
+store. Ingest saves the source file's voxel-to-RAS matrix in a
+`TRKHeader` under `/headers/trk/`, but the exporter never reads it, so
+you must pass it in yourself:
 
-**Notable options**
+```python
+from zarr_vectors_tools.headers import HeaderRegistry
+from zarr_vectors_tools.export.trk import export_trk
 
-`affine`
-: 4×4 voxel-to-RAS affine matrix. If `None`, uses identity. If the
-  store was ingested with `ingest_trk(..., preserve_header=True)`, the
-  original TRK affine is automatically loaded from
-  [`TRKHeader`](../headers.md) when this argument is omitted.
+reg = HeaderRegistry("tracts.zv")
+header = reg.get("trk")                 # KeyError if ingest did not preserve one
+export_trk("tracts.zv", "out.trk", affine=header.affine)
+```
 
-`level`, `object_ids`, `group_ids`, `chunks`
-: Standard filters. The `chunks` filter is special for streamlines: it
-  filters at the **segment** level — only vertex groups stored in the
-  listed chunks are emitted, and each surviving contiguous run is
-  written as its own streamline. The output `streamline_count` can
-  therefore exceed the source object count when a long streamline is
-  cut at chunk boundaries.
+`TRKHeader.affine` unflattens the stored 16-float `vox_to_ras` list into
+a `(4, 4)` array, returning `None` when the source file carried no
+affine — in which case the identity default is the correct behaviour
+anyway.
+
+:::{warning}
+Exporting without the stored affine silently produces a geometrically
+valid but **misregistered** tractogram: the streamlines are in voxel
+space while the file claims RAS. Always pass `affine=` when the store
+has a `trk` header.
+:::
 
 ## TRX — `export_trx`
 
 ```python
-from zarr_vectors_tools.export import export_trx
+from zarr_vectors_tools.export.trx import export_trx
 
-export_trx(
-    store_path="tracts.zv",
-    output_path="tracts.trx",
+summary = export_trx(
+    "tracts.zv",
+    "tracts.trx",
+    level=0,
     object_ids=[3, 5, 17],
+    group_ids=None,
+    chunks=None,
 )
+summary["streamline_count"]
+summary["vertex_count"]
 ```
 
-Requires `trx-python` (install with `pip install "zarr-vectors-tools[streamlines]"`).
+`export_trx` takes no `affine` — TRX carries its own spatial metadata,
+which the exporter leaves at the `TrxFile` defaults. The writer populates
+the positions array and the per-streamline offsets only; per-vertex
+(`dpv`), per-streamline (`dps`), and per-group (`dpg`) fields are not
+written, so store attributes and groupings do not survive the trip.
 
-Returns `{"streamline_count": int, "vertex_count": int}`.
+## The segment-level `chunks` caveat
 
-TRX is a direct round-trip target for ZVF streamlines — every
-`attributes/*` (per-vertex) array becomes a `dpv` field, every
-`object_attributes/*` array becomes a `dps` field, every `groupings/*`
-group becomes a TRX `groups` entry, and every `groupings_attributes/*`
-becomes a `dpg`.
+:::{warning}
+On both `export_trk` and `export_trx` the `chunks` filter selects at the
+**segment** level, not the object level. A streamline crossing a chunk
+boundary is stored as several segments, and each surviving contiguous run
+becomes its own streamline in the output. The returned
+`streamline_count` can therefore exceed the number of source objects, and
+individual streamlines are cut short at the boundary of the whitelist.
+:::
 
-`level`, `object_ids`, `group_ids`, `chunks` filters behave exactly as
-they do for `export_trk`.
+```python
+# Objects here are whole streamlines — counts match the source.
+by_object = export_trk("tracts.zv", "a.trk", object_ids=[7])
+
+# Chunks here cut object 7 into however many segments it spans.
+by_chunk = export_trk("tracts.zv", "b.trk", chunks=[(0, 0, 0), (0, 0, 1)])
+by_chunk["streamline_count"] >= by_object["streamline_count"]   # possibly much greater
+```
+
+Use `object_ids` or `group_ids` whenever you need whole objects; reach
+for `chunks` only when you genuinely want a spatial slab and can tolerate
+cut streamlines.
 
 ## See also
 
-- [Ingest → polylines and streamlines](../ingest/polylines_streamlines.md)
+- [Export overview](index.md) — shared call shape and the `level=` parameter.
+- [Ingest → tractography](../ingest/tractography.md) — the symmetric direction.
+- [Tractography at scale](../ingest/tractography_at_scale.md) — the parallel TRK path.
+- [Headers](../headers.md) — `TRKHeader` fields and the `HeaderRegistry` API.
