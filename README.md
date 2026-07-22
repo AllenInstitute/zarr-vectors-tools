@@ -13,7 +13,7 @@
 
 | | |
 | --- | --- |
-| Documentation | [zarr-vectors-tools docs](https://zarr-vectors-tools.readthedocs.io/) |
+| Documentation | [zarr-vectors-tools docs](https://zarr-vectors-tools.readthedocs.io/en/latest) |
 | Core library | [zarr-vectors-py](https://github.com/Andrew-Keenlyside/zarr-vectors-py) · [docs](https://zarr-vectors-py.readthedocs.io/en/latest) |
 | Specification | [AllenInstitute/zarr_vectors](https://github.com/AllenInstitute/zarr_vectors) · [spec site](https://alleninstitute.github.io/zarr_vectors/) |
 
@@ -28,11 +28,12 @@ pip install zarr-vectors-tools
 Python ≥ 3.11. Every file format is gated behind an extra, so a base install stays slim:
 
 ```bash
+pip install "zarr-vectors-tools[trk]"           # nibabel (TRK)
 pip install "zarr-vectors-tools[streamlines]"   # nibabel + trx-python
 pip install "zarr-vectors-tools[all]"           # everything except gpu
 ```
 
-Extras: `las`, `ply`, `streamlines`, `graph`, `points-enrichment`, `mesh`, `precomputed`, `parallel`, `gpu`, `all`, `dev`.
+Extras: `las`, `ply`, `trk`, `trx`, `streamlines`, `graph`, `points-enrichment`, `mesh`, `precomputed`, `parallel`, `gpu`, `all`, `dev`.
 
 > [!IMPORTANT]
 > This package requires the merged `links/<delta>/<offsets>/` layout — on-disk **format 0.9.0** — in which connectivity is a single family and there is no `cross_chunk_links/` to fall back to. That format ships in the current core *development* line, whose *package* version is still 0.2.x; format version and package version are independent. The reliable install is an editable core working tree:

@@ -1,11 +1,21 @@
 # Streamlines
 
-Two targets for the ZVF `polylines` geometry: TrackVis TRK and TRX. Both
-need the `streamlines` extra:
+Two targets for the ZVF `polylines` geometry: TrackVis TRK and TRX. Each
+has its own extra, and `streamlines` installs both:
 
 ```bash
-pip install "zarr-vectors-tools[streamlines]"
+pip install "zarr-vectors-tools[trk]"          # nibabel only
+pip install "zarr-vectors-tools[trx]"          # trx-python only
+pip install "zarr-vectors-tools[streamlines]"  # both
 ```
+
+:::{note}
+The extras are split because `nibabel` is pure Python while `trx-python`
+ships compiled wheels. Only the `trk` half installs in a WebAssembly
+runtime such as Pyodide. Neither exporter imports the other's
+dependency: `from zarr_vectors_tools.export.trk import export_trk`
+succeeds with `trx-python` absent.
+:::
 
 Both exporters reassemble each object's stored segments into one
 contiguous vertex array before writing, and both raise `ExportError` if

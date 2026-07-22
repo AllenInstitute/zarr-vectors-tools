@@ -46,7 +46,9 @@ this is almost certainly why. Check with `zvtools info STORE` — the
 | --- | --- | --- |
 | `las` | `laspy>=2.4` | LAS / LAZ point cloud ingest |
 | `ply` | `plyfile>=1.0` | PLY point cloud ingest **and** export |
-| `streamlines` | `nibabel>=5.0`, `trx-python>=0.3` | TCK, TRK, TRX ingest; TRK / TRX export |
+| `trk` | `nibabel>=5.0` | TCK / TRK ingest; TRK export. Pure Python — installs under Pyodide |
+| `trx` | `trx-python>=0.3` | TRX ingest and export |
+| `streamlines` | `trk` + `trx` | both of the above (back-compat alias) |
 | `graph` | `networkx>=3.0` | GraphML ingest and the `degree` / `clustering` enrichments |
 | `points-enrichment` | `scipy>=1.10` | the `knn_distance` attribute on point clouds |
 | `mesh` | `pyfqmr>=0.2`, `scipy>=1.10` | quadric mesh decimation in the pyramid coarseners |
@@ -57,7 +59,7 @@ this is almost certainly why. Check with `zvtools info STORE` — the
 | `dev` | `pytest>=7.0`, `ruff>=0.4`, `jupyter>=1.0` | the test and lint toolchain |
 
 ```bash
-pip install "zarr-vectors-tools[streamlines]"      # one extra
+pip install "zarr-vectors-tools[trk]"              # one extra
 pip install "zarr-vectors-tools[all]"              # everything but gpu
 ```
 

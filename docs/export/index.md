@@ -30,12 +30,12 @@ import from the module (`zarr_vectors_tools.export.ply`) every time.
 | --- | --- | --- | --- | --- |
 | points | `zarr_vectors_tools.export.csv_points.export_csv` | CSV / XYZ text | `bbox`, `object_ids`, `chunks` | none |
 | points | `zarr_vectors_tools.export.ply.export_ply` | PLY (binary or ASCII) | `bbox`, `object_ids`, `chunks` | `ply` |
-| polylines | `zarr_vectors_tools.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks` | `streamlines` |
-| polylines | `zarr_vectors_tools.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks` | `streamlines` |
+| polylines | `zarr_vectors_tools.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks` | `trk` |
+| polylines | `zarr_vectors_tools.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks` | `trx` |
 | graphs (trees) | `zarr_vectors_tools.export.swc.export_swc` | SWC | `chunks` | none |
 | meshes | `zarr_vectors_tools.export.obj.export_obj` | Wavefront OBJ | `bbox`, `object_ids`, `chunks` | none |
 
-Install an extra with `pip install "zarr-vectors-tools[streamlines]"`.
+Install an extra with `pip install "zarr-vectors-tools[trk]"`.
 
 Filters AND together: `bbox=(...)` *and* `object_ids=[3, 5]` means
 "objects 3 and 5, intersected with the bounding box". Passing `None`
