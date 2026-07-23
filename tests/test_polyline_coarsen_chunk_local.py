@@ -287,6 +287,57 @@ def test_two_level_pyramid_shrinks_vertices_preserves_objects(tmp_path):
 
 
 # ===================================================================
+# rdp identity: coarsen_factor == 1 must NOT reduce vertices
+# ===================================================================
+
+
+def test_rdp_coarsen_factor_one_preserves_all_vertices(tmp_path):
+    """In the default ``rdp`` mode, ``coarsen_factor == 1`` must be a true
+    no-op on vertices (matching decimate's stride-1 identity), so a level built
+    with ``--coarsen 1`` is a pure sparser subset of *full-resolution*
+    streamlines.
+
+    Regression: rdp used to derive a chunk-size epsilon
+    (``0.5 * min(chunk_shape) * coarsen_factor``) that stayed non-zero at
+    factor 1, silently simplifying every streamline down to ~half-chunk vertex
+    spacing even though the caller asked for no vertex coarsening.
+    """
+    store = tmp_path / "s.zv"
+    lines = _random_walk_streamlines(seed=7, n=12, npts=40)
+    write_polylines(str(store), lines, chunk_shape=(30.0, 30.0, 30.0))
+
+    v0 = _level_vertex_count(store, 0)
+    build_pyramid(
+        str(store),
+        factors=[(1.0, 1.0)],      # coarsen 1 (no vtx reduction), sparsity 1 (keep all)
+        chunk_scale_factors=[1],
+        coarsen_mode="rdp",        # the CLI default
+    )
+    v1 = _level_vertex_count(store, 1)
+    assert v1 == v0, f"rdp coarsen_factor=1 dropped vertices: {v0} -> {v1}"
+    assert _level_object_count(store, 1) == 12
+
+
+def test_rdp_coarsen_factor_above_one_still_simplifies(tmp_path):
+    """Guard the other side of the identity fast-path: a factor > 1 must still
+    reduce vertices, so the ``coarsen_factor <= 1`` no-op didn't disable rdp
+    simplification wholesale."""
+    store = tmp_path / "s.zv"
+    lines = _random_walk_streamlines(seed=7, n=12, npts=40)
+    write_polylines(str(store), lines, chunk_shape=(30.0, 30.0, 30.0))
+
+    v0 = _level_vertex_count(store, 0)
+    build_pyramid(
+        str(store),
+        factors=[(4.0, 1.0)],
+        chunk_scale_factors=[1],
+        coarsen_mode="rdp",
+    )
+    v1 = _level_vertex_count(store, 1)
+    assert v1 < v0
+
+
+# ===================================================================
 # Serial vs. multi-process executor parity
 # ===================================================================
 

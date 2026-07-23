@@ -607,6 +607,12 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
             continue
         if coarsen_mode == "decimate":
             rpos = decimate_polyline(merged, stride)
+        elif simplify_epsilon is None or simplify_epsilon <= 0:
+            # coarsen_factor <= 1: rdp is a no-op, keep full vertex resolution
+            # (matches decimate's stride-1 identity — the level is then a pure
+            # sparser subset of full-resolution streamlines, not a decimated
+            # one).  Guard also stops a None epsilon reaching the DP recursion.
+            rpos = merged
         else:
             simp = simplify_polylines([merged], simplify_epsilon, min_vertices=2)
             rpos = simp[0] if simp else merged[:2]
@@ -889,7 +895,13 @@ def coarsen_polyline_level(
     )
     chunk_shape_override = None if same_as_root else target_chunk_shape
 
-    if coarsen_mode == "rdp" and simplify_epsilon is None:
+    # ``coarsen_factor <= 1`` is the documented identity (no vertex reduction)
+    # for BOTH modes — see coarsen_level's "1.0 is the identity" contract.
+    # Decimate already collapses to stride 1 (a straight copy); rdp must match
+    # rather than simplify at a chunk-derived epsilon, so leave the epsilon
+    # unset (the worker treats an unset/non-positive epsilon as a no-op) and
+    # only derive one when the factor genuinely asks for reduction.
+    if coarsen_mode == "rdp" and simplify_epsilon is None and coarsen_factor > 1.0:
         simplify_epsilon = min(src_chunk_shape) * 0.5 * float(coarsen_factor)
     stride = max(1, int(round(coarsen_factor)))
 
