@@ -106,6 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="codec for per-chunk arrays (default: none = raw). "
                         "zstd/blosc roughly halve streamline stores (~2.4x on "
                         "HCP tracts) at the cost of a slower write path")
+    c.add_argument("--shard", type=parse_num_chunks, dest="shard", default=None,
+                   metavar="N|X,Y,Z",
+                   help="after conversion, pack per-chunk cells into shards of N "
+                        "chunks per axis (one file per shard instead of one per "
+                        "chunk) — far fewer files for cloud upload. 8 = 8x8x8 "
+                        "~512 chunks/shard. Omit to leave unsharded")
     c.add_argument("--workers", type=int, default=None,
                    help="parallel worker processes (default backend needs no extra)")
     c.add_argument("--workers-backend", dest="workers_backend",
@@ -114,6 +120,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "'dask' (needs the [parallel] extra)")
     c.add_argument("--n-parts", type=int, dest="n_parts", default=None,
                    help="trk: file-split granularity")
+    c.add_argument("--apply-affine", action="store_true", dest="apply_affine",
+                   help="trk only (rejected for other inputs): bake the "
+                        "vox_to_ras affine into vertex positions (RAS world "
+                        "space) and store an identity crs affine. Simpler for "
+                        "viewers that can't apply an affine themselves (e.g. "
+                        "neuroglancer). Default: keep raw voxmm coordinates + "
+                        "the real affine in crs")
     c.add_argument("--compute-length", action="store_true", dest="compute_length",
                    help="streamlines: store per-object length")
     c.add_argument("--compute-endpoints", action="store_true", dest="compute_endpoints",
@@ -157,6 +170,22 @@ def build_parser() -> argparse.ArgumentParser:
     i = sub.add_parser("info", help="print store geometry, levels, and metadata")
     i.add_argument("store", help="zarr-vectors store path")
     i.set_defaults(func=_pyramid.run_info)
+
+    # ---- shard -------------------------------------------------------------
+    s = sub.add_parser(
+        "shard", help="(re)shard or unshard an existing store's per-chunk arrays",
+        description="Pack per-chunk cells into shards (few large files, good for "
+                    "cloud upload) or reverse it. Data and coordinates are "
+                    "unchanged; only the on-disk file layout differs.",
+    )
+    s.add_argument("store", help="zarr-vectors store path")
+    s.add_argument("--shape", type=parse_num_chunks, dest="shard_shape", default=8,
+                   metavar="N|X,Y,Z",
+                   help="shard size in chunks per axis (default 8 = 8x8x8). "
+                        "Ignored with --unshard")
+    s.add_argument("--unshard", action="store_true",
+                   help="remove sharding (back to one file per chunk)")
+    s.set_defaults(func=_convert.run_shard)
 
     return parser
 

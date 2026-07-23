@@ -383,3 +383,66 @@ class TestOverwrite:
         with pytest.raises(SystemExit):
             _maybe_overwrite(out, overwrite=True)
         assert (out / "important.txt").exists()  # guard prevented deletion
+
+
+# ===================================================================
+# --shard / shard subcommand
+# ===================================================================
+
+import json
+
+
+def _vertices_sharded(store: Path, level: int = 0) -> bool:
+    meta = json.loads((Path(store) / str(level) / "vertices" / "zarr.json").read_text())
+    return "sharding_indexed" in [c["name"] for c in meta["codecs"]]
+
+
+class TestSharding:
+    def _multi_chunk_csv(self, tmp_path) -> Path:
+        # ~200 occupied chunks so sharding actually packs multiple cells/shard.
+        return _write_csv(tmp_path / "pts.csv", n=600)
+
+    def test_convert_shard_produces_sharded_vertices(self, tmp_path):
+        src = self._multi_chunk_csv(tmp_path)
+        out = tmp_path / "pts.zv"
+        rc = main(["convert", str(src), str(out), "--chunk-shape", "40,40,40", "--shard", "2"])
+        assert rc == 0
+        assert _levels(out) == [0]
+        assert _vertices_sharded(out), "vertices must carry the sharding_indexed codec"
+
+    def test_shard_subcommand_roundtrips(self, tmp_path):
+        src = self._multi_chunk_csv(tmp_path)
+        out = tmp_path / "pts.zv"
+        main(["convert", str(src), str(out), "--chunk-shape", "40,40,40"])
+        assert not _vertices_sharded(out)                 # unsharded by default
+
+        assert main(["shard", str(out), "--shape", "2"]) == 0
+        assert _vertices_sharded(out)                     # now sharded
+
+        assert main(["shard", str(out), "--unshard"]) == 0
+        assert not _vertices_sharded(out)                 # back to one file per chunk
+
+    def test_sharded_store_reads_back_identically(self, tmp_path):
+        # Sharding must not change coordinates — only the on-disk layout.
+        from zarr_vectors.types.points import read_points
+
+        src = self._multi_chunk_csv(tmp_path)
+        a, b = tmp_path / "flat.zv", tmp_path / "shard.zv"
+        main(["convert", str(src), str(a), "--chunk-shape", "40,40,40"])
+        main(["convert", str(src), str(b), "--chunk-shape", "40,40,40", "--shard", "2"])
+
+        pa = np.asarray(read_points(str(a))["positions"])
+        pb = np.asarray(read_points(str(b))["positions"])
+        pa = pa[np.lexsort(pa.T)]
+        pb = pb[np.lexsort(pb.T)]
+        assert np.allclose(pa, pb, atol=1e-4)
+
+
+class TestApplyAffineScope:
+    def test_apply_affine_rejected_for_non_trk(self, tmp_path):
+        # --apply-affine only applies to trk; other inputs must reject it
+        # (no source affine / already in world space), not silently ignore it.
+        src = _write_csv(tmp_path / "pts.csv")
+        with pytest.raises(SystemExit):
+            main(["convert", str(src), str(tmp_path / "o.zv"),
+                  "--chunk-shape", "50,50,50", "--apply-affine"])

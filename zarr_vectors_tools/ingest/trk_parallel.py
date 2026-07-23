@@ -1,8 +1,14 @@
 """Memory-bounded parallel TRK → zarr-vectors ingest.
 
 Processes large TRK (TrackVis) files without loading them whole into RAM.
-Coordinate convention: stored as-is in "voxmm" space (voxel_index × voxel_size).
-The vox_to_ras affine is stored in the store's CRS metadata for downstream use.
+Coordinate convention: by default the raw TrackVis voxmm coordinates are stored
+as-is and the ``vox_to_ras`` affine is recorded in CRS metadata (a viewer that
+understands the affine renders it registered).  Pass ``register_to_rasmm=True``
+to instead bake that affine into the vertices at ingest — matching
+``nibabel.streamlines.load(...).streamlines`` — and store an identity CRS
+affine.  That is the layout viewers which can only scale/translate (not rotate),
+e.g. neuroglancer, need: NGFF transforms can't undo the affine's axis flips, so
+the geometry itself must carry them.
 
 Pipeline
 --------
@@ -40,6 +46,7 @@ from zarr_vectors.core.arrays import (
 )
 from zarr_vectors.core.metadata import LevelMetadata
 from zarr_vectors.core.store import create_resolution_level, create_store, open_store
+from zarr_vectors.exceptions import IngestError
 from zarr_vectors.spatial.boundary import split_polyline_at_boundaries
 from zarr_vectors.typing import ChunkShape
 
@@ -102,6 +109,48 @@ def _compute_bounds_from_header(header: dict[str, Any]) -> tuple[list[float], li
     lo = [0.0, 0.0, 0.0]
     hi = [float(dim[i]) * float(vs[i]) for i in range(3)]
     return lo, hi
+
+
+def _trackvis_to_rasmm_affine(input_path: str | Path) -> np.ndarray:
+    """4×4 affine mapping the TRK's on-disk trackvis-voxmm coords to RASmm.
+
+    Uses nibabel's canonical transform, which correctly handles ``voxel_order``
+    and the voxel-corner→center convention (a naive ``vox_to_ras @
+    (voxmm / voxel_size)`` gets those subtly wrong).  Baking this into the
+    geometry makes the stored streamlines match what
+    ``nibabel.streamlines.load(...).streamlines`` returns — i.e. registered to
+    the source image's world space — so neuroglancer renders them aligned.
+    """
+    try:
+        import nibabel as nib
+        from nibabel.streamlines.trk import get_affine_trackvis_to_rasmm
+    except ImportError as e:  # pragma: no cover - env without nibabel
+        raise IngestError(
+            "nibabel is required to register TRK streamlines to RASmm world "
+            "space (so neuroglancer aligns them with the source image). "
+            "Install with: pip install nibabel"
+        ) from e
+    hdr = nib.streamlines.load(str(input_path), lazy_load=True).header
+    return np.asarray(get_affine_trackvis_to_rasmm(hdr), dtype=np.float64)
+
+
+def _transform_bounds(
+    bounds: tuple[list[float], list[float]], affine: np.ndarray,
+) -> tuple[list[float], list[float]]:
+    """Axis-aligned bbox of a min/max corner pair after applying ``affine``.
+
+    The affine maps the voxmm box to a rotated parallelepiped; its
+    axis-aligned bounding box is the min/max over the 8 transformed corners.
+    """
+    lo, hi = bounds
+    a = np.asarray(affine, dtype=np.float64)
+    corners = np.array(
+        [[x, y, z] for x in (lo[0], hi[0])
+         for y in (lo[1], hi[1]) for z in (lo[2], hi[2])],
+        dtype=np.float64,
+    )
+    out = corners @ a[:3, :3].T + a[:3, 3]
+    return out.min(axis=0).tolist(), out.max(axis=0).tolist()
 
 
 def _compute_chunk_shape(
@@ -243,6 +292,7 @@ def _phase_a_worker(
     chunk_shape = shared["chunk_shape"]
     grid_shape = shared["grid_shape"]
     grid_origin = shared["grid_origin"]
+    affine_tv2ras = shared["affine_tv2ras"]
     intermediate_dir = shared["intermediate_dir"]
     dtype = shared["dtype"]
     compute_length = shared["compute_length"]
@@ -293,6 +343,15 @@ def _phase_a_worker(
                 verts = verts_flat.reshape(n_pts, 3).astype(np_dtype)
             else:
                 verts = verts_flat.reshape(n_pts, 3 + n_scalars)[:, :3].astype(np_dtype)
+
+            if affine_tv2ras is not None:
+                # Bake trackvis-voxmm → RASmm so the stored geometry is
+                # registered to the source image's world space (see module
+                # docstring).  A rigid/orthogonal transform, so streamline
+                # lengths and endpoints computed below are unaffected.
+                verts = (
+                    verts @ affine_tv2ras[:3, :3].T + affine_tv2ras[:3, 3]
+                ).astype(np_dtype)
 
             segments = split_polyline_at_boundaries(verts, chunk_shape)
 
@@ -598,6 +657,7 @@ def ingest_trk_parallel(
     compute_length: bool = False,
     compute_endpoints: bool = False,
     preserve_header: bool = True,
+    register_to_rasmm: bool = False,
     build_multiscale: bool = True,
     pyramid_factors: list[tuple[float, float]] | None = None,
     chunk_scale_factors: list[int] | None = None,
@@ -642,6 +702,12 @@ def ingest_trk_parallel(
         compute_length: Write per-streamline path length to object_attributes.
         compute_endpoints: Write start/end points to object_attributes.
         preserve_header: Store TRKHeader (affine, dims) in the zarr store.
+        register_to_rasmm: When True, bake the trackvis-voxmm→RASmm affine into
+            the stored vertex positions (and chunk grid) and record an identity
+            CRS affine, so the store is in registered world space with no
+            transform left for the viewer to apply — the layout neuroglancer
+            needs.  When False (default) the raw voxmm coordinates are kept and
+            the real ``vox_to_ras`` affine is recorded in CRS metadata instead.
         build_multiscale: Build coarser pyramid levels after level 0.
         pyramid_factors: List of (coarsen_factor, sparsity_factor) per level.
             Default: [(8.0, 1.0), (8.0, 1.0)] for two coarser levels. In
@@ -670,6 +736,14 @@ def ingest_trk_parallel(
     _log("Phase 0: parsing TRK header...")
     header = parse_trk_header(input_path)
     bounds = _compute_bounds_from_header(header)
+    # Register to RASmm world space by baking the trackvis-voxmm→RASmm affine
+    # into the geometry (applied per streamline in Phase A).  Derive the store
+    # bounds/chunk grid in that same RASmm space so the chunk layout matches the
+    # stored coordinates.  Without this the store sits in voxmm — shifted to the
+    # chunk-grid origin and axis-flipped relative to the source image.
+    affine_tv2ras = _trackvis_to_rasmm_affine(input_path) if register_to_rasmm else None
+    if affine_tv2ras is not None:
+        bounds = _transform_bounds(bounds, affine_tv2ras)
     chunk_shape = _compute_chunk_shape(bounds, num_chunks)
     lo, hi = bounds
     # Use the SAME (origin, grid_shape) the single-array layout derives for the
@@ -731,12 +805,25 @@ def ingest_trk_parallel(
         # --- Create zarr-vectors store ------------------------------------
         _log("Creating zarr-vectors store...")
         vox_to_ras = header["vox_to_ras"]
-        crs_dict = {
-            "input_space": "voxmm",
-            "output_space": "RASmm",
-            "units": "mm",
-            "affine": vox_to_ras.flatten().tolist(),
-        }
+        if affine_tv2ras is not None:
+            # Geometry is already baked to RASmm, so the store-space transform
+            # is the identity — a crs-aware viewer applying it must be a no-op
+            # (otherwise it would double-transform).  The original voxmm→RASmm
+            # affine is preserved in the Phase-5 TRKHeader metadata for
+            # provenance / round-trip export.
+            crs_dict = {
+                "input_space": "RASmm",
+                "output_space": "RASmm",
+                "units": "mm",
+                "affine": np.eye(4, dtype=np.float64).flatten().tolist(),
+            }
+        else:
+            crs_dict = {
+                "input_space": "voxmm",
+                "output_space": "RASmm",
+                "units": "mm",
+                "affine": vox_to_ras.flatten().tolist(),
+            }
         root = create_store(
             str(output_path),
             bounds=bounds,
@@ -807,6 +894,7 @@ def ingest_trk_parallel(
             "chunk_shape": chunk_shape,
             "grid_shape": grid_shape,
             "grid_origin": grid_origin,
+            "affine_tv2ras": affine_tv2ras,
             "intermediate_dir": _intermediate_dir,
             "dtype": dtype,
             "compute_length": compute_length,
