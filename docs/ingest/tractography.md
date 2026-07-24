@@ -144,6 +144,37 @@ All three functions accept the same three:
 If filtering removes everything, the ingest raises `IngestError` rather
 than writing an empty store.
 
+## Synthetic attributes for coloring test data (trk CLI)
+
+The `zvtools convert … --format trk` path can *generate* colorable
+attributes from geometry alone — handy when a TRK file has no native
+scalars but you need test data for attribute coloring. Both flags are
+repeatable and are wired into the parallel TRK path only (trx/tck carry
+their own native scalars, so the flags are rejected there).
+
+```bash
+zvtools convert tracts.trk out.zarrvectors --format trk \
+  --object-attr orientation --object-attr tortuosity --object-attr vertex_count \
+  --vertex-attr arc_length --vertex-attr z --vertex-attr tangent --attr-seed 0
+```
+
+`--object-attr {length,endpoints,orientation,tortuosity,vertex_count}`
+: Per-streamline (color *by object*). `length`/`endpoints` are the same
+  data as `--compute-length`/`--compute-endpoints`; `orientation` is the
+  start→end unit vector `(O, 3)` (DEC RGB); `tortuosity` is length ÷
+  endpoint distance (≥ 1); `vertex_count` is points per streamline.
+
+`--vertex-attr {arc_length,x,y,z,random,index,tangent}`
+: Per-vertex (color *by vertex*). `arc_length` runs 0→1 along each
+  streamline (a head→tail gradient); `x`/`y`/`z` are the coordinate
+  value; `index` is 0→1 within each streamline; `tangent` is the
+  per-vertex unit direction `(N, 3)` (DEC); `random` is seeded by
+  `--attr-seed`.
+
+Every generated attribute is carried through the sparsity pyramid, so
+coloring renders at all zoom levels. See the full attribute table in
+[Enrichments](../enrichments.md#synthetic-attributes-for-coloring-test-data-trk-cli-only).
+
 ## See also
 
 - [Tractography at scale](tractography_at_scale.md) — the parallel TRK pipeline

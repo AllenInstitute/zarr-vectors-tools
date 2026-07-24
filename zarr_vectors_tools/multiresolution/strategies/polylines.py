@@ -163,6 +163,52 @@ def simplify_polylines(
     return result
 
 
+def _coarsen_keep_indices(
+    vertices: npt.NDArray[np.floating],
+    *,
+    coarsen_mode: str,
+    stride: int,
+    simplify_epsilon: float | None,
+    min_vertices: int = 2,
+) -> npt.NDArray[np.int64]:
+    """Indices of the vertices a coarsen pass keeps, for aligning attributes.
+
+    Returns the same subset that ``decimate_polyline`` (decimate mode) or
+    ``simplify_polylines([v], eps, min_vertices=2)`` (rdp mode) would keep,
+    but as indices into ``vertices`` — so a companion per-vertex attribute
+    array can be reduced identically to the positions (``vertices[idx]`` is
+    byte-for-byte what those helpers return).
+    """
+    n = len(vertices)
+    if coarsen_mode == "decimate":
+        if n <= 2 or stride <= 1:
+            return np.arange(n, dtype=np.int64)
+        keep = np.zeros(n, dtype=bool)
+        keep[0] = True
+        keep[-1] = True
+        keep[0:n:stride] = True
+        return np.flatnonzero(keep).astype(np.int64)
+    # rdp — a None/≤0 epsilon is the "coarsen_factor ≤ 1" no-op: keep all
+    # vertices (matches the worker's ``rpos = merged`` branch), and never let a
+    # None epsilon reach _dp_recurse.
+    if simplify_epsilon is None or simplify_epsilon <= 0:
+        return np.arange(n, dtype=np.int64)
+    if n <= 2:
+        idx = np.arange(n, dtype=np.int64)
+    else:
+        keep = np.zeros(n, dtype=bool)
+        keep[0] = True
+        keep[-1] = True
+        _dp_recurse(vertices, 0, n - 1, simplify_epsilon, keep)
+        idx = np.flatnonzero(keep).astype(np.int64)
+    if len(idx) < min_vertices:
+        idx = (
+            np.linspace(0, n - 1, min_vertices, dtype=np.int64)
+            if n >= min_vertices else np.arange(n, dtype=np.int64)
+        )
+    return idx
+
+
 def subsample_polylines(
     polylines: list[npt.NDArray[np.floating]],
     bin_size: float | tuple[float, ...],
@@ -358,7 +404,10 @@ def _build_local_polyline_plan(
     ndim: int,
     keep_mask: npt.NDArray[np.uint8] | None,
     ccl_cells: list | None = None,
-) -> tuple[list[dict], dict]:
+    attr_names: list[str] | None = None,
+    attr_dtypes: dict[str, Any] | None = None,
+    attr_ncols: dict[str, int] | None = None,
+) -> tuple[list[dict], dict, dict]:
     """Build ONE target chunk's coarsen plan by reading only its source children.
 
     Reads the source children ``scc ∈ [tcc·scale, (tcc+1)·scale)``: per-fragment
@@ -376,16 +425,24 @@ def _build_local_polyline_plan(
     ``(chunk_coords, fragment_idx)``), ``head_cross``/``tail_cross`` (whether
     the run's first/last vertex is a cross-target anchor Phase B must stitch).
     ``vcache`` is the per-fragment vertex read cache (reused by the caller, no
-    double read).
+    double read).  ``acache`` mirrors ``vcache`` for each per-vertex attribute
+    in ``attr_names`` (``acache[name][(scc, fidx)]`` aligned 1:1 with the
+    fragment's vertices), so the caller can reduce attributes with the same
+    keep-mask it applies to positions; it is empty when ``attr_names`` is falsy.
     """
     from itertools import product
 
     from zarr_vectors.core.arrays import (
+        read_chunk_attributes,
         read_chunk_fragment_attributes,
         read_chunk_vertices,
     )
     from zarr_vectors.core.arrays import read_links_for_tuple
     from zarr_vectors.exceptions import ArrayError
+
+    attr_names = list(attr_names or [])
+    attr_dtypes = attr_dtypes or {}
+    attr_ncols = attr_ncols or {}
 
     tcc = tuple(int(x) for x in tcc)
     child_ccs = [
@@ -394,6 +451,7 @@ def _build_local_polyline_plan(
     ]
 
     vcache: dict = {}
+    acache: dict = {name: {} for name in attr_names}
     fragoid: dict = {}
     child_ranges: dict = {}  # scc -> (starts, ends, fidxs) for local->fragment resolve
     for scc in child_ccs:
@@ -410,6 +468,7 @@ def _build_local_polyline_plan(
 
         starts = []
         st = 0
+        kept_fidx: list[int] = []
         for fidx in range(len(vgroups)):
             cnt = len(vgroups[fidx])
             starts.append((st, st + cnt, fidx))
@@ -422,6 +481,23 @@ def _build_local_polyline_plan(
                     continue
             vcache[(scc, fidx)] = vgroups[fidx]
             fragoid[(scc, fidx)] = oid
+            kept_fidx.append(fidx)
+        # Per-vertex attribute cells for the kept fragments, sliced by the same
+        # fragment index the vertices use (read_chunk_attributes aligns 1:1).
+        if kept_fidx and attr_names:
+            for name in attr_names:
+                try:
+                    ag = read_chunk_attributes(
+                        src, name, scc,
+                        dtype=attr_dtypes.get(name, np.float32),
+                        ncols=int(attr_ncols.get(name, 1)),
+                    )
+                except ArrayError:
+                    ag = None
+                if ag is not None:
+                    for fidx in kept_fidx:
+                        if fidx < len(ag):
+                            acache[name][(scc, fidx)] = ag[fidx]
         child_ranges[scc] = (
             np.asarray([r[0] for r in starts], np.int64),
             np.asarray([r[1] for r in starts], np.int64),
@@ -553,7 +629,7 @@ def _build_local_polyline_plan(
                 "tail_link": tail_out[1] if tail_out else None,
             })
 
-    return groups, vcache
+    return groups, vcache, acache
 
 
 def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) -> dict:
@@ -566,7 +642,11 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
     rows (with role + resolved local vertex index) for Phase B — all without
     ever holding more than one target chunk's fan-in in memory.
     """
-    from zarr_vectors.core.arrays import write_chunk_fragment_attributes, write_chunk_vertices
+    from zarr_vectors.core.arrays import (
+        write_chunk_attributes,
+        write_chunk_fragment_attributes,
+        write_chunk_vertices,
+    )
     from zarr_vectors.core.store import get_resolution_level, open_store
 
     shared = shared or {}
@@ -577,20 +657,27 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
     coarsen_mode = shared["coarsen_mode"]
     stride = int(shared.get("stride", 1))
     simplify_epsilon = shared.get("simplify_epsilon")
+    attr_names = list(shared.get("attr_names", []))
+    attr_dtypes = shared.get("attr_dtypes", {})
+    attr_ncols = shared.get("attr_ncols", {})
 
     root = open_store(shared["store_path"], mode="r+")
     src = get_resolution_level(root, shared["source_level"])
     level_group = get_resolution_level(root, shared["target_level"])
 
-    groups, vcache = _build_local_polyline_plan(
+    groups, vcache, acache = _build_local_polyline_plan(
         src, tcc, scale=scale, ndim=ndim, keep_mask=keep_mask,
         ccl_cells=payload.get("ccl_cells"),
+        attr_names=attr_names, attr_dtypes=attr_dtypes, attr_ncols=attr_ncols,
     )
     input_fragments = int(len(vcache))
     input_vertices = int(sum(len(v) for v in vcache.values()))
     input_objects = int(len({g["oid"] for g in groups}))
 
     pieces: list[tuple[int, npt.NDArray]] = []
+    # Per-vertex attribute pieces, aligned 1:1 with ``pieces`` (one array per
+    # surviving run, reduced by the same keep-mask as the positions).
+    attr_pieces: dict[str, list[npt.NDArray]] = {name: [] for name in attr_names}
     # sidecar row = (*ccA, viA, *ccB, viB, role, local_vi); role 0=pred(exit)
     # 1=succ(entry).  (ccA, viA, ccB, viB) is the SOURCE link's own identity
     # (see _build_local_polyline_plan) — the join key Phase B stitches two
@@ -605,17 +692,15 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         merged = parts[0] if len(parts) == 1 else np.concatenate(parts, axis=0)
         if len(merged) == 0:
             continue
-        if coarsen_mode == "decimate":
-            rpos = decimate_polyline(merged, stride)
-        elif simplify_epsilon is None or simplify_epsilon <= 0:
-            # coarsen_factor <= 1: rdp is a no-op, keep full vertex resolution
-            # (matches decimate's stride-1 identity — the level is then a pure
-            # sparser subset of full-resolution streamlines, not a decimated
-            # one).  Guard also stops a None epsilon reaching the DP recursion.
-            rpos = merged
-        else:
-            simp = simplify_polylines([merged], simplify_epsilon, min_vertices=2)
-            rpos = simp[0] if simp else merged[:2]
+        # One keep-mask drives BOTH the positions and every per-vertex
+        # attribute, so a surviving vertex keeps its own attribute value.
+        # _coarsen_keep_indices reproduces exactly what decimate_polyline /
+        # simplify_polylines(min_vertices=2) / the rdp-no-op branch would keep.
+        keep_idx = _coarsen_keep_indices(
+            merged, coarsen_mode=coarsen_mode, stride=stride,
+            simplify_epsilon=simplify_epsilon,
+        )
+        rpos = merged[keep_idx]
         if len(rpos) == 0:
             continue
 
@@ -631,6 +716,20 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
             partners.add(g["tail_partner"])
 
         pieces.append((g["oid"], rpos))
+        # Reduce each attribute with the identical keep-mask.  A member missing
+        # a cell (unreadable attr chunk) falls back to zeros so attr_pieces stays
+        # 1:1 with pieces — the write path requires that alignment.
+        for name in attr_names:
+            aparts = [acache[name].get(m) for m in g["members"]]
+            if any(a is None for a in aparts):
+                ncols = int(attr_ncols.get(name, 1))
+                shape = (len(rpos),) if ncols == 1 else (len(rpos), ncols)
+                attr_pieces[name].append(
+                    np.zeros(shape, dtype=attr_dtypes.get(name, np.float32))
+                )
+            else:
+                merged_a = aparts[0] if len(aparts) == 1 else np.concatenate(aparts, axis=0)
+                attr_pieces[name].append(merged_a[keep_idx])
         chunk_offset += len(rpos)
         total_out_vertices += len(rpos)
 
@@ -650,6 +749,13 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
             level_group, "segment_id", tcc, seg_ids, dtype=np.uint64,
             record_presence=False,
         )
+        # Per-vertex attributes: one ragged group per fragment, same order as
+        # the vertex pieces above.  Manifests are rebuilt by the coordinator.
+        for name in attr_names:
+            write_chunk_attributes(
+                level_group, name, tcc, attr_pieces[name],
+                dtype=attr_dtypes.get(name, np.float32), record_presence=False,
+            )
         recs = [(int(p[0]), fidx) for fidx, p in enumerate(pieces)]
 
     # Spill object-index refs partitioned by OID shard (Phase C reduces these
@@ -834,8 +940,10 @@ def coarsen_polyline_level(
     from zarr_vectors.core.arrays import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
+        VERTEX_ATTRIBUTES,
         VERTICES,
         _write_object_index_manifests,
+        create_attribute_array,
         create_fragment_attribute_array,
         create_object_attributes_array,
         create_object_index_array,
@@ -846,6 +954,7 @@ def coarsen_polyline_level(
         read_object_attributes,
         write_object_attributes,
     )
+    from zarr_vectors.exceptions import ArrayError
     from zarr_vectors.core.metadata import LevelMetadata, get_level_chunk_shape
     from zarr_vectors.core.store import (
         create_resolution_level,
@@ -878,6 +987,27 @@ def coarsen_polyline_level(
     root_meta = read_root_metadata(root)
     ndim = root_meta.sid_ndim
     src = get_resolution_level(root, source_level)
+
+    # Per-vertex attributes present on the source: carry each forward, reduced
+    # by the same keep-mask as the positions and re-written per target chunk.
+    vattr_names: list[str] = []
+    vattr_dtypes: dict[str, str] = {}
+    vattr_ncols: dict[str, int] = {}
+    vattr_channels: dict[str, list[str] | None] = {}
+    if VERTEX_ATTRIBUTES in src:
+        # ``.children()`` (not iterating the group) — each vertex attribute is a
+        # flat ARRAY node, which plain iteration (group_keys only) misses, the
+        # same reason the object_attributes carry-forward below uses children().
+        for _name in src[VERTEX_ATTRIBUTES].children():
+            try:
+                _meta = src.read_array_meta(f"{VERTEX_ATTRIBUTES}/{_name}")
+            except ArrayError:
+                continue
+            _cn = _meta.get("channel_names")
+            vattr_names.append(_name)
+            vattr_dtypes[_name] = _meta.get("dtype", "float32")
+            vattr_ncols[_name] = len(_cn) if _cn else 1
+            vattr_channels[_name] = _cn
 
     try:
         src_level_meta = read_level_metadata(root, source_level)
@@ -993,7 +1123,10 @@ def coarsen_polyline_level(
         # datasource/zarr-vectors/frontend.ts's hasFragmentSegmentIds), so it
         # silently fell back to a meaningless chunk-local fragment index for
         # picking/selection at every level except the finest.
-        arrays_present=["vertices", "object_index", "fragment_attributes"],
+        arrays_present=(
+            ["vertices", "object_index", "fragment_attributes"]
+            + (["vertex_attributes"] if vattr_names else [])
+        ),
         bin_shape=tuple(
             float(b) * float(coarsen_factor) for b in root_meta.effective_bin_shape
         ),
@@ -1023,6 +1156,13 @@ def coarsen_polyline_level(
         create_fragment_attribute_array(
             level_group, "segment_id", dtype="uint64",
         )
+        # Pre-create each carried per-vertex attribute array once, single
+        # process, so the concurrent Phase A workers only WRITE cells.
+        for _name in vattr_names:
+            create_attribute_array(
+                level_group, _name, dtype=vattr_dtypes[_name],
+                channel_names=vattr_channels[_name],
+            )
 
     # Pre-create the kN cross-chunk-link arrays with LEVEL-WIDE dims so
     # Phase-B workers only WRITE cells (no create-race).
@@ -1072,6 +1212,9 @@ def coarsen_polyline_level(
         "simplify_epsilon": simplify_epsilon,
         "oid_reduce_shards": int(oid_reduce_shards),
         "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
+        "attr_names": vattr_names,
+        "attr_dtypes": vattr_dtypes,
+        "attr_ncols": vattr_ncols,
     }
     # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
     # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces

@@ -46,6 +46,27 @@ nearest neighbours.
 | *(TRX `dps/<name>`)* | per-streamline | dtype of TRX field | TRX reader | `ingest_trx` (auto) |
 | `mean_<scalar>` | per-streamline | float32 | computed mean of dpv | `ingest_trx(mean_scalar="name")` |
 
+### Synthetic attributes for coloring test data (trk CLI only)
+
+The `zvtools convert … --format trk` path can also *generate* colorable
+attributes from geometry alone, for exercising attribute coloring when a
+TRK file carries no native scalars. Both flags are repeatable; the
+`random` generators are seeded by `--attr-seed` (default 0). All are
+carried through the pyramid to every level.
+
+| Attribute | Slot | Type | Triggered by |
+| --- | --- | --- | --- |
+| `length` | per-streamline | float32 | `--object-attr length` (= `--compute-length`) |
+| `start` / `end` | per-streamline | float32, `(O, 3)` | `--object-attr endpoints` (= `--compute-endpoints`) |
+| `orientation` | per-streamline | float32, `(O, 3)` | `--object-attr orientation` — start→end unit vector (DEC RGB) |
+| `tortuosity` | per-streamline | float32 | `--object-attr tortuosity` — length ÷ endpoint distance (≥ 1) |
+| `vertex_count` | per-streamline | uint32 | `--object-attr vertex_count` |
+| `arc_length` | per-vertex | float32 | `--vertex-attr arc_length` — 0→1 along each streamline |
+| `x` / `y` / `z` | per-vertex | float32 | `--vertex-attr x\|y\|z` — the coordinate value |
+| `random` | per-vertex | float32 | `--vertex-attr random` — uniform [0, 1), seeded |
+| `index` | per-vertex | float32 | `--vertex-attr index` — 0→1 within each streamline |
+| `tangent` | per-vertex | float32, `(N, 3)` | `--vertex-attr tangent` — per-vertex unit direction (DEC) |
+
 ## Graphs
 
 | Attribute | Slot | Type | Source | Triggered by |

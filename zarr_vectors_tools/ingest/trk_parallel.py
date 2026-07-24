@@ -34,11 +34,13 @@ import numpy as np
 import numpy.typing as npt
 
 from zarr_vectors.core.arrays import (
+    create_attribute_array,
     create_fragment_attribute_array,
     create_links_family,
     create_object_index_array,
     create_vertices_array,
     level_grid_layout,
+    write_chunk_attributes,
     write_chunk_fragment_attributes,
     write_chunk_vertices,
     write_links,
@@ -51,7 +53,29 @@ from zarr_vectors.spatial.boundary import split_polyline_at_boundaries
 from zarr_vectors.typing import ChunkShape
 
 from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
+from zarr_vectors_tools.ingest._polyline_enrichments import (
+    arc_length_normalized,
+    compute_tangents,
+    index_normalized,
+)
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+
+# Per-vertex synthetic attribute generators.  ``_VERTEX_CARRY`` names must be
+# computed on the whole streamline in Phase A (before the chunk split, which
+# would otherwise destroy the along-streamline context) and carried through it
+# via a parallel memmap; the rest (x/y/z/random) are derived at chunk-write
+# time in Phase B from the already-assembled positions.  All stored float32.
+_VERTEX_CARRY = ("arc_length", "index", "tangent")
+_VERTEX_ATTR_NCOLS = {
+    "arc_length": 1, "index": 1, "tangent": 3,
+    "x": 1, "y": 1, "z": 1, "random": 1,
+}
+_TANGENT_CHANNELS = ["dx", "dy", "dz"]
+
+
+def _carry_attr_path(npz_path: str, name: str) -> str:
+    """Path of the Phase-A per-part memmap carrying vertex attribute ``name``."""
+    return npz_path.replace(".npz", f".attr_{name}.npy")
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +321,8 @@ def _phase_a_worker(
     dtype = shared["dtype"]
     compute_length = shared["compute_length"]
     compute_endpoints = shared["compute_endpoints"]
+    compute_vertex_count = shared.get("compute_vertex_count", False)
+    vertex_carry = shared.get("vertex_carry", [])
     part_specs = shared["part_specs"]
 
     part_spec = part_specs[part_index]
@@ -322,6 +348,20 @@ def _phase_a_worker(
         verts_npy_path, mode="w+", dtype=np.float32, shape=(total_pts, 3)
     )
 
+    # Parallel memmaps for per-vertex attributes that must be computed on the
+    # whole streamline (before the split) and carried through it in the same
+    # vertex order as verts_mm.  split_polyline_at_boundaries preserves order
+    # (segments are contiguous slices), so slicing the full attribute array by
+    # a per-streamline cursor keeps it aligned 1:1 with the stored vertices.
+    carry_mm: dict[str, npt.NDArray] = {}
+    for name in vertex_carry:
+        ncols = _VERTEX_ATTR_NCOLS[name]
+        shape = (total_pts,) if ncols == 1 else (total_pts, ncols)
+        carry_mm[name] = np.lib.format.open_memmap(
+            _carry_attr_path(npz_path, name), mode="w+",
+            dtype=np.float32, shape=shape,
+        )
+
     seg_poly_ids: list[int] = []
     seg_chunk_x: list[int] = []
     seg_chunk_y: list[int] = []
@@ -331,6 +371,7 @@ def _phase_a_worker(
     lengths: list[float] = []
     starts: list[npt.NDArray] = []
     ends: list[npt.NDArray] = []
+    vertex_counts: list[int] = []
 
     write_cursor = 0
     with open(trk_path, "rb") as f:
@@ -353,12 +394,30 @@ def _phase_a_worker(
                     verts @ affine_tv2ras[:3, :3].T + affine_tv2ras[:3, 3]
                 ).astype(np_dtype)
 
+            # Per-vertex carry attributes are computed on the full streamline
+            # here (post-affine, so tangents match the stored geometry) and
+            # sliced segment-by-segment below in the same vertex order.
+            carry_full: dict[str, npt.NDArray] = {}
+            for name in vertex_carry:
+                if name == "arc_length":
+                    carry_full[name] = arc_length_normalized(verts)
+                elif name == "index":
+                    carry_full[name] = index_normalized(len(verts))
+                elif name == "tangent":
+                    carry_full[name] = compute_tangents(verts)
+
             segments = split_polyline_at_boundaries(verts, chunk_shape)
 
+            local_cursor = 0
             for cc, seg_verts in segments:
                 n = len(seg_verts)
                 verts_mm[write_cursor:write_cursor + n] = seg_verts
+                for name in vertex_carry:
+                    carry_mm[name][write_cursor:write_cursor + n] = (
+                        carry_full[name][local_cursor:local_cursor + n]
+                    )
                 write_cursor += n
+                local_cursor += n
                 seg_poly_ids.append(poly_id)
                 # Clamp the chunk assignment to the array grid derived from the
                 # TRK header bbox.  Vertices can sit fractionally outside that
@@ -390,8 +449,15 @@ def _phase_a_worker(
                 starts.append(verts[0].astype(np.float32))
                 ends.append(verts[-1].astype(np.float32))
 
+            if compute_vertex_count:
+                vertex_counts.append(int(len(verts)))
+
     # Flush and release the memmap — pages can now be evicted by the OS.
     del verts_mm
+    for name in vertex_carry:
+        # Same flush/release as verts_mm; the .npy stays on disk for Phase B.
+        del carry_mm[name]
+    carry_mm.clear()
 
     save_dict: dict[str, Any] = {
         "poly_id_base": np.int64(poly_id_base),
@@ -407,6 +473,8 @@ def _phase_a_worker(
     if compute_endpoints:
         save_dict["starts"] = np.stack(starts, axis=0).astype(np.float32) if starts else np.zeros((0, 3), dtype=np.float32)
         save_dict["ends"] = np.stack(ends, axis=0).astype(np.float32) if ends else np.zeros((0, 3), dtype=np.float32)
+    if compute_vertex_count:
+        save_dict["vertex_counts"] = np.array(vertex_counts, dtype=np.uint32)
 
     np.savez_compressed(npz_path, **save_dict)
     return npz_path
@@ -446,10 +514,15 @@ def _phase_b_worker(
     store_path = shared["store_path"]
     dtype = shared["dtype"]
     out_dtype = np.dtype(dtype)
+    vertex_attrs = shared.get("vertex_attrs", ())
+    vertex_carry = shared.get("vertex_carry", ())
+    attr_seed = int(shared.get("attr_seed", 0))
 
-    # Records for this chunk across all parts, in (part, poly_id, seg_within_poly) order
-    # We collect: (part_idx, poly_id, seg_idx_within_poly, vertex_array)
-    records: list[tuple[int, int, int, npt.NDArray]] = []
+    # Records for this chunk across all parts, in (part, poly_id, seg_within_poly)
+    # order.  Each: (part_idx, poly_id, seg_idx_within_poly, vertex_array,
+    # {carry_attr_name: value_array}) — the carry dict is empty unless per-vertex
+    # carry attributes were requested.
+    records: list[tuple[int, int, int, npt.NDArray, dict[str, npt.NDArray]]] = []
 
     for part_idx, npz_path in enumerate(part_npz_paths):
         # ``with``: NpzFile holds an open zipfile handle until closed, and
@@ -494,6 +567,12 @@ def _phase_b_worker(
 
         verts_npy_path = npz_path.replace(".npz", ".verts.npy")
         vertices = np.load(verts_npy_path, mmap_mode="r")
+        # Carry-attribute memmaps for this part, sliced with the SAME vs:vc as
+        # the vertices (Phase A wrote them in identical vertex order).
+        carry_mm = {
+            name: np.load(_carry_attr_path(npz_path, name), mmap_mode="r")
+            for name in vertex_carry
+        }
         try:
             for i in range(len(match_idx)):
                 vs = int(m_vtx_starts[i])
@@ -503,14 +582,21 @@ def _phase_b_worker(
                 # directly in the output dtype so the write path needs no
                 # further copy (a no-op cast when out_dtype is float32).
                 seg_verts = np.array(vertices[vs:vs + vc], dtype=out_dtype)
+                attr_vals = {
+                    name: np.array(carry_mm[name][vs:vs + vc], dtype=np.float32)
+                    for name in vertex_carry
+                }
                 records.append(
-                    (part_idx, int(m_poly_ids[i]), int(m_within[i]), seg_verts)
+                    (part_idx, int(m_poly_ids[i]), int(m_within[i]),
+                     seg_verts, attr_vals)
                 )
         finally:
             # Close the mapping explicitly: `del` drops a reference but leaves
             # the file handle open until GC, which on Windows is long enough to
             # block cleanup of the intermediate dir.
             _close_memmap(vertices)
+            for mm in carry_mm.values():
+                _close_memmap(mm)
 
     if not records:
         return {}
@@ -548,13 +634,43 @@ def _phase_b_worker(
         record_presence=False,
     )
 
+    # Per-vertex attributes: one ragged group per fragment, aligned 1:1 with
+    # vert_groups.  Coordinate/random generators are derived here from the
+    # assembled positions (no Phase A carry); the geometry-following ones come
+    # from the carry dict.  record_presence=False for the same reason as above.
+    if vertex_attrs:
+        _axis = {"x": 0, "y": 1, "z": 2}
+        for name in sorted(vertex_attrs):
+            if name in _axis:
+                ax = _axis[name]
+                attr_groups = [vg[:, ax].astype(np.float32) for vg in vert_groups]
+            elif name == "random":
+                # Deterministic per (seed, chunk): reproducible across serial
+                # and parallel runs since each chunk is written by one worker.
+                # Mask to 32-bit unsigned — chunk coords can be negative after
+                # --apply-affine, and SeedSequence rejects negative seeds.
+                rng = np.random.default_rng(
+                    [attr_seed & 0xFFFFFFFF]
+                    + [int(c) & 0xFFFFFFFF for c in chunk_coords]
+                )
+                attr_groups = [
+                    rng.random(len(vg), dtype=np.float32) for vg in vert_groups
+                ]
+            else:  # carry attribute (arc_length / index / tangent)
+                attr_groups = [r[4][name] for r in records]
+            write_chunk_attributes(
+                level_group, name, chunk_coords, attr_groups,
+                dtype=np.float32, record_presence=False,
+            )
+
     # Build fragment result map: key = (part_idx, poly_id, seg_within_poly)
     result: dict[tuple[int, int, int], tuple[tuple[int, int, int], int, int, int]] = {}
     cum_row = 0
-    for frag_idx, (part_idx, poly_id, seg_within, seg_verts) in enumerate(records):
+    for frag_idx, rec in enumerate(records):
+        seg_verts = rec[3]
         first_row = cum_row
         last_row = cum_row + len(seg_verts) - 1
-        result[(part_idx, poly_id, seg_within)] = (chunk_coords, frag_idx, first_row, last_row)
+        result[(rec[0], rec[1], rec[2])] = (chunk_coords, frag_idx, first_row, last_row)
         cum_row += len(seg_verts)
 
     return result
@@ -656,6 +772,9 @@ def ingest_trk_parallel(
     max_streamlines: int | None = None,
     compute_length: bool = False,
     compute_endpoints: bool = False,
+    object_attrs: set[str] | None = None,
+    vertex_attrs: set[str] | None = None,
+    attr_seed: int = 0,
     preserve_header: bool = True,
     register_to_rasmm: bool = False,
     build_multiscale: bool = True,
@@ -701,6 +820,18 @@ def ingest_trk_parallel(
             of a large tractogram; leave None to ingest all streamlines.
         compute_length: Write per-streamline path length to object_attributes.
         compute_endpoints: Write start/end points to object_attributes.
+        object_attrs: Synthetic per-object (per-streamline) attributes to
+            generate for color-by-object testing.  Any of ``length``,
+            ``endpoints``, ``orientation`` (start→end unit vector, 3ch),
+            ``tortuosity``, ``vertex_count``.  ``compute_length`` /
+            ``compute_endpoints`` are folded in as ``length`` / ``endpoints``.
+        vertex_attrs: Synthetic per-vertex (per-point) attributes to generate
+            for color-by-vertex testing.  Any of ``arc_length`` (0→1 along the
+            streamline), ``x`` / ``y`` / ``z`` (coordinate), ``random``,
+            ``index`` (0→1 within the streamline), ``tangent`` (unit direction,
+            3ch).  Stored under ``vertex_attributes/<name>`` and carried through
+            the pyramid to every level.
+        attr_seed: Seed for the ``random`` vertex generator (default 0).
         preserve_header: Store TRKHeader (affine, dims) in the zarr store.
         register_to_rasmm: When True, bake the trackvis-voxmm→RASmm affine into
             the stored vertex positions (and chunk grid) and record an identity
@@ -727,6 +858,22 @@ def ingest_trk_parallel(
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
+
+    # Normalize the attribute request.  ``compute_length`` / ``compute_endpoints``
+    # are sugar for the corresponding object attrs, so callers (and the pyramid's
+    # "length" sparsity auto-enable) keep working unchanged.
+    object_attrs = set(object_attrs or ())
+    if compute_length:
+        object_attrs.add("length")
+    if compute_endpoints:
+        object_attrs.add("endpoints")
+    vertex_attrs = set(vertex_attrs or ())
+    vertex_carry = sorted(vertex_attrs.intersection(_VERTEX_CARRY))
+
+    # Which per-part accumulators Phase A must produce for the object attrs.
+    _need_length = bool(object_attrs & {"length", "tortuosity"})
+    _need_endpoints = bool(object_attrs & {"endpoints", "orientation", "tortuosity"})
+    _need_vertex_count = "vertex_count" in object_attrs
 
     def _log(msg: str) -> None:
         if progress:
@@ -857,7 +1004,10 @@ def ingest_trk_parallel(
             # before the re-stamp runs, as happened when Phase 6 OOM'd on a
             # real run) silently falls back to a meaningless per-chunk
             # fragment index for picking/selection.
-            arrays_present=["vertices", "object_index", "fragment_attributes"],
+            arrays_present=(
+                ["vertices", "object_index", "fragment_attributes"]
+                + (["vertex_attributes"] if vertex_attrs else [])
+            ),
         )
         level_group = create_resolution_level(root, 0, level_meta)
         # A chunk array's codec pipeline is fixed when the array is CREATED
@@ -884,6 +1034,15 @@ def ingest_trk_parallel(
             create_fragment_attribute_array(
                 level_group, "segment_id", dtype="uint64",
             )
+            # Pre-create each per-vertex attribute array once, single-process,
+            # so the concurrent Phase B workers only WRITE cells (creating here
+            # would race on the array's zarr.json — same reason segment_id is
+            # created up front).  Metadata-only; cells are written in Phase B.
+            for _name in sorted(vertex_attrs):
+                _cn = _TANGENT_CHANNELS if _name == "tangent" else None
+                create_attribute_array(
+                    level_group, _name, dtype="float32", channel_names=_cn,
+                )
 
         # --- Phase A: per-part spatial binning ---------------------------
         _log(f"Phase A: binning streamlines ({len(part_specs)} parts)...")
@@ -897,8 +1056,10 @@ def ingest_trk_parallel(
             "affine_tv2ras": affine_tv2ras,
             "intermediate_dir": _intermediate_dir,
             "dtype": dtype,
-            "compute_length": compute_length,
-            "compute_endpoints": compute_endpoints,
+            "compute_length": _need_length,
+            "compute_endpoints": _need_endpoints,
+            "compute_vertex_count": _need_vertex_count,
+            "vertex_carry": vertex_carry,
             "part_specs": part_specs,
         }
 
@@ -932,6 +1093,9 @@ def ingest_trk_parallel(
             "part_npz_paths": part_npz_paths,
             "store_path": str(output_path),
             "dtype": dtype,
+            "vertex_attrs": sorted(vertex_attrs),
+            "vertex_carry": vertex_carry,
+            "attr_seed": int(attr_seed),
         }
 
         chunk_list = sorted(all_chunk_coords)
@@ -969,29 +1133,48 @@ def ingest_trk_parallel(
                 mode="replace", directed=True,
             )
 
-        # Object attributes
+        # Object attributes (per-streamline).  Gather the per-part accumulators
+        # once, then derive each requested attribute in global object order —
+        # parts are concatenated in ascending part index, which is ascending
+        # poly_id (== object id), so row i lines up with object i.
         obj_attrs_to_write: dict[str, npt.NDArray] = {}
-        if compute_length:
-            length_parts = []
-            for npz_path in part_npz_paths:
-                with np.load(npz_path) as d:
-                    if "lengths" in d:
-                        length_parts.append(d["lengths"])
-            if length_parts:
-                obj_attrs_to_write["length"] = np.concatenate(length_parts, axis=0)
+        if object_attrs:
+            from zarr_vectors_tools.ingest._polyline_enrichments import (
+                orientation_from_endpoints,
+                tortuosity_from_endpoints,
+            )
 
-        if compute_endpoints:
-            start_parts, end_parts = [], []
-            for npz_path in part_npz_paths:
-                with np.load(npz_path) as d:
-                    if "starts" in d:
-                        start_parts.append(d["starts"])
-                    if "ends" in d:
-                        end_parts.append(d["ends"])
-            if start_parts:
-                obj_attrs_to_write["start"] = np.concatenate(start_parts, axis=0)
-            if end_parts:
-                obj_attrs_to_write["end"] = np.concatenate(end_parts, axis=0)
+            def _concat_part_arrays(key: str, cols: int) -> npt.NDArray:
+                parts = []
+                for npz_path in part_npz_paths:
+                    with np.load(npz_path) as d:
+                        if key in d:
+                            parts.append(d[key])
+                if parts:
+                    return np.concatenate(parts, axis=0)
+                return np.zeros((0,) if cols == 1 else (0, cols), dtype=np.float32)
+
+            lengths_all = _concat_part_arrays("lengths", 1) if _need_length else None
+            starts_all = _concat_part_arrays("starts", 3) if _need_endpoints else None
+            ends_all = _concat_part_arrays("ends", 3) if _need_endpoints else None
+
+            if "length" in object_attrs and lengths_all is not None:
+                obj_attrs_to_write["length"] = lengths_all
+            if "endpoints" in object_attrs and starts_all is not None:
+                obj_attrs_to_write["start"] = starts_all
+                obj_attrs_to_write["end"] = ends_all
+            if "orientation" in object_attrs and starts_all is not None:
+                obj_attrs_to_write["orientation"] = orientation_from_endpoints(
+                    starts_all, ends_all,
+                )
+            if "tortuosity" in object_attrs and starts_all is not None:
+                obj_attrs_to_write["tortuosity"] = tortuosity_from_endpoints(
+                    starts_all, ends_all, lengths_all,
+                )
+            if "vertex_count" in object_attrs:
+                obj_attrs_to_write["vertex_count"] = _concat_part_arrays(
+                    "vertex_counts", 1,
+                ).astype(np.uint32)
 
         if obj_attrs_to_write:
             from zarr_vectors.core.arrays import write_object_attributes
@@ -1059,7 +1242,7 @@ def ingest_trk_parallel(
                 _lvl0_attrs["zarr_vectors_level"]["arrays_present"] = [
                     k for k in ["vertices", "vertex_fragments", "object_index",
                                  "links", "object_attributes",
-                                 "fragment_attributes"]
+                                 "vertex_attributes", "fragment_attributes"]
                     if k in _lvl0_z
                 ]
             _lvl0_z.attrs.update(_lvl0_attrs)

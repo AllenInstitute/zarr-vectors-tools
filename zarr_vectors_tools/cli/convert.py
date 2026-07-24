@@ -82,6 +82,9 @@ def _convert_trk(args, factors, chunk_scale) -> int:
             compressor=(None if args.compressor == "none" else args.compressor),
             compute_length=args.compute_length,
             compute_endpoints=args.compute_endpoints,
+            object_attrs=set(args.object_attrs or []),
+            vertex_attrs=set(args.vertex_attrs or []),
+            attr_seed=args.attr_seed,
             register_to_rasmm=args.apply_affine,
             build_multiscale=factors is not None,
             pyramid_factors=factors,
@@ -114,6 +117,17 @@ def run(args) -> int:
         raise SystemExit(
             f"error: --apply-affine only applies to trk input, not {fmt.name!r} "
             f"({why})"
+        )
+
+    # The synthetic attribute generators are wired into the trk parallel path
+    # only.  trx/tck carry their own native per-vertex/per-object scalars, and
+    # non-streamline formats have no streamlines to derive them from — so reject
+    # rather than accept-and-ignore (mirrors --apply-affine above).
+    if (getattr(args, "object_attrs", None) or getattr(args, "vertex_attrs", None)) \
+            and fmt.name != "trk":
+        raise SystemExit(
+            f"error: --object-attr/--vertex-attr only apply to trk input, "
+            f"not {fmt.name!r}"
         )
 
     _maybe_overwrite(args.output, args.overwrite)

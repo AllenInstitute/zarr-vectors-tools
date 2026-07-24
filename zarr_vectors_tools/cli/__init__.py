@@ -131,6 +131,25 @@ def build_parser() -> argparse.ArgumentParser:
                    help="streamlines: store per-object length")
     c.add_argument("--compute-endpoints", action="store_true", dest="compute_endpoints",
                    help="streamlines: store per-object endpoints")
+    c.add_argument("--object-attr", action="append", dest="object_attrs",
+                   default=None, metavar="NAME",
+                   choices=("length", "endpoints", "orientation",
+                            "tortuosity", "vertex_count"),
+                   help="trk: generate a per-object (per-streamline) attribute "
+                        "for color-by-object testing (repeatable). Choices: "
+                        "length, endpoints, orientation (start→end unit vector, "
+                        "3ch DEC), tortuosity, vertex_count")
+    c.add_argument("--vertex-attr", action="append", dest="vertex_attrs",
+                   default=None, metavar="NAME",
+                   choices=("arc_length", "x", "y", "z", "random",
+                            "index", "tangent"),
+                   help="trk: generate a per-vertex (per-point) attribute for "
+                        "color-by-vertex testing (repeatable). Choices: "
+                        "arc_length (0→1 along each streamline), x/y/z "
+                        "(coordinate), random, index (0→1 within streamline), "
+                        "tangent (per-vertex unit direction, 3ch DEC)")
+    c.add_argument("--attr-seed", type=int, dest="attr_seed", default=0,
+                   help="seed for the 'random' attribute generators (default: 0)")
     c.add_argument("--nodes", default=None,
                    help="edgelist: path to the node CSV (second input)")
     c.add_argument("--knn-distance-k", type=int, dest="knn_distance_k", default=None,
