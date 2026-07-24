@@ -1,11 +1,18 @@
-"""End-to-end coverage for the 0.4 multiscale links layout.
+"""End-to-end coverage for the merged links layout.
 
-Covers:
-- ``links/0/<chunk>`` regression (delta=0 writer/reader behavior).
-- Manual round-trip of ``links/+1/<chunk>`` and ``cross_chunk_links/+1/data``.
-- The new ``cross_chunk_link_attributes`` writer/reader pair.
+Connectivity is ONE family under ``links/<delta>/<offsets>/``: an
+intra-chunk link is just one whose offsets are all zero.  Covers:
+
+- ``links/<delta>/<offsets>`` round-trips, intra and chunk-spanning.
+- ``links/<delta>`` being a GROUP, not an array — the distinction several
+  readers fail *silently* on.
+- The whole-family / cross-only split, which is where a port from the
+  pre-merge two-family API double-counts.
+- ``link_attributes`` writer/reader, and the enumeration order that is the
+  only thing aligning attribute rows to link records.
+- Family policy being family-wide and un-flippable.
 - ``build_pyramid`` cross-level emission across depth / storage modes.
-- The hard schema-version cutoff at 0.4.
+- The hard schema-version cutoff.
 """
 
 from __future__ import annotations
@@ -17,8 +24,6 @@ import pytest
 
 from zarr_vectors.constants import (
     CAP_MULTISCALE_LINKS,
-    CROSS_CHUNK_LINK_ATTRIBUTES,
-    CROSS_CHUNK_LINKS,
     FORMAT_VERSION,
     LINKS,
     XLEVEL_EXPLICIT,
@@ -26,40 +31,59 @@ from zarr_vectors.constants import (
     XLEVEL_NONE,
 )
 from zarr_vectors.core.arrays import (
-    create_cross_chunk_link_attributes_array,
-    create_cross_chunk_links_array,
     create_link_attributes_array,
     create_links_array,
+    create_links_family,
     create_vertices_array,
-    list_cross_link_deltas,
+    link_family_policy,
     list_link_deltas,
+    list_link_offsets,
     read_chunk_links,
-    read_cross_chunk_link_attributes,
-    read_cross_chunk_links,
-    write_chunk_link_attributes,
+    read_link_attributes,
+    read_links,
     write_chunk_links,
     write_chunk_vertices,
-    write_cross_chunk_link_attributes,
-    write_cross_chunk_links,
+    write_link_attributes,
+    write_link_cells,
+    write_links,
 )
 from zarr_vectors.core.metadata import RootMetadata
 from zarr_vectors.core.paths import (
-    cross_chunk_link_attributes_path,
-    cross_chunk_links_path,
     link_attributes_path,
+    links_group_path,
     links_path,
 )
-from zarr_vectors.core.store import FsGroup
+from zarr_vectors.core.store import create_store, get_resolution_level
 from zarr_vectors.exceptions import ArrayError, MetadataError
 
+from zarr_vectors_tools.algorithms._links import (
+    link_prefetch_plan,
+    list_link_cells,
+    read_cross_links,
+)
 
-def _make_level_group(tmp_path: Path, name: str = "0") -> FsGroup:
-    root = FsGroup(tmp_path / "store.zarr", create=True)
-    return root.create_group(name)
+INTRA_3D = ((0, 0, 0),)
+
+
+def _make_level_group(tmp_path: Path):
+    """A real resolution level.
+
+    Per-chunk arrays are single multidim zarr arrays shaped to the level's
+    chunk grid, so they can only be allocated against a level that knows
+    that grid — a bare group is not enough.
+    """
+    root = create_store(
+        str(tmp_path / "store.zv"),
+        bounds=([0.0, 0.0, 0.0], [1000.0, 1000.0, 1000.0]),
+        chunk_shape=(100.0, 100.0, 100.0),
+        geometry_types=["graph"],
+        ndim=3,
+    )
+    return get_resolution_level(root, 0)
 
 
 # ===================================================================
-# delta=0 regression (current behavior preserved under new path layout)
+# delta=0 round-trips
 # ===================================================================
 
 class TestDeltaZero:
@@ -67,7 +91,7 @@ class TestDeltaZero:
     def test_intra_chunk_links_round_trip(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
         create_vertices_array(lg)
-        create_links_array(lg, link_width=2)
+        create_links_array(lg, link_width=2, sid_ndim=3)
         write_chunk_vertices(lg, (0, 0, 0), [np.zeros((4, 3), dtype=np.float32)])
         edges = np.array([[0, 1], [1, 2], [2, 3]], dtype=np.int64)
         write_chunk_links(lg, (0, 0, 0), [edges])
@@ -76,28 +100,107 @@ class TestDeltaZero:
         assert len(groups) == 1
         np.testing.assert_array_equal(groups[0], edges)
 
-    def test_cross_chunk_links_round_trip(self, tmp_path: Path) -> None:
+    def test_chunk_spanning_links_round_trip(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg)
         links = [
             (((0, 0, 0), 4), ((0, 0, 1), 0)),
             (((0, 0, 0), 2), ((1, 0, 0), 1)),
         ]
-        write_cross_chunk_links(lg, links, sid_ndim=3)
-        assert read_cross_chunk_links(lg) == links
+        write_links(lg, links, sid_ndim=3)
+        # read_links enumerates by (offsets segment, cell), NOT input order:
+        # placement is a function of the record, so input order is not
+        # preserved.  Each record round-trips in its own input endpoint
+        # order, which is what perm_idx exists to restore.
+        assert set(read_links(lg)) == set(links)
 
-    def test_paths_have_delta_segment(self, tmp_path: Path) -> None:
+    def test_links_delta_is_a_group_not_an_array(self, tmp_path: Path) -> None:
+        """``links/<delta>`` holds one array per offsets segment.
+
+        Naming the group where an array is expected fails silently —
+        ``list_chunks`` returns [] and the batch reader skips it — so pin
+        the distinction explicitly.
+        """
         lg = _make_level_group(tmp_path)
-        create_links_array(lg, link_width=2, delta=0)
-        create_cross_chunk_links_array(lg, delta=0)
-        # The on-disk layout now puts <delta> between the array prefix
-        # and the per-chunk subpath / data blob.
-        assert lg.array_exists(f"{LINKS}/0")
-        assert lg.array_exists(f"{CROSS_CHUNK_LINKS}/0")
+        create_links_array(lg, link_width=2, delta=0, sid_ndim=3)
+        family = links_group_path(0)
+
+        assert lg.array_exists(family)
+        assert not lg.standalone_array_exists(family)
+        assert lg.list_chunks(family) == []
+        # The array is one level deeper, under its offsets segment.
+        assert lg.standalone_array_exists(links_path(0, INTRA_3D))
 
 
 # ===================================================================
-# delta != 0 — cross-pyramid-level links (manual writer/reader)
+# The whole-family / cross-only split
+# ===================================================================
+
+class TestFamilyVsCross:
+
+    def _mixed_store(self, tmp_path: Path):
+        from zarr_vectors.core.store import get_resolution_level, open_store
+        from zarr_vectors.types.graphs import write_graph
+
+        # 3 intra edges inside chunk (0,0,0); 2 edges spanning to (2,0,0).
+        positions = np.array(
+            [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [20, 0, 0], [21, 0, 0]],
+            dtype=np.float32,
+        )
+        edges = np.array(
+            [[0, 1], [1, 2], [2, 3], [0, 4], [1, 5]], dtype=np.int64,
+        )
+        store = tmp_path / "mixed.zv"
+        write_graph(str(store), positions, edges, chunk_shape=(10.0, 10.0, 10.0))
+        return get_resolution_level(open_store(str(store)), 0)
+
+    def test_read_links_returns_whole_family(self, tmp_path: Path) -> None:
+        lg = self._mixed_store(tmp_path)
+        assert len(read_links(lg, delta=0)) == 5
+
+    def test_read_cross_links_returns_spanning_only(self, tmp_path: Path) -> None:
+        lg = self._mixed_store(tmp_path)
+        cross = read_cross_links(lg, delta=0)
+        assert len(cross) == 2
+        for record in cross:
+            assert len({tuple(cc) for cc, _vi in record}) > 1
+
+    def test_intra_is_family_minus_cross(self, tmp_path: Path) -> None:
+        """The regression guard for the double-count trap.
+
+        Pre-merge, read_links meant intra-only and had a sibling cross
+        reader.  Anyone porting that idiom by unioning a per-chunk
+        read_chunk_links loop with read_links counts every intra edge
+        twice — silently, with no error.
+        """
+        lg = self._mixed_store(tmp_path)
+        family = read_links(lg, delta=0)
+        cross = read_cross_links(lg, delta=0)
+        intra = [r for r in family if len({tuple(cc) for cc, _vi in r}) == 1]
+        assert len(intra) == 3
+        assert len(intra) + len(cross) == len(family)
+
+    def test_list_link_cells_lists_spanning_cells(self, tmp_path: Path) -> None:
+        lg = self._mixed_store(tmp_path)
+        cells = list_link_cells(lg, delta=0)
+        assert cells == [((0, 0, 0), (2, 0, 0))]
+        assert list_link_cells(lg, delta=0, involves=(2, 0, 0)) == cells
+        assert list_link_cells(lg, delta=0, involves=(9, 9, 9)) == []
+
+    def test_prefetch_plan_names_arrays_not_groups(self, tmp_path: Path) -> None:
+        """Every plan entry must resolve to a real array.
+
+        The batch reader skips any plan node that is not an array, so a
+        group path here would silently disable prefetch rather than fail.
+        """
+        lg = self._mixed_store(tmp_path)
+        plan = link_prefetch_plan(lg, [(0, 0, 0), (2, 0, 0)])
+        assert plan, "plan must cover the link family"
+        for path, _keys in plan:
+            assert lg.standalone_array_exists(path), f"{path} is not an array"
+
+
+# ===================================================================
+# delta != 0 — cross-pyramid-level links
 # ===================================================================
 
 class TestCrossLevelManual:
@@ -106,76 +209,137 @@ class TestCrossLevelManual:
         lg = _make_level_group(tmp_path)
         # Source vertices at this level; target side conceptually lives
         # at this_level + 1.  Per-chunk single edge group.
-        create_links_array(lg, link_width=2, delta=1)
+        create_links_array(lg, link_width=2, delta=1, sid_ndim=3)
         edges = np.array([[0, 0], [1, 0], [2, 1]], dtype=np.int64)
         write_chunk_links(lg, (0, 0, 0), [edges], delta=1)
         back = read_chunk_links(lg, (0, 0, 0), link_width=2, delta=1)
         assert len(back) == 1
         np.testing.assert_array_equal(back[0], edges)
 
-    def test_ccl_minus_two(self, tmp_path: Path) -> None:
+    def test_spanning_minus_two(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=-2)
         links = [
             (((1, 0, 0), 0), ((0, 0, 0), 3)),
             (((1, 0, 0), 1), ((0, 0, 1), 7)),
         ]
-        write_cross_chunk_links(lg, links, sid_ndim=3, delta=-2)
-        assert read_cross_chunk_links(lg, delta=-2) == links
+        write_links(lg, links, sid_ndim=3, delta=-2)
+        assert set(read_links(lg, delta=-2)) == set(links)
 
     def test_listing_helpers(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
-        create_links_array(lg, link_width=2, delta=0)
-        create_links_array(lg, link_width=2, delta=1)
-        create_links_array(lg, link_width=2, delta=-1)
-        create_cross_chunk_links_array(lg, delta=0)
-        create_cross_chunk_links_array(lg, delta=2)
+        create_links_array(lg, link_width=2, delta=0, sid_ndim=3)
+        create_links_array(lg, link_width=2, delta=1, sid_ndim=3)
+        create_links_array(lg, link_width=2, delta=-1, sid_ndim=3)
         assert list_link_deltas(lg) == [-1, 0, 1]
-        assert list_cross_link_deltas(lg) == [0, 2]
+        # One array per offsets segment; only the intra one exists so far.
+        assert list_link_offsets(lg, 0) == ["0.0.0"]
 
 
 # ===================================================================
-# Cross-chunk link attributes (NEW in 0.4)
+# Family policy is family-wide and un-flippable
 # ===================================================================
 
-class TestCrossChunkLinkAttributes:
+class TestFamilyPolicy:
 
-    def test_round_trip(self, tmp_path: Path) -> None:
+    def test_policy_stamped_on_the_group(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=1)
-        links = [
-            (((0, 0, 0), 4), ((0, 0, 1), 0)),
-            (((0, 0, 0), 2), ((1, 0, 0), 1)),
-            (((1, 0, 0), 5), ((1, 0, 1), 0)),
-        ]
-        write_cross_chunk_links(lg, links, sid_ndim=3, delta=1)
-
-        create_cross_chunk_link_attributes_array(
-            lg, "weight", dtype="float32", delta=1,
+        create_links_family(
+            lg, delta=0, link_width=2, sid_ndim=3, directed=True,
         )
+        assert link_family_policy(lg, 0) == (2, 3, True, "canonical")
+
+    def test_family_can_be_stamped_without_any_array(self, tmp_path: Path) -> None:
+        """A cross-only family must not be forced to materialise an
+        intra array purely to carry the group stamp."""
+        lg = _make_level_group(tmp_path)
+        create_links_family(lg, delta=0, link_width=2, sid_ndim=3)
+        assert lg.array_exists(links_group_path(0))
+        assert list_link_offsets(lg, 0) == []
+
+    def test_cannot_flip_directed_under_surviving_siblings(
+        self, tmp_path: Path,
+    ) -> None:
+        """Policy is one per (level, delta): every offsets array decodes
+        against it, so flipping it would strand the ones already written."""
+        lg = _make_level_group(tmp_path)
+        create_links_family(
+            lg, delta=0, link_width=2, sid_ndim=3, directed=False,
+        )
+        links = [(((0, 0, 0), 0), ((1, 0, 0), 1))]
+        with pytest.raises(ArrayError):
+            write_link_cells(
+                lg, links, 3, delta=0, link_width=2, directed=True,
+            )
+
+
+# ===================================================================
+# Link attributes
+# ===================================================================
+
+class TestLinkAttributes:
+
+    LINKS_3 = [
+        (((0, 0, 0), 4), ((0, 0, 1), 0)),
+        (((0, 0, 0), 2), ((1, 0, 0), 1)),
+        (((1, 0, 0), 5), ((1, 0, 1), 0)),
+    ]
+
+    def test_round_trip_with_partition(self, tmp_path: Path) -> None:
+        """With the writer's partition, attr_data is in INPUT order."""
+        lg = _make_level_group(tmp_path)
+        partition = write_links(lg, self.LINKS_3, sid_ndim=3, delta=1)
+
         weights = np.array([0.1, 0.5, 0.9], dtype=np.float32)
-        write_cross_chunk_link_attributes(
-            lg, "weight", weights, num_links=3, delta=1,
+        write_link_attributes(
+            lg, "weight", weights, num_links=3, delta=1, partition=partition,
         )
 
-        back = read_cross_chunk_link_attributes(lg, "weight", delta=1)
-        np.testing.assert_allclose(back, weights)
+        # Each record keeps the weight it was given, whatever order the
+        # family enumerates in.
+        by_record = dict(zip(read_links(lg, delta=1),
+                             read_link_attributes(lg, "weight", delta=1)))
+        for record, expected in zip(self.LINKS_3, weights):
+            assert by_record[record] == pytest.approx(expected)
+
+    def test_round_trip_without_partition_is_enumeration_order(
+        self, tmp_path: Path,
+    ) -> None:
+        """Without a partition, attr_data must ALREADY be in read_links order.
+
+        The writer can only re-derive on-disk order by reading the records
+        back, so it cannot map input positions for you.  Handing it input
+        order here silently mis-assigns every row — placement is a function
+        of the record, so input order is not enumeration order.
+        """
+        lg = _make_level_group(tmp_path)
+        write_links(lg, self.LINKS_3, sid_ndim=3, delta=1)
+
+        records = read_links(lg, delta=1)
+        assert list(records) != list(self.LINKS_3), (
+            "fixture must exercise a reordering, else the test proves nothing"
+        )
+        wanted = {r: float(i) for i, r in enumerate(self.LINKS_3)}
+        rows = np.array([wanted[r] for r in records], dtype=np.float32)
+        write_link_attributes(lg, "weight", rows, num_links=3, delta=1)
+
+        by_record = dict(zip(read_links(lg, delta=1),
+                             read_link_attributes(lg, "weight", delta=1)))
+        for record, expected in wanted.items():
+            assert by_record[record] == pytest.approx(expected)
 
     def test_length_invariant_enforced(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
         bad = np.array([1.0, 2.0], dtype=np.float32)
         with pytest.raises(ArrayError):
-            write_cross_chunk_link_attributes(
-                lg, "weight", bad, num_links=3, delta=0,
-            )
+            write_link_attributes(lg, "weight", bad, num_links=3, delta=0)
 
     def test_path_layout(self, tmp_path: Path) -> None:
         lg = _make_level_group(tmp_path)
-        create_cross_chunk_link_attributes_array(
-            lg, "weight", dtype="float32", delta=0,
+        create_link_attributes_array(
+            lg, "weight", dtype="float32", delta=0, sid_ndim=3, link_width=2,
         )
-        assert lg.array_exists(
-            f"{CROSS_CHUNK_LINK_ATTRIBUTES}/weight/0"
+        assert lg.standalone_array_exists(
+            link_attributes_path("weight", 0, INTRA_3D)
         )
 
 
@@ -185,15 +349,13 @@ class TestCrossChunkLinkAttributes:
 
 def test_paths_module_matches_disk_layout(tmp_path: Path) -> None:
     lg = _make_level_group(tmp_path)
-    create_links_array(lg, link_width=2, delta=2)
-    create_link_attributes_array(lg, "w", dtype="float32", delta=-1)
-    create_cross_chunk_links_array(lg, delta=3)
-    create_cross_chunk_link_attributes_array(lg, "w", delta=-2)
+    create_links_array(lg, link_width=2, delta=2, sid_ndim=3)
+    create_link_attributes_array(
+        lg, "w", dtype="float32", delta=-1, sid_ndim=3, link_width=2,
+    )
 
-    assert lg.array_exists(links_path(2))
-    assert lg.array_exists(link_attributes_path("w", -1))
-    assert lg.array_exists(cross_chunk_links_path(3))
-    assert lg.array_exists(cross_chunk_link_attributes_path("w", -2))
+    assert lg.standalone_array_exists(links_path(2, INTRA_3D))
+    assert lg.standalone_array_exists(link_attributes_path("w", -1, INTRA_3D))
 
 
 # ===================================================================
@@ -275,7 +437,6 @@ def test_invalid_cross_level_depth_rejected():
 zarr = pytest.importorskip("zarr")
 
 from zarr_vectors.core.store import (  # noqa: E402
-    create_store,
     get_resolution_level,
     list_resolution_levels,
     open_store,
@@ -292,7 +453,7 @@ def _seed_simple_graph(tmp_path: Path) -> Path:
     n = 64
     positions = rng.uniform(0.0, 100.0, size=(n, 3)).astype(np.float32)
     # Trivial spanning tree edges so the graph is connected enough to
-    # exercise both intra- and cross-chunk links.
+    # exercise both intra- and chunk-spanning links.
     edges = np.stack(
         [np.arange(n - 1, dtype=np.int64), np.arange(1, n, dtype=np.int64)],
         axis=1,
@@ -309,7 +470,7 @@ def _seed_simple_graph(tmp_path: Path) -> Path:
     return store_path
 
 
-def _delta_dirs(root, level: int, prefix: str) -> set[str]:
+def _delta_dirs(root, level: int, prefix: str = LINKS) -> set[str]:
     lg = get_resolution_level(root, level)
     if not lg.array_exists(prefix):
         return set()
@@ -325,11 +486,30 @@ def test_build_pyramid_depth_zero_emits_no_cross_level(tmp_path: Path) -> None:
         cross_level_storage=XLEVEL_NONE,
     )
     root = open_store(str(store_path))
-    levels = list_resolution_levels(root)
-    for lvl in levels:
+    for lvl in list_resolution_levels(root):
         # Only delta=0 (or nothing at all) should exist.
-        assert _delta_dirs(root, lvl, LINKS) <= {"0"}
-        assert _delta_dirs(root, lvl, CROSS_CHUNK_LINKS) <= {"0"}
+        assert _delta_dirs(root, lvl) <= {"0"}
+
+
+def test_build_pyramid_depth_zero_omits_multiscale_capability(
+    tmp_path: Path,
+) -> None:
+    """The token marks delta != 0 arrays only.
+
+    Cross-CHUNK links are just a non-zero offsets segment since the merge,
+    so a store with plenty of them but no cross-LEVEL arrays must not
+    claim it.
+    """
+    store_path = _seed_simple_graph(tmp_path)
+    build_pyramid(
+        store_path,
+        factors=[(2.0, 1.0), (2.0, 1.0)],
+        cross_level_depth=0,
+        cross_level_storage=XLEVEL_NONE,
+    )
+    root = open_store(str(store_path))
+    rmeta = read_root_metadata(root)
+    assert CAP_MULTISCALE_LINKS not in rmeta.format_capabilities
 
 
 def test_build_pyramid_explicit_depth_one(tmp_path: Path) -> None:
@@ -351,14 +531,8 @@ def test_build_pyramid_explicit_depth_one(tmp_path: Path) -> None:
     assert CAP_MULTISCALE_LINKS in rmeta.format_capabilities
 
     # Fine levels carry +1, coarser levels carry -1.
-    has_plus = False
-    has_minus = False
-    for lvl in levels[:-1]:
-        if "+1" in _delta_dirs(root, lvl, LINKS) | _delta_dirs(root, lvl, CROSS_CHUNK_LINKS):
-            has_plus = True
-    for lvl in levels[1:]:
-        if "-1" in _delta_dirs(root, lvl, LINKS) | _delta_dirs(root, lvl, CROSS_CHUNK_LINKS):
-            has_minus = True
+    has_plus = any("+1" in _delta_dirs(root, lvl) for lvl in levels[:-1])
+    has_minus = any("-1" in _delta_dirs(root, lvl) for lvl in levels[1:])
     assert has_plus, "explicit mode must materialize +1 at the finer level"
     assert has_minus, "explicit mode must materialize -1 at the coarser level"
 
@@ -372,169 +546,53 @@ def test_build_pyramid_implicit_only_plus(tmp_path: Path) -> None:
         cross_level_storage=XLEVEL_IMPLICIT,
     )
     root = open_store(str(store_path))
-    levels = sorted(list_resolution_levels(root))
     # No -N arrays anywhere.
-    for lvl in levels:
-        link_deltas = _delta_dirs(root, lvl, LINKS)
-        ccl_deltas = _delta_dirs(root, lvl, CROSS_CHUNK_LINKS)
-        assert all(not d.startswith("-") for d in link_deltas), \
+    for lvl in list_resolution_levels(root):
+        deltas = _delta_dirs(root, lvl)
+        assert all(not d.startswith("-") for d in deltas), \
             f"implicit mode should not emit negative links/<delta> at level {lvl}"
-        assert all(not d.startswith("-") for d in ccl_deltas), \
-            f"implicit mode should not emit negative cross_chunk_links/<delta> at level {lvl}"
 
 
-# ===================================================================
-# v0.8 kN-array layout — shape, direct lookup, canonical ci
-# ===================================================================
+def test_build_pyramid_stamps_num_links(tmp_path: Path) -> None:
+    """finalize_links must run, run last, and run unconditionally.
 
-@pytest.mark.skip(
-    reason="v0.8 partitioned kN-array/leaf CCL layout was replaced by the "
-    "cells/directed/duplicate layout in core (PR #26); these on-disk-shape "
-    "assertions no longer apply. Tools reads/writes CCL via the cells API."
-)
-class TestShardedLayoutV1:
-    """Cover the on-disk shape introduced by the v0.8 kN-array layout.
+    EVERY family must carry num_links, including one whose records are all
+    chunk-aligned: those are written by the per-cell write_chunk_links,
+    which maintains no family-wide counts, so only a finalize pass supplies
+    them.  Do not skip a family that lacks the key — that is the bug.
 
-    Sharding is a recommended writer-side codec choice, not a
-    format-level mandate; readers detect the v0.8 layout structurally
-    (presence of ``kK`` sub-arrays) rather than via a discriminator
-    attribute.
+    num_links matching the record count also proves every cell it counted is
+    discoverable through nonempty_chunks, and that nothing restamped the
+    family meta afterwards and dropped the counts.
     """
+    store_path = _seed_simple_graph(tmp_path)
+    # depth=1 so the inline ±1 cross-level emitter runs; its aligned-only
+    # deltas are exactly the case a per-cell writer leaves uncounted.
+    build_pyramid(
+        store_path,
+        factors=[(2.0, 1.0), (2.0, 1.0)],
+        cross_level_depth=1,
+        cross_level_storage=XLEVEL_EXPLICIT,
+    )
+    root = open_store(str(store_path))
+    seen = 0
+    for lvl in list_resolution_levels(root):
+        lg = get_resolution_level(root, lvl)
+        for delta in list_link_deltas(lg):
+            meta = lg.read_array_meta(links_group_path(delta))
+            assert "num_links" in meta, (
+                f"level {lvl} delta {delta}: finalize_links never stamped "
+                f"num_links (segments={list_link_offsets(lg, delta)})"
+            )
+            assert meta["num_links"] == len(read_links(lg, delta=delta)), (
+                f"level {lvl} delta {delta}: num_links disagrees with reader"
+            )
+            seen += 1
+    assert seen >= 3, "fixture must produce delta=0 and cross-level families"
 
-    def test_no_layout_attr_written_on_group(self, tmp_path: Path) -> None:
-        # The format no longer stamps a ``layout`` discriminator — the
-        # presence of ``kK`` Array children is the structural signal.
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        write_cross_chunk_links(
-            lg, [(((0, 0, 0), 1), ((1, 0, 0), 2))], sid_ndim=3,
-        )
-        meta = lg.read_array_meta(cross_chunk_links_path(0))
-        assert "layout" not in meta
 
-    def test_structural_detection_of_legacy_blob(self, tmp_path: Path) -> None:
-        # Synthesize a legacy single-blob layout and confirm the reader
-        # raises with a migration hint when it encounters one.
-        import zarr
-        from zarr_vectors.core.arrays import read_cross_chunk_links
-        from zarr_vectors.core.group import Group
-        from zarr_vectors.exceptions import ArrayError
-
-        store_path = tmp_path / "legacy.zarrvectors"
-        root = zarr.open_group(store=str(store_path), mode="w")
-        level = root.require_group("0")
-        ccl_group = level.require_group("cross_chunk_links").require_group("0")
-        data_arr = ccl_group.create_array(
-            name="data", shape=(8,), chunks=(8,), dtype="uint8",
-        )
-        data_arr.attrs.update({
-            "zv_array": "cross_chunk_links",
-            "sid_ndim": 3,
-            "level_delta": 0,
-            "link_width": 2,
-        })
-        lg = Group._from_zarr(level)
-        with pytest.raises(ArrayError, match="legacy.*data.*blob"):
-            read_cross_chunk_links(lg, delta=0)
-
-    def test_kN_arrays_exist_per_distinct_K(self, tmp_path: Path) -> None:
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0, link_width=3)
-        records = [
-            # K=2 face: two distinct chunks among three vertices
-            [((0, 0, 0), 1), ((1, 0, 0), 2), ((0, 0, 0), 3)],
-            # K=3 face: three distinct chunks
-            [((0, 0, 0), 4), ((1, 0, 0), 5), ((0, 1, 0), 6)],
-        ]
-        write_cross_chunk_links(
-            lg, records, sid_ndim=3, link_width=3,
-        )
-        # Both k2 and k3 should exist on disk.
-        parent = cross_chunk_links_path(0)
-        children = list(lg.zarr_group[parent])
-        assert "k2" in children
-        assert "k3" in children
-        # k1 should NOT exist (no records had K=1).
-        assert "k1" not in children
-
-    def test_per_leaf_lookup_round_trips(self, tmp_path: Path) -> None:
-        from zarr_vectors.core.arrays import read_cross_chunk_link_leaf
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        records = [
-            (((0, 0, 0), 5), ((1, 0, 0), 2)),
-            (((0, 0, 0), 7), ((2, 0, 0), 3)),
-        ]
-        write_cross_chunk_links(lg, records, sid_ndim=3)
-        # Direct cell read: chunks (0,0,0) + (1,0,0) → 1 record back.
-        leaf = read_cross_chunk_link_leaf(
-            lg, ((0, 0, 0), (1, 0, 0)), delta=0,
-        )
-        assert len(leaf) == 1
-        assert (tuple(leaf[0][0][0]), leaf[0][0][1]) == ((0, 0, 0), 5)
-        assert (tuple(leaf[0][1][0]), leaf[0][1][1]) == ((1, 0, 0), 2)
-
-    def test_canonical_ci_for_l2_delta0(self, tmp_path: Path) -> None:
-        """A record written with the larger chunk first comes back with
-        the smaller chunk as endpoint 0 (ci=[0,1] canonicalization)."""
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        # B > A in lex order; pass B first.
-        a, b = (0, 0, 0), (1, 0, 0)
-        write_cross_chunk_links(
-            lg, [(((b, 5)), ((a, 2)))], sid_ndim=3,
-        )
-        out = read_cross_chunk_links(lg, delta=0)
-        assert len(out) == 1
-        # Endpoint 0 (smaller chunk by lex) should be ((0,0,0), 2),
-        # endpoint 1 should be ((1,0,0), 5).
-        assert tuple(out[0][0][0]) == a and out[0][0][1] == 2
-        assert tuple(out[0][1][0]) == b and out[0][1][1] == 5
-
-    def test_delta_plus_one_preserves_endpoint_order(
-        self, tmp_path: Path,
-    ) -> None:
-        """For delta != 0 the writer must NOT canonicalize; endpoint 0
-        belongs to the owning level, the rest to the target level."""
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=1)
-        # Pass (larger_chunk, ...) first.  This is endpoint 0 (owning).
-        write_cross_chunk_links(
-            lg, [(((1, 0, 0), 7), ((0, 0, 0), 3))],
-            sid_ndim=3, delta=1,
-        )
-        out = read_cross_chunk_links(lg, delta=1)
-        assert len(out) == 1
-        # Endpoint 0 must still be the (1,0,0) side — no canonicalization.
-        assert tuple(out[0][0][0]) == (1, 0, 0) and out[0][0][1] == 7
-        assert tuple(out[0][1][0]) == (0, 0, 0) and out[0][1][1] == 3
-
-    def test_chunk_origin_attr_present_on_kK_arrays(
-        self, tmp_path: Path,
-    ) -> None:
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        write_cross_chunk_links(
-            lg, [(((0, 0, 0), 1), ((1, 0, 0), 2))], sid_ndim=3,
-        )
-        kN_arr = lg.zarr_group[cross_chunk_links_path(0)]["k2"]
-        assert "chunk_origin" in kN_arr.attrs
-
-    def test_list_leaves_enumerates_populated_cells(
-        self, tmp_path: Path,
-    ) -> None:
-        from zarr_vectors.core.arrays import list_cross_chunk_link_leaves
-        lg = _make_level_group(tmp_path)
-        create_cross_chunk_links_array(lg, delta=0)
-        records = [
-            (((0, 0, 0), 1), ((1, 0, 0), 2)),
-            (((0, 0, 0), 3), ((2, 0, 0), 4)),
-        ]
-        write_cross_chunk_links(lg, records, sid_ndim=3)
-        leaves = list_cross_chunk_link_leaves(lg, delta=0)
-        # Two cells, both K=2.
-        assert len(leaves) == 2
-        assert all(len(L) == 2 for L in leaves)
-        # Each cell's chunk-tuple list is sorted lex.
-        for L in leaves:
-            assert L == tuple(sorted(L))
+def test_no_cross_chunk_links_directory_anywhere(tmp_path: Path) -> None:
+    """The merged layout has no second family; nothing may recreate one."""
+    store_path = _seed_simple_graph(tmp_path)
+    build_pyramid(store_path, factors=[(2.0, 1.0)])
+    assert not list(Path(store_path).rglob("cross_chunk_links"))

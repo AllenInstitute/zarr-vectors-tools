@@ -16,10 +16,10 @@ All three materialise the in-memory adjacency once via
 unavoidable (they touch every edge per iteration); for k-core it could
 also be streamed, but uniformity wins.
 
-Cross-chunk edges now carry per-edge weights when the store has a
-matching ``cross_chunk_link_attributes/<weight>/0/`` array; otherwise a
-silent unit-weight fallback applies (matches intra-chunk behaviour for
-a missing attribute).
+Cross-chunk edges are not a special case: connectivity is one family, so
+they take per-edge weights from the same ``link_attributes/<weight>/0/``
+family as intra-chunk edges.  A store with no such family falls back to
+unit weights silently.
 """
 
 from __future__ import annotations
@@ -216,9 +216,9 @@ def compute_louvain(
         store_path: Path to a graph (or skeleton) store.
         level: Resolution level.
         weight: Optional edge-attribute name. ``None`` means unit
-            weights. Cross-chunk edges contribute per-edge weights when
-            the store has a matching ``cross_chunk_link_attributes/<weight>/0/``
-            array; otherwise unit weight is used (silent fallback).
+            weights.  Every edge, intra- or cross-chunk, takes its weight
+            from ``link_attributes/<weight>/0/``; a store without that
+            family uses unit weight (silent fallback).
         max_iter: Maximum number of Phase-1+Phase-2 outer rounds.
         seed: RNG seed for tie-breaking in the local-move order.
 

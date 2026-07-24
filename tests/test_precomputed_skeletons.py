@@ -15,7 +15,7 @@ import tempfile
 import numpy as np
 import pytest
 
-from zarr_vectors.core.arrays import read_cross_chunk_links
+from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.types import skeletons as sk
 
@@ -210,7 +210,7 @@ def test_cross_chunk_edges_merge_fragments_one_level_up(tmp_store):
     r0 = sk.read_skeleton_by_segment_id(tmp_store, seg, level=0)
     assert r0["fragment_count"] == 2
     g0 = get_resolution_level(open_store(tmp_store), 0)
-    assert len(read_cross_chunk_links(g0, delta=0)) == 1
+    assert len(read_cross_links(g0, delta=0)) == 1
 
     # Level 1: merged to one fragment, fully connected (n-1 edges, 1 comp).
     r1 = sk.read_skeleton_by_segment_id(tmp_store, seg, level=1)

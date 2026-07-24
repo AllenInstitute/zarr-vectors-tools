@@ -67,6 +67,31 @@ def _write_trk(path: Path, n: int = 30, seed: int = 0) -> Path:
     return path
 
 
+def _write_smooth_trk(path: Path, n: int = 200, npts: int = 60, seed: int = 0) -> Path:
+    """A .trk of SMOOTH streamlines — the shape real tractography has.
+
+    ``_write_trk`` emits uniform-random points, which carry ~full entropy and
+    do not compress.  Real streamlines advance ~1 voxel per step, so
+    consecutive coordinates are highly correlated; use this whenever a test
+    depends on compressibility rather than just structure.
+    """
+    from nibabel.streamlines import Tractogram
+    from nibabel.streamlines.trk import TrkFile
+
+    rng = np.random.default_rng(seed)
+    streamlines = []
+    for _ in range(n):
+        start = rng.uniform(10, 90, size=3)
+        steps = rng.normal(0, 1.0, size=(npts - 1, 3))
+        pos = np.concatenate([[start], start + np.cumsum(steps, axis=0)])
+        streamlines.append(np.clip(pos, 0.5, 99.5).astype(np.float32))
+    tfile = TrkFile(Tractogram(streamlines=streamlines, affine_to_rasmm=np.eye(4)))
+    tfile.header["dimensions"] = np.array([100, 100, 100], dtype=np.int16)
+    tfile.header["voxel_sizes"] = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    tfile.save(str(path))
+    return path
+
+
 def _levels(store: Path) -> list[int]:
     return list_resolution_levels(open_store(str(store)))
 
@@ -235,6 +260,94 @@ class TestTrk:
         ])
         assert rc == 0
         assert _levels(out) == [0, 1, 2]
+
+    def test_trk_compressor_reaches_the_vertices_array(self, tmp_path):
+        """--compressor must land on `vertices`, which is the whole point.
+
+        create_store warm-creates vertices/vertex_fragments, and a chunk
+        array's codec pipeline is fixed at creation — so a compressor applied
+        only to the ingest's own create_* calls silently skips the largest
+        array in the store (every later create_vertices_array short-circuits
+        on the existing one).  Assert the codec is actually ON vertices, not
+        merely that the ingest accepted the flag.
+
+        Uses SMOOTH streamlines: `_write_trk` emits uniform-random points,
+        which are near-incompressible, and at 600 vertices per-chunk framing
+        overhead makes zstd *larger*.  Real tract coordinates advance ~1 voxel
+        per step, so they compress ~2.4x — this fixture reproduces that shape
+        so the size assertion means something.
+        """
+        pytest.importorskip("nibabel")
+        import json
+
+        sizes = {}
+        for comp in ("none", "zstd"):
+            trk = _write_smooth_trk(tmp_path / f"{comp}.trk")
+            out = tmp_path / f"{comp}.zv"
+            rc = main([
+                "convert", str(trk), str(out), "--num-chunks", "27",
+                "--workers", "1", "--compressor", comp,
+            ])
+            assert rc == 0
+            meta = json.loads((out / "0" / "vertices" / "zarr.json").read_text())
+            names = [c.get("name") for c in meta["codecs"]]
+            if comp == "none":
+                assert names == ["vlen-bytes"], names
+            else:
+                assert "zstd" in names, names
+            sizes[comp] = sum(
+                f.stat().st_size for f in (out / "0" / "vertices").rglob("*")
+                if f.is_file()
+            )
+
+        # And it must actually shrink the payload, not just relabel it.
+        assert sizes["zstd"] < sizes["none"], sizes
+
+    def test_trk_compressor_roundtrips_identically(self, tmp_path):
+        """Compression must be lossless: same polylines, same vertices."""
+        pytest.importorskip("nibabel")
+        from zarr_vectors.types.polylines import read_polylines
+
+        out = {}
+        for comp in ("none", "zstd"):
+            trk = _write_trk(tmp_path / f"rt_{comp}.trk")
+            dest = tmp_path / f"rt_{comp}.zv"
+            assert main([
+                "convert", str(trk), str(dest), "--num-chunks", "27",
+                "--workers", "1", "--compressor", comp,
+            ]) == 0
+            d = read_polylines(str(dest), level=0)
+            out[comp] = (d["polyline_count"], d["vertex_count"])
+        assert out["zstd"] == out["none"], out
+
+    def test_trk_compressor_applies_to_every_pyramid_level(self, tmp_path):
+        """Coarser levels create their OWN arrays, so they need the codec too.
+
+        A chunk array's pipeline is fixed at creation and level 0's codec does
+        not propagate — so the compressor has to be forwarded through
+        build_pyramid -> coarsen_level -> the strategy.  Without that the
+        pyramid levels silently stay raw while level 0 is compressed.
+        """
+        pytest.importorskip("nibabel")
+        import json
+
+        trk = _write_smooth_trk(tmp_path / "pyr.trk")
+        out = tmp_path / "pyr.zv"
+        rc = main([
+            "convert", str(trk), str(out), "--num-chunks", "27",
+            "--workers", "1", "--compressor", "zstd",
+            "--coarsen", "1,1", "--sparsity", "2,2",
+            "--coarsen-mode", "decimate", "--sparsity-strategy", "random",
+        ])
+        assert rc == 0
+        levels = _levels(out)
+        assert levels == [0, 1, 2], levels
+        for lvl in levels:
+            meta = json.loads(
+                (out / str(lvl) / "vertices" / "zarr.json").read_text()
+            )
+            names = [c.get("name") for c in meta["codecs"]]
+            assert "zstd" in names, f"level {lvl} left uncompressed: {names}"
 
 
 # ===================================================================

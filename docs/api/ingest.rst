@@ -52,6 +52,14 @@ TrackVis TRK
    :undoc-members:
    :show-inheritance:
 
+TrackVis TRK (parallel)
+-----------------------
+
+.. automodule:: zarr_vectors_tools.ingest.trk_parallel
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 TRX
 ---
 
@@ -80,6 +88,22 @@ SWC
 ---
 
 .. automodule:: zarr_vectors_tools.ingest.swc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Precomputed skeletons (spatial index)
+-------------------------------------
+
+.. automodule:: zarr_vectors_tools.ingest.precomputed_skeletons
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Precomputed skeletons (plain)
+-----------------------------
+
+.. automodule:: zarr_vectors_tools.ingest.precomputed_plain_skeletons
    :members:
    :undoc-members:
    :show-inheritance:

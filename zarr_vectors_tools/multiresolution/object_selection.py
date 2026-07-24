@@ -14,7 +14,7 @@ Four strategies:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -278,6 +278,7 @@ def apply_sparsity(
     representative_points: npt.NDArray | None = None,
     bin_shape: tuple[float, ...] | float | None = None,
     alive_mask: npt.NDArray[np.bool_] | None = None,
+    relative_to: Literal["original", "alive"] = "original",
 ) -> npt.NDArray[np.int64]:
     """Convenience wrapper: compute target count from sparsity and dispatch.
 
@@ -298,19 +299,28 @@ def apply_sparsity(
         alive_mask: ``(n_objects,)`` boolean — ``True`` for object indices
             that still have data at the source level (e.g. object IDs
             preserved but emptied by an earlier pyramid level's sparsity
-            drop are ``False``).  When given, ``target_count`` is still
-            computed against the full ``n_objects`` (so callers keep the
-            "keep N of the *original* population" semantics), but every
-            strategy's *candidate pool* is restricted to alive objects —
-            without this, ``"random"`` selection has no way to avoid
-            re-"keeping" already-empty objects, silently wasting most of
-            its budget on them once enough earlier levels have dropped
-            objects (the ranking-based strategies — ``"length"`` etc. —
-            happen to dodge this only because a dead object's length/
-            attribute value is degenerate and never wins a top-N rank;
-            that's incidental, not guaranteed for every factor sequence).
-            Omit (default ``None``) to consider every index a candidate,
-            matching prior behavior.
+            drop are ``False``).  When given, every strategy's *candidate
+            pool* is restricted to alive objects — without this,
+            ``"random"`` selection has no way to avoid re-"keeping"
+            already-empty objects, silently wasting most of its budget on
+            them once enough earlier levels have dropped objects (the
+            ranking-based strategies — ``"length"`` etc. — happen to dodge
+            this only because a dead object's length/attribute value is
+            degenerate and never wins a top-N rank; that's incidental, not
+            guaranteed for every factor sequence).  Omit (default ``None``)
+            to consider every index a candidate, matching prior behavior.
+        relative_to: What ``sparsity`` is a fraction *of* — the basis for
+            the target survivor count.  ``"original"`` (default) keeps
+            ``target_count = round(n_objects * sparsity)`` — "keep N of the
+            *original* population", so with ``alive_mask`` a constant
+            ``sparsity`` reselects the same absolute count every level and,
+            once the alive pool has shrunk to it, keeps everything.
+            ``"alive"`` computes ``round(len(candidates) * sparsity)``
+            instead — "keep that fraction of the *surviving* pool", which
+            makes repeated application **cumulative** (each level a fixed
+            fraction of the previous).  Pyramids want ``"alive"``; direct
+            callers that mean an absolute-of-original target keep the
+            default.
 
     Returns:
         Sorted array of kept object indices.
@@ -326,7 +336,8 @@ def apply_sparsity(
     else:
         candidates = np.arange(n_objects, dtype=np.int64)
 
-    target_count = max(1, round(n_objects * sparsity))
+    basis = n_objects if relative_to == "original" else len(candidates)
+    target_count = max(1, round(basis * sparsity))
     target_count = min(target_count, len(candidates))
 
     if strategy == "random":

@@ -15,7 +15,27 @@ copyright = (
     "Forrest Collman, Allen Institute for Brain Sciences."
 )
 author = "BRIDGE Neuroscience"
+# Package version. Independent of the on-disk FORMAT version this package
+# targets, which is ZVF 0.9.0 (the merged links/<delta>/<offsets>/ layout).
 release = "0.2.0"
+version = release
+
+# On-disk format targeted by this release. Single source of truth for the
+# format version quoted throughout the prose.
+#
+# It has to be wired up twice, because the two parsers do not share a
+# substitution mechanism: rst_prolog covers the .rst pages (|zvf_version|),
+# myst_substitutions covers the .md pages ({{ zvf_version }}). rst_prolog
+# alone leaves the literal "|zvf_version|" in the rendered Markdown.
+zvf_format_version = "0.9.0"
+
+rst_prolog = f"""
+.. |zvf_version| replace:: {zvf_format_version}
+"""
+
+myst_substitutions = {
+    "zvf_version": zvf_format_version,
+}
 
 # -- General configuration ----------------------------------------------------
 extensions = [
@@ -25,6 +45,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
     "sphinx.ext.autosectionlabel",
+    "sphinx.ext.extlinks",
     # Markdown support
     "myst_parser",
     # API diagrams
@@ -40,6 +61,7 @@ myst_enable_extensions = [
     "fieldlist",        # field lists
     "tasklist",         # - [ ] checkboxes
     "attrs_inline",     # inline attribute syntax
+    "substitution",     # {{ zvf_version }} - see myst_substitutions above
 ]
 myst_heading_anchors = 3
 
@@ -76,6 +98,19 @@ intersphinx_mapping = {
     # Add a "zarr_vectors" entry here once that site exists.
 }
 
+# extlinks - canonical outbound targets, so the three sibling sites are
+# spelled once here rather than pasted into forty pages.
+#
+#   :zvpy:`getting_started/concepts.html`  -> main library docs
+#   :zvspec:`05-zarr-store-structure.html` -> the specification site
+#   :zvrepo:`blob/main/schema/README.md`   -> the library source repo
+extlinks = {
+    "zvpy":   ("https://zarr-vectors-py.readthedocs.io/en/latest/%s", "%s"),
+    "zvspec": ("https://alleninstitute.github.io/zarr_vectors/%s", "%s"),
+    "zvrepo": ("https://github.com/BRIDGE-Neuroscience/zarr-vectors-py/%s", "%s"),
+}
+extlinks_detect_hardcoded_links = False
+
 # Source suffixes
 source_suffix = {
     ".rst": "restructuredtext",
@@ -104,18 +139,19 @@ html_theme_options = {
     "sidebar_hide_name": False,
     "navigation_with_keys": True,
     "top_of_page_button": "edit",
-    "source_repository": "https://github.com/Andrew-Keenlyside/zarr-vectors-tools/",
+    "source_repository": "https://github.com/AllenInstitute/zarr-vectors-tools/",
     "source_branch": "main",
     "source_directory": "docs/",
 }
 
 html_logo = "_static/logo.png"
+html_favicon = "_static/favicon.png"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 
 # Show "Edit on GitHub" links
 html_context = {
-    "github_user":    "Andrew-Keenlyside",
+    "github_user":    "AllenInstitute",
     "github_repo":    "zarr-vectors-tools",
     "github_version": "main",
     "doc_path":       "docs",

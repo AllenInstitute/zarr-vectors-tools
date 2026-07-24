@@ -10,9 +10,20 @@ from __future__ import annotations
 
 import numpy as np
 
-from zarr_vectors.core.arrays import read_all_object_manifests, read_chunk_vertices
-from zarr_vectors.core.paths import cross_chunk_links_path
-from zarr_vectors.core.store import get_resolution_level, open_store, read_level_metadata
+from zarr_vectors.constants import CAP_MULTISCALE_LINKS, XLEVEL_EXPLICIT
+from zarr_vectors.core.arrays import (
+    list_link_deltas,
+    read_all_object_manifests,
+    read_chunk_vertices,
+)
+from zarr_vectors.core.paths import links_group_path
+from zarr_vectors.core.store import (
+    get_resolution_level,
+    list_resolution_levels,
+    open_store,
+    read_level_metadata,
+    read_root_metadata,
+)
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.multiresolution.strategies.polylines import decimate_polyline
@@ -158,11 +169,11 @@ def test_build_pyramid_decimate_mode_can_drop_streamlines(tmp_path):
     assert len(dropped) == 15
 
 
-def test_cross_chunk_links_group_stamped_with_sid_ndim_even_when_empty(tmp_path):
+def test_links_family_group_stamped_with_sid_ndim_even_when_empty(tmp_path):
     # All streamlines confined to a single (large) chunk, so the coarsened
-    # level has zero cross-chunk-spanning links and write_cross_chunk_links
-    # (which stamps sid_ndim) is never called; create_cross_chunk_links_array
-    # alone must still stamp sid_ndim so readers don't see it as undefined.
+    # level has zero chunk-spanning links and no writer that stamps sid_ndim
+    # is ever called; create_links_family alone must still stamp the policy
+    # so readers don't see it as undefined.
     store = tmp_path / "single_chunk.zv"
     write_polylines(
         str(store),
@@ -173,6 +184,76 @@ def test_cross_chunk_links_group_stamped_with_sid_ndim_even_when_empty(tmp_path)
 
     root = open_store(str(store))
     lvl1 = get_resolution_level(root, 1)
-    meta = lvl1.read_array_meta(cross_chunk_links_path(0))
+    meta = lvl1.read_array_meta(links_group_path(0))
     assert meta.get("sid_ndim") == 3
     assert meta.get("link_width") == 2
+    # directed is family-wide and un-flippable now, so pin it too.
+    assert meta.get("directed") is True
+
+
+def test_no_multiscale_capability_when_no_cross_level_arrays_emitted(tmp_path):
+    """The token marks delta != 0 arrays; a store without any must not claim it.
+
+    The polyline coarsener never emits inline ±1 cross-level links, so a
+    polyline pyramid built with cross_level_depth=1 produces no delta != 0
+    array anywhere — regardless of what cross_level_storage asks for.
+    Stamping optimistically (before knowing whether anything would be
+    emitted) made the store advertise cross-LEVEL links it does not have.
+    """
+    store = tmp_path / "polyline_depth1.zv"
+    write_polylines(
+        str(store),
+        _make_streamlines(seed=4, n=12, vpp=40, extent=200.0),
+        chunk_shape=(50.0, 50.0, 50.0),
+    )
+    build_pyramid(
+        str(store),
+        factors=[(4.0, 1.0)],
+        coarsen_mode="decimate",
+        cross_level_depth=1,
+        cross_level_storage=XLEVEL_EXPLICIT,
+    )
+
+    root = open_store(str(store))
+    deltas = {
+        lvl: list_link_deltas(get_resolution_level(root, lvl))
+        for lvl in list_resolution_levels(root)
+    }
+    emitted = any(d != 0 for ds in deltas.values() for d in ds)
+    stamped = CAP_MULTISCALE_LINKS in read_root_metadata(root).format_capabilities
+    assert stamped == emitted, (
+        f"capability={stamped} but delta!=0 arrays present={emitted} "
+        f"(per-level deltas: {deltas})"
+    )
+
+
+def test_sparsity_pyramid_is_cumulative_per_level(tmp_path):
+    """--sparsity 10 per level drops to 1/10 of the PREVIOUS level each time.
+
+    Regression for the bug where levels 2..N were byte-identical copies of
+    level 1: sparsity targeted a fixed fraction of the ORIGINAL count, so a
+    constant factor kept the same survivors every level after the first.
+    With cumulative sparsity, N -> N/10 -> N/100 -> N/1000.  decimate stride
+    1 keeps every vertex, isolating the object-drop behaviour.
+    """
+    store = tmp_path / "cumulative.zv"
+    write_polylines(
+        str(store),
+        _make_streamlines(seed=7, n=1000, vpp=20, extent=300.0),
+        chunk_shape=(150.0, 150.0, 150.0),
+    )
+    build_pyramid(
+        str(store),
+        factors=[(1.0, 10.0)] * 3,
+        coarsen_mode="decimate",
+        sparsity_strategy="random",
+        sparsity_seed=0,
+    )
+
+    root = open_store(str(store))
+    counts = [
+        sum(1 for m in read_all_object_manifests(get_resolution_level(root, lvl)) if m)
+        for lvl in sorted(list_resolution_levels(root))
+    ]
+    # 1000 -> 100 -> 10 -> 1 (random keeps exactly round(alive / 10)).
+    assert counts == [1000, 100, 10, 1], counts

@@ -65,13 +65,25 @@ def build_factors(
 
 
 @contextmanager
-def executor_ctx(workers: int | None):
-    """Yield a dask executor when ``workers > 1`` (needs the ``parallel`` extra), else ``None``."""
-    if workers and workers > 1:
-        from zarr_vectors_tools.ingest._parallel import dask_executor
+def executor_ctx(workers: int | None, backend: str = "process"):
+    """Yield a parallel executor when ``workers > 1``, else ``None``.
 
-        with dask_executor(workers) as ex:
-            yield ex
+    ``backend="process"`` (default) uses the stdlib process pool — no extra
+    dependency.  ``backend="dask"`` uses a local Dask cluster and needs the
+    ``parallel`` extra (it adds ``scatter`` broadcast of the shared payload,
+    which helps dense levels with a large shared object).
+    """
+    if workers and workers > 1:
+        if backend == "dask":
+            from zarr_vectors_tools.ingest._parallel import dask_executor
+
+            with dask_executor(workers) as ex:
+                yield ex
+        else:
+            from zarr_vectors_tools.ingest._parallel import process_pool_executor
+
+            with process_pool_executor(workers) as ex:
+                yield ex
     else:
         yield None
 

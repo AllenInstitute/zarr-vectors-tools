@@ -4,10 +4,12 @@ Core migrated every per-spatial-chunk item class (``vertices``,
 ``vertex_fragments``, ``links/<delta>``, attribute arrays) to ONE Zarr v3
 vlen-bytes array whose shape is the chunk grid (cells at ``<array>/c/i/j/k``).
 That array keeps a ``nonempty_chunks`` presence manifest maintained by a
-read-modify-write; the tools write per-chunk cells from *parallel worker
-processes*, whose manifest RMWs race and can under-report.  The coordinators
-call :meth:`Group.rebuild_nonempty_manifests` after each parallel phase to
-re-derive the manifest from the on-disk cells.
+read-modify-write.  It is an array *attribute*, so it lives in ``zarr.json``
+and every cell write rewrites a file shared by the whole array.  The tools
+write per-chunk cells from *parallel worker processes*, so those RMWs race.
+The coordinators call
+:func:`zarr_vectors_tools._manifests.rebuild_nonempty_manifests` after each
+parallel phase to re-derive the manifest from the on-disk cells.
 
 These tests assert:
 1. The tools produce the single-array layout on disk (not per-chunk sub-arrays).
@@ -15,6 +17,15 @@ These tests assert:
    every level (the manifest is complete despite the write race).
 3. Negative chunk coordinates (points below the grid origin) enumerate and
    round-trip through the parallel coarsener.
+
+KNOWN FAILURE (2 and 3): core exposes ``record_presence=False`` on
+``write_chunk_links`` but on no other per-chunk writer, so the vertex writes
+cannot opt out of stamping the manifest.  On Windows the concurrent
+``zarr.json`` atomic-renames collide and kill the worker with
+``PermissionError`` before the coordinator's repair pass can run.  The repair
+itself is sound — it recovers every on-disk cell — but it cannot revive a dead
+worker.  See docs/upstream/links-merge-findings.md; this is not a links
+regression (it reproduces with vertices alone).
 """
 
 from __future__ import annotations
@@ -154,3 +165,45 @@ def test_negative_coordinates_enumerate_through_parallel_coarsener(tmp_path):
     assert any(min(cc) < 0 for cc in level1), (
         "negative chunk coord lost through coarsening"
     )
+
+
+def test_dense_parallel_cross_link_pyramid_completes(tmp_path):
+    """A dense, boundary-crossing bundle survives a multi-process pyramid.
+
+    Two Phase-B workers can land records in the SAME
+    ``links/<delta>/<offsets>`` array (same chunk displacement, different
+    source chunk) — the shard partition only guarantees disjoint *cells*.
+    Creating that array concurrently is not safe: the loser of the zarr.json
+    atomic rename dies with ``PermissionError`` on Windows.  The coordinator
+    therefore pre-creates every offsets array before dispatching Phase B.
+
+    HONEST SCOPE: that race is a timing-dependent TOCTOU window, so this test
+    cannot deterministically reproduce it — it passes with the pre-create
+    removed too.  It is a smoke test that the dense parallel path completes
+    and produces links; it catches the failure only intermittently.  The
+    pre-create is justified by construction (workers never create arrays),
+    not by this test.
+    """
+    store = tmp_path / "dense.zv"
+    lines = _random_walk_streamlines(seed=11, n=300, npts=40, extent=300.0, step=12.0)
+    write_polylines(str(store), lines, chunk_shape=(60.0, 60.0, 60.0))
+
+    # Must not raise (pre-fix: PermissionError on links/0/<offsets>/zarr.json).
+    build_pyramid(
+        str(store),
+        factors=[(1.0, 4.0)] * 2,
+        coarsen_mode="decimate",
+        sparsity_strategy="random",
+        sparsity_seed=0,
+        executor=_ppool_executor,
+    )
+
+    from zarr_vectors.core.arrays import read_links
+
+    root = open_store(str(store))
+    for lvl in (0, 1, 2):
+        lg = get_resolution_level(root, lvl)
+        assert _vertex_chunk_set(store, lvl), f"level {lvl}: no chunks"
+        # Links survive the parallel write and are discoverable after
+        # finalize_links re-derives the manifests.
+        assert read_links(lg, delta=0), f"level {lvl}: no links enumerated"

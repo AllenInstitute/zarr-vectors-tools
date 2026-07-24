@@ -36,6 +36,7 @@ import pickle
 import shutil
 import tempfile
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -46,7 +47,7 @@ from zarr_vectors.constants import (
     VERTEX_ATTRIBUTES,
     VERTICES,
 )
-from zarr_vectors_tools.multiresolution._ccl_compat import COARSEN_SKELETON
+from zarr_vectors_tools.multiresolution.constants import COARSEN_SKELETON
 
 
 # ===================================================================
@@ -542,9 +543,7 @@ def _build_local_plan(
     # merges.  Reading the v0.8 partitioned ccl per chunk-pair stays local and,
     # unlike geometric coincidence, handles BOTH coincident boundary vertices
     # AND phase-split (distinct-vertex) cross edges.
-    from zarr_vectors_tools.multiresolution._ccl_compat import (
-        read_cross_chunk_link_leaf,
-    )
+    from zarr_vectors.core.arrays import read_links_for_tuple
 
     child_set = set(child_ranges)
     oid_of_frag: dict = {}
@@ -556,7 +555,7 @@ def _build_local_plan(
     # children (enumerated once by the coordinator and bucketed per target).
     for cell in (ccl_cells or ()):
         try:
-            recs = read_cross_chunk_link_leaf(src, cell, delta=0)
+            recs = read_links_for_tuple(src, cell, delta=0)
         except Exception:
             continue
         for rec in recs:
@@ -814,8 +813,14 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
             pieces = [p for i, p in enumerate(pieces) if keep_mask[i]]
             total_out_vertices = sum(len(p["positions"]) for p in pieces)
 
+    # record_presence=False: this is a per-target-chunk worker that may run in
+    # a separate PROCESS.  ``nonempty_chunks`` is array-wide state, so stamping
+    # it per chunk is a read-modify-write that concurrent workers collide on (a
+    # Windows atomic-rename hard-fail).  The coordinator's
+    # rebuild_nonempty_manifests pass re-derives every manifest after Phase A.
     recs, alocs = write_skeleton_chunk(
         level_group, tcc, pieces, attr_dtypes=attr_dtypes,
+        record_presence=False,
     )
     # Spill object-index refs partitioned by OID shard to avoid a central
     # gather of whole-level ``{oid: manifest}`` structures.
@@ -862,22 +867,24 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
 
 
 def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
-    """Phase B worker: write the cross-target-chunk links for ONE ccl shard.
+    """Phase B worker: write the cross-target-chunk links for ONE task shard.
 
-    Each task owns the adjacent target-chunk pairs whose ``k2`` cells fall in a
-    single outer shard (the coordinator partitions pairs by shard, so writers
-    never collide).  For each pair it matches coincident ``(segment_id, coord)``
-    OUTER-face vertices — the same igneous-style boundary coincidence used at L0 —
-    from the two chunks' sidecars, and writes the link records into the sharded
-    store via :func:`write_cross_chunk_link_cells`.
+    Each task owns a disjoint set of adjacent target-chunk pairs (the
+    coordinator partitions pairs by shard, so writers never collide).  For
+    each pair it matches coincident ``(segment_id, coord)`` OUTER-face
+    vertices — the same igneous-style boundary coincidence used at L0 —
+    from the two chunks' sidecars, and writes the records via
+    :func:`write_link_cells`.
+
+    A record's cell is ``(offsets_segment, source_chunk)``, which maps 1:1
+    to its endpoint pair, so disjoint pairs are disjoint cells and the
+    partition is race-safe for any grouping.
     """
-    from zarr_vectors_tools.multiresolution._ccl_compat import write_cross_chunk_link_cells
+    from zarr_vectors.core.arrays import write_link_cells
     from zarr_vectors.core.store import get_resolution_level, open_store
 
     shared = shared or {}
     ndim = shared["ndim"]
-    cgs = tuple(int(x) for x in shared["chunk_grid_shape"])
-    corigin = tuple(int(x) for x in shared["chunk_origin"])
     sidecar_paths = {
         tuple(int(x) for x in e["tcc"]): str(e["path"])
         for e in payload.get("sidecar_paths", [])
@@ -932,9 +939,19 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
     if links:
         root = open_store(shared["store_path"], mode="r+")
         level_group = get_resolution_level(root, shared["target_level"])
-        write_cross_chunk_link_cells(
-            level_group, links, sid_ndim=ndim,
-            chunk_grid_shape=cgs, chunk_origin=corigin, delta=0, link_width=2,
+        # Writes only the cells these records touch and does NOT maintain
+        # the family-wide counts; the coordinator's finalize_links pass
+        # reconciles them once every worker is done.
+        #
+        # directed=True matches the level-0 skeleton family and drops the
+        # perm_idx column every row would otherwise carry.  It is safe
+        # because the pairs are built as (tcc, tcc + e_a) — always
+        # (lower, higher) — so canonical sorting is a no-op on them and
+        # placement is identical either way.  It means "endpoint order is
+        # (lower, higher) and stable", NOT "endpoint order is data": these
+        # coincidence matches have no parent→child direction.
+        write_link_cells(
+            level_group, links, ndim, delta=0, link_width=2, directed=True,
         )
     return {"n_links": len(links)}
 
@@ -992,6 +1009,7 @@ def coarsen_skeleton_level(
     attr_agg: str = "max",
     drop_interior_below: int = 0,
     boundary_offset_nm: Sequence[float] | None = None,
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Coarsen one skeleton level by uniform per-path decimation.
@@ -1041,10 +1059,9 @@ def coarsen_skeleton_level(
         read_object_attributes,
         write_object_attributes,
     )
-    from zarr_vectors_tools.multiresolution._ccl_compat import (
-        CROSS_CHUNK_LINK_SHARD_AXIS,
-        create_cross_chunk_link_kN_arrays,
-        finalize_cross_chunk_links,
+    from zarr_vectors.core.arrays import create_links_family, finalize_links
+    from zarr_vectors_tools.multiresolution.constants import (
+        CROSS_LINK_TASK_SHARD_AXIS,
     )
     from zarr_vectors.core.metadata import (
         LevelMetadata,
@@ -1163,6 +1180,9 @@ def coarsen_skeleton_level(
         kept = apply_sparsity(
             n_src, 1.0 / sparsity_factor, sparsity_strategy,
             seed=sparsity_seed, lengths=lengths, alive_mask=alive_mask,
+            # Cumulative per level: fraction of the surviving pool, not of
+            # the original count.  See apply_sparsity's `relative_to`.
+            relative_to="alive",
         )
         keep_mask = np.zeros(n_src, dtype=np.uint8)
         keep_mask[np.asarray(kept, dtype=np.int64)] = 1
@@ -1200,13 +1220,36 @@ def coarsen_skeleton_level(
             root, target_level, scale=[1.0] * ndim,
             translation=[float(x) for x in _offset],
         )
-    create_vertices_array(level_group, dtype="float32")
-    create_links_array(level_group, link_width=2, delta=0)
-    create_object_index_array(level_group)
-    create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
-    create_fragment_attribute_array(level_group, "object_id", dtype="uint64")
-    for name in attr_names:
-        create_attribute_array(level_group, name, dtype=str(attr_dtypes[name]))
+    # A chunk array's codec pipeline is fixed when it is created, so the
+    # compressor only has to be active around the create_* calls — every later
+    # per-cell write (Phase A/B workers included) encodes to match.  The block
+    # must CLOSE before any worker dispatch: batched_writes defers array metas
+    # to its flush, and a worker reading an unflushed meta would see nothing.
+    _codec_ctx = (
+        level_group.batched_writes(compressor=compressor)
+        if compressor else nullcontext()
+    )
+    with _codec_ctx:
+        create_vertices_array(level_group, dtype="float32")
+        # directed=True is family-wide at (level, delta=0) and cannot be
+        # flipped later, so the intra array created here and Phase B's cross
+        # cells must agree.  True matches the level-0 skeleton family
+        # (types.skeletons stamps it so parent->child order survives) and
+        # keeps a whole pyramid on one policy.
+        create_links_array(
+            level_group, link_width=2, delta=0, sid_ndim=ndim, directed=True,
+        )
+        create_object_index_array(level_group)
+        create_fragment_attribute_array(
+            level_group, "segment_id", dtype="uint64",
+        )
+        create_fragment_attribute_array(
+            level_group, "object_id", dtype="uint64",
+        )
+        for name in attr_names:
+            create_attribute_array(
+                level_group, name, dtype=str(attr_dtypes[name]),
+            )
 
     # Pre-create the kN cross-chunk-link arrays with LEVEL-WIDE dims so Phase-B
     # workers only WRITE cells (no create-race) and every writer agrees on the
@@ -1218,9 +1261,11 @@ def coarsen_skeleton_level(
     chunk_grid_shape = tuple(
         int(max(1, int(cmax[a]) - chunk_origin[a] + 1)) for a in range(ndim)
     )
-    create_cross_chunk_link_kN_arrays(
-        level_group, sid_ndim=ndim, link_width=2,
-        chunk_grid_shape=chunk_grid_shape, chunk_origin=chunk_origin, max_K=2,
+    # Fix the family policy up front so the decentralized Phase B workers
+    # agree on it rather than racing to establish it.  No offsets array is
+    # materialised here: which ones exist depends on where the records land.
+    create_links_family(
+        level_group, delta=0, link_width=2, sid_ndim=ndim, directed=True,
     )
 
     # --- Phase A: decimate each target chunk (workers self-plan locally) ---
@@ -1251,14 +1296,12 @@ def coarsen_skeleton_level(
     }
     # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
     # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
-    # a per-target-per-child list_cross_chunk_link_leaves() scan
-    # (O(target_chunks × children × cells)) with a single O(cells) pass; workers
-    # then read only their bucket's cells.
-    from zarr_vectors_tools.multiresolution._ccl_compat import (
-        list_cross_chunk_link_leaves,
-    )
+    # a per-target-per-child cell scan (O(target_chunks × children × cells))
+    # with a single O(cells) pass; workers then read only their bucket's cells.
+    from zarr_vectors_tools.algorithms._links import list_link_cells
+
     cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
-    for cell in list_cross_chunk_link_leaves(src, delta=0):
+    for cell in list_link_cells(src, delta=0):
         seen_t: set = set()
         for c in cell:
             t = tuple(int(c[a]) // scale[a] for a in range(ndim))
@@ -1385,9 +1428,13 @@ def coarsen_skeleton_level(
     # processes, whose per-array ``nonempty_chunks`` manifest RMWs race and can
     # under-report.  Re-derive them single-process from the on-disk cells so the
     # next level's coarsening source scan and the algorithms readers see every
-    # chunk.  (Phase B below only touches the per-cell cross-chunk-link group,
-    # which carries no such manifest.)
-    level_group.rebuild_nonempty_manifests()
+    # chunk.  Phase B's cross-link cells are NOT covered here — under the merged
+    # layout they are ordinary chunk-grid arrays that carry (and race on) the
+    # same manifest, so their rebuild belongs to the ``finalize_links`` call
+    # after Phase B, which re-derives it per offsets segment.
+    from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
+
+    rebuild_nonempty_manifests(level_group)
 
     # --- Phase B: cross-target links, decentralized per ccl shard -------
     # Each adjacent target-chunk pair's k2 cell falls in one outer shard; group
@@ -1396,7 +1443,7 @@ def coarsen_skeleton_level(
     # coincident OUTER-face vertices (sidecars) and write their shard's cells.
     tcc_set = set(target_chunks)
     shard_shape = tuple(
-        min(CROSS_CHUNK_LINK_SHARD_AXIS, chunk_grid_shape[i % ndim])
+        min(CROSS_LINK_TASK_SHARD_AXIS, chunk_grid_shape[i % ndim])
         for i in range(2 * ndim)
     )
     shard_pairs: dict = defaultdict(list)
@@ -1447,11 +1494,14 @@ def coarsen_skeleton_level(
     finally:
         shutil.rmtree(sidecar_tmp_dir, ignore_errors=True)
 
-    # Reconcile the cross-chunk-link family counts after the decentralized
-    # per-cell writes above (the core cells layout defers count metadata to a
-    # finalize pass; the old kN-array layout self-described so needed none).
-    if n_cross:
-        finalize_cross_chunk_links(level_group, delta=0)
+    # Reconcile the whole links/0 family after the decentralized per-cell
+    # writes above: recompute num_links and re-derive each offsets array's
+    # nonempty_chunks from the store listing.  Unconditional, not gated on
+    # n_cross: the family also holds Phase A's intra links, which carry no
+    # counts of their own, so a level with zero cross links would otherwise
+    # get no num_links stamp at all.  Must be the last writer of family
+    # meta — a later create_links_* would drop the counts it merges in.
+    finalize_links(level_group, delta=0)
 
     _timings["finalize"] = _time.perf_counter() - _tfin
     _timings["total"] = _time.perf_counter() - _t0
@@ -1487,6 +1537,7 @@ def build_skeleton_pyramid(
     attr_agg: str = "max",
     drop_interior_below: int = 0,
     boundary_offset_nm: Sequence[float] | None = None,
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Build a skeleton pyramid by repeated :func:`coarsen_skeleton_level`.
@@ -1515,10 +1566,17 @@ def build_skeleton_pyramid(
             sparsity_factor=float(spf),
             chunk_scale_factor=csf,
             sparsity_strategy=sparsity_strategy,
-            sparsity_seed=sparsity_seed,
+            # Advance the seed per level so "random" sparsity differs each
+            # level (see build_pyramid).
+            sparsity_seed=(
+                None if sparsity_seed is None else int(sparsity_seed) + i
+            ),
             attr_agg=attr_agg,
             drop_interior_below=int(drop_interior_below or 0),
             boundary_offset_nm=boundary_offset_nm,
+            # Each level's codec is fixed at its own array creation, so the
+            # compressor is forwarded per level.
+            compressor=compressor,
             executor=executor,
         ))
     return {"levels": summaries, "num_levels": n + 1}

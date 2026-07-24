@@ -2,9 +2,21 @@
 
 Frontier search over a chunked graph (or skeleton) store. Both
 algorithms in this module use the same in-memory adjacency map, built
-once per call via the internal `build_adjacency` helper — intra-chunk
-edges are resolved using `zarr_vectors.spatial.boundary.chunk_local_to_global_offsets`,
-and cross-chunk edges are merged in from `read_cross_chunk_links`.
+once per call via the internal `build_adjacency` helper.
+
+At format {{ zvf_version }} connectivity is a single family, so
+`build_adjacency` performs **one whole-family `read_links(delta=0)`**
+rather than a per-chunk pass followed by a separate cross-chunk merge.
+Edge weights come from `read_link_attributes(level_group, weight_attr,
+delta=0)`, aligned row-for-row with the links by shared `(segment, cell)`
+enumeration order; a length mismatch falls back to unit weights.
+
+:::{warning}
+Older code and notes describe merging cross-chunk edges in from
+`read_cross_chunk_links`. That reader no longer exists, and reproducing
+the pattern against the merged family double-counts every intra-chunk
+edge. See the double-count trap in [Algorithms](index.md).
+:::
 
 ## `bfs_distances` — unweighted BFS
 

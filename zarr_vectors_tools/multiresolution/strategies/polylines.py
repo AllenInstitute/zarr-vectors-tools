@@ -18,6 +18,7 @@ from __future__ import annotations
 import pickle
 import shutil
 import tempfile
+from contextlib import nullcontext
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -340,8 +341,8 @@ def coarsen_polylines(
 # - Streamlines carry no branch structure, so intra-object connectivity
 #   is a simple chain, not a general graph.
 # - Every fragment boundary (source-level ``_build_manifests_and_cross_links``)
-#   is stored as an EXPLICIT, DIRECTED ``cross_chunk_links`` record
-#   (predecessor endpoint 0 -> successor endpoint 1).  This lets a
+#   is stored as an EXPLICIT, DIRECTED links/0 record with a non-zero
+#   offsets segment (predecessor endpoint 0 -> successor endpoint 1).  This lets a
 #   target-chunk worker recover object order (and walk direction) purely
 #   from local reads, without ever touching a global object manifest —
 #   geometric boundary-vertex coincidence (as skeletons.py falls back to)
@@ -383,9 +384,7 @@ def _build_local_polyline_plan(
         read_chunk_fragment_attributes,
         read_chunk_vertices,
     )
-    from zarr_vectors_tools.multiresolution._ccl_compat import (
-        read_cross_chunk_link_leaf,
-    )
+    from zarr_vectors.core.arrays import read_links_for_tuple
     from zarr_vectors.exceptions import ArrayError
 
     tcc = tuple(int(x) for x in tcc)
@@ -466,7 +465,7 @@ def _build_local_polyline_plan(
     # children (enumerated once by the coordinator and bucketed per target).
     for cell in (ccl_cells or ()):
         try:
-            recs = read_cross_chunk_link_leaf(src, cell, delta=0)
+            recs = read_links_for_tuple(src, cell, delta=0)
         except Exception:
             continue
         for rec in recs:
@@ -631,16 +630,26 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
 
     recs: list[tuple[int, int]] = []
     if pieces:
-        write_chunk_vertices(level_group, tcc, [p[1] for p in pieces], dtype=np.float32)
+        # record_presence=False: these run in parallel worker PROCESSES, and
+        # nonempty_chunks is an array-wide attribute, so stamping it here would
+        # race across workers (a Windows hard-fail on the zarr.json rename).
+        # The coordinator's rebuild_nonempty_manifests pass re-derives the
+        # manifests once, after Phase A, from the on-disk cells.
+        write_chunk_vertices(
+            level_group, tcc, [p[1] for p in pieces], dtype=np.float32,
+            record_presence=False,
+        )
         seg_ids = np.array([p[0] for p in pieces], dtype=np.uint64)
-        write_chunk_fragment_attributes(level_group, "segment_id", tcc, seg_ids, dtype=np.uint64)
+        write_chunk_fragment_attributes(
+            level_group, "segment_id", tcc, seg_ids, dtype=np.uint64,
+            record_presence=False,
+        )
         recs = [(int(p[0]), fidx) for fidx, p in enumerate(pieces)]
 
     # Spill object-index refs partitioned by OID shard (Phase C reduces these
     # without ever gathering a whole-level {oid: manifest} structure).
     oid_shards = int(shared.get("oid_reduce_shards", 1) or 1)
     oid_tmp_dir = str(shared.get("oid_reduce_tmp_dir", ""))
-    sidecar_tmp_dir = str(shared.get("sidecar_tmp_dir", ""))
     shard_rows: dict[int, list[tuple[int, int]]] = defaultdict(list)
     for oid, fidx in recs:
         shard_rows[oid % oid_shards].append((oid, fidx))
@@ -653,13 +662,16 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
             np.save(path, arr, allow_pickle=False)
             shard_files.append((int(shard), str(path)))
 
-    sidecar_path = None
-    if sidecar_tmp_dir and sc_rows:
-        arr = np.asarray(sc_rows, dtype=np.int64).reshape(-1, 2 * ndim + 4)
-        tcc_tag = ".".join(str(int(x)) for x in tcc)
-        p = Path(sidecar_tmp_dir) / f"{tcc_tag}.anchors.npy"
-        np.save(p, arr, allow_pickle=False)
-        sidecar_path = str(p)
+    # Cross-target anchor rows travel back inline in the result dict rather
+    # than through a per-chunk .npy sidecar: the coordinator forwards them
+    # straight into the Phase B payloads.  The total is O(cross-chunk
+    # crossings) — far smaller than vertex volume — so it fits in RAM, and
+    # this removes thousands of tiny-file writes/reads/deletes (a real
+    # serial cost, and a Windows handle-churn hazard).
+    anchors = (
+        np.asarray(sc_rows, dtype=np.int64).reshape(-1, 2 * ndim + 4)
+        if sc_rows else None
+    )
 
     return {
         "tcc": tcc,
@@ -668,7 +680,7 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         "input_objects": input_objects,
         "fragment_count": int(len(recs)),
         "oid_shards": shard_files,
-        "sidecar_path": sidecar_path,
+        "anchors": anchors,
         "partners": [list(p) for p in partners],
         "vertex_count": int(total_out_vertices),
     }
@@ -685,16 +697,16 @@ def _polyline_cross_edge_shard(payload: dict, shared: dict | None = None) -> dic
     the written link — this is what a plain undirected coincidence match
     (as skeletons.py Phase B does) cannot supply on its own.
     """
-    from zarr_vectors_tools.multiresolution._ccl_compat import write_cross_chunk_link_cells
+    from zarr_vectors.core.arrays import write_link_cells
     from zarr_vectors.core.store import get_resolution_level, open_store
 
     shared = shared or {}
     ndim = int(shared["ndim"])
-    cgs = tuple(int(x) for x in shared["chunk_grid_shape"])
-    corigin = tuple(int(x) for x in shared["chunk_origin"])
-    sidecar_paths = {
-        tuple(int(x) for x in e["tcc"]): str(e["path"])
-        for e in payload.get("sidecar_paths", [])
+    # Anchor rows arrive inline (see _coarsen_polyline_target_chunk), keyed by
+    # source target-chunk; no per-chunk .npy sidecar to load.
+    sidecar_arrays = {
+        tuple(int(x) for x in e["tcc"]): e["arr"]
+        for e in payload.get("anchors", [])
     }
     pairs = payload["pairs"]
     link_w = 2 * ndim + 2
@@ -715,11 +727,11 @@ def _polyline_cross_edge_shard(payload: dict, shared: dict | None = None) -> dic
     def _load_sorted(cc: tuple[int, ...]):
         if cc in sorted_cache:
             return sorted_cache[cc]
-        path = sidecar_paths.get(cc)
-        if path is None:
+        raw = sidecar_arrays.get(cc)
+        if raw is None:
             sorted_cache[cc] = None
             return None
-        arr = np.asarray(np.load(path, allow_pickle=False), dtype=np.int64)
+        arr = np.asarray(raw, dtype=np.int64)
         if arr.size == 0:
             sorted_cache[cc] = None
             return None
@@ -763,10 +775,15 @@ def _polyline_cross_edge_shard(payload: dict, shared: dict | None = None) -> dic
     if links:
         root = open_store(shared["store_path"], mode="r+")
         level_group = get_resolution_level(root, shared["target_level"])
-        write_cross_chunk_link_cells(
-            level_group, links, sid_ndim=ndim,
-            chunk_grid_shape=cgs, chunk_origin=corigin, delta=0, link_width=2,
-            directed=True,
+        # Writes only the cells these records touch and does NOT maintain
+        # the family-wide counts; the coordinator's finalize_links pass
+        # reconciles them once every worker is done.
+        #
+        # directed=True is load-bearing here: endpoint order IS the data
+        # (predecessor -> successor, chosen by role above), so a canonical
+        # sort would destroy it.
+        write_link_cells(
+            level_group, links, ndim, delta=0, link_width=2, directed=True,
         )
     return {"n_links": len(links)}
 
@@ -783,6 +800,7 @@ def coarsen_polyline_level(
     sparsity_seed: int | None = None,
     coarsen_mode: str = "rdp",
     simplify_epsilon: float | None = None,
+    compressor: Any = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """Coarsen one streamline/polyline level, chunk-local and executor-parallel.
@@ -830,11 +848,13 @@ def coarsen_polyline_level(
         read_level_metadata,
         read_root_metadata,
     )
-    from zarr_vectors_tools.multiresolution._ccl_compat import (
-        CROSS_CHUNK_LINK_SHARD_AXIS,
-        create_cross_chunk_link_kN_arrays,
-        finalize_cross_chunk_links,
-        stamp_ccl_capabilities,
+    from zarr_vectors.core.arrays import (
+        create_links_array,
+        create_links_family,
+        finalize_links,
+    )
+    from zarr_vectors_tools.multiresolution.constants import (
+        CROSS_LINK_TASK_SHARD_AXIS,
     )
     from zarr_vectors_tools.multiresolution.coarsen import _stamp_root_capability
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
@@ -933,6 +953,10 @@ def coarsen_polyline_level(
         kept = apply_sparsity(
             n_src, 1.0 / sparsity_factor, sparsity_strategy,
             seed=sparsity_seed, lengths=lengths, alive_mask=alive_mask,
+            # Cumulative: keep 1/sparsity_factor of the SURVIVING objects, so
+            # a repeated factor sparsifies each level relative to the previous
+            # one (503k -> 50k -> 5k -> ...), not relative to the original.
+            relative_to="alive",
         )
         keep_mask = np.zeros(n_src, dtype=np.uint8)
         keep_mask[np.asarray(kept, dtype=np.int64)] = 1
@@ -971,9 +995,22 @@ def coarsen_polyline_level(
         shared_fragments=False,
     )
     level_group = create_resolution_level(root, target_level, level_meta)
-    create_vertices_array(level_group, dtype="float32")
-    create_object_index_array(level_group)
-    create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
+    # A chunk array's codec pipeline is fixed when it is created, so the
+    # compressor only has to be active around the create_* calls — every later
+    # per-cell write (Phase A/B workers included, in their own processes)
+    # encodes to match via zarr's array API.  The `with` block must CLOSE
+    # before any worker dispatch: batched_writes defers array metas to its
+    # flush, and a worker that reads an unflushed meta would see nothing.
+    _codec_ctx = (
+        level_group.batched_writes(compressor=compressor)
+        if compressor else nullcontext()
+    )
+    with _codec_ctx:
+        create_vertices_array(level_group, dtype="float32")
+        create_object_index_array(level_group)
+        create_fragment_attribute_array(
+            level_group, "segment_id", dtype="uint64",
+        )
 
     # Pre-create the kN cross-chunk-link arrays with LEVEL-WIDE dims so
     # Phase-B workers only WRITE cells (no create-race).
@@ -984,17 +1021,21 @@ def coarsen_polyline_level(
     chunk_grid_shape = tuple(
         int(max(1, int(cmax[a]) - chunk_origin[a] + 1)) for a in range(ndim)
     )
-    # min_K=2: a genuine cross-target transition always connects two
-    # DIFFERENT target chunks (never the same one), so streamlines can
-    # never produce a K=1 (same-chunk) cross-chunk-link record.  Skip
-    # pre-creating k1 entirely — an empty-but-existing kN array (zarr.json
-    # present, zero shard files) makes neuroglancer's reader 404 and fail
-    # the whole chunk download instead of treating it as "no records",
-    # which cascades into the LOD picker falling back to level 0.
-    create_cross_chunk_link_kN_arrays(
-        level_group, sid_ndim=ndim, link_width=2,
-        chunk_grid_shape=chunk_grid_shape, chunk_origin=chunk_origin,
-        min_K=2, max_K=2, directed=True,
+    # Fix the family policy up front so the decentralized Phase-B workers
+    # agree on it rather than racing to establish it.  This stamps the
+    # links/0 GROUP only and materialises no offsets array, which is what
+    # this family wants: polyline connectivity is implicit-sequential
+    # within a fragment, so there are no intra records and the only arrays
+    # that should ever appear here are the ones Phase B's records land in.
+    # (An empty-but-existing array — zarr.json present, zero cells — makes
+    # neuroglancer's reader 404 and fail the whole chunk download instead
+    # of treating it as "no records", which cascades into the LOD picker
+    # falling back to level 0.)
+    #
+    # directed=True because endpoint order is the data here: a record is
+    # predecessor -> successor, and a canonical sort would destroy it.
+    create_links_family(
+        level_group, delta=0, link_width=2, sid_ndim=ndim, directed=True,
     )
 
     # Scale shard count with the dense OID space instead of a fixed 64: a
@@ -1006,7 +1047,6 @@ def coarsen_polyline_level(
     # file-handle overhead for no benefit.
     oid_reduce_shards = max(64, min(4096, -(-n_src // 20_000)))
     oid_reduce_tmp_dir = tempfile.mkdtemp(prefix=f"polyline_oid_reduce_l{target_level}_")
-    sidecar_tmp_dir = tempfile.mkdtemp(prefix=f"polyline_sidecar_l{target_level}_")
 
     sharedA = {
         "store_path": str(store_path),
@@ -1020,18 +1060,15 @@ def coarsen_polyline_level(
         "simplify_epsilon": simplify_epsilon,
         "oid_reduce_shards": int(oid_reduce_shards),
         "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
-        "sidecar_tmp_dir": str(sidecar_tmp_dir),
     }
     # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
     # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
-    # a per-target-per-child list_cross_chunk_link_leaves() scan
-    # (O(target_chunks × children × cells)) with a single O(cells) pass; workers
-    # then read only their bucket's cells.
-    from zarr_vectors_tools.multiresolution._ccl_compat import (
-        list_cross_chunk_link_leaves,
-    )
+    # a per-target-per-child cell scan (O(target_chunks × children × cells))
+    # with a single O(cells) pass; workers then read only their bucket's cells.
+    from zarr_vectors_tools.algorithms._links import list_link_cells
+
     cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
-    for cell in list_cross_chunk_link_leaves(src, delta=0):
+    for cell in list_link_cells(src, delta=0):
         seen_t: set = set()
         for c in cell:
             t = tuple(int(c[a]) // scale[a] for a in range(ndim))
@@ -1051,16 +1088,16 @@ def coarsen_polyline_level(
 
         total_out_vertices = 0
         total_fragments = 0
-        sidecar_paths: dict[tuple[int, ...], str] = {}
+        sidecar_arrays: dict[tuple[int, ...], np.ndarray] = {}
         shard_entries: dict[int, list[dict[str, Any]]] = defaultdict(list)
         cross_target_pairs: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
         for res in resultsA:
             total_fragments += int(res["fragment_count"])
             total_out_vertices += int(res["vertex_count"])
             tcc = tuple(int(x) for x in res["tcc"])
-            sp = res.get("sidecar_path")
-            if sp:
-                sidecar_paths[tcc] = str(sp)
+            anchors = res.get("anchors")
+            if anchors is not None and len(anchors):
+                sidecar_arrays[tcc] = anchors
             for shard, path in res.get("oid_shards", []):
                 shard_entries[int(shard)].append({"tcc": list(tcc), "path": str(path)})
             # Cross-target anchors report their OTHER target chunk directly —
@@ -1128,16 +1165,50 @@ def coarsen_polyline_level(
     # processes, whose per-array ``nonempty_chunks`` manifest RMWs race and can
     # under-report.  Re-derive them single-process from the on-disk cells so the
     # next level's coarsening source scan and the algorithms readers see every
-    # chunk.  (Phase B below only touches the per-cell cross-chunk-link group,
-    # which carries no such manifest.)
-    level_group.rebuild_nonempty_manifests()
+    # chunk.  Phase B's link cells are NOT covered here — under the merged
+    # layout they are ordinary chunk-grid arrays that carry (and race on) the
+    # same manifest, so their rebuild belongs to the ``finalize_links`` call
+    # after Phase B, which re-derives it per offsets segment.
+    from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
+
+    rebuild_nonempty_manifests(level_group)
 
     # --- Phase B: cross-target links, decentralized per ccl shard ---------
     # ``cross_target_pairs`` (gathered above from Phase A's actual reports)
     # already IS the set of chunk pairs needing a stitch — no grid-adjacency
     # scan needed (and none would suffice; see the comment above).
+    #
+    # Pre-create every offsets ARRAY the Phase B workers will write into,
+    # serially, up front.  The shard partition gives each worker disjoint
+    # CELLS, but two workers in different shards can still land records in the
+    # SAME offsets array (same displacement, different source chunk) — and
+    # ``create_links_array`` is not concurrency-safe on the array's zarr.json
+    # (a Windows atomic-rename hard-fail).  A cross-target pair (A, B) yields
+    # a record sourced at A with offset B-A or sourced at B with offset A-B
+    # (the direction is the streamline's), so both displacement arrays are
+    # possible; creating both here (empty ones are harmless — finalize_links
+    # counts them as zero) means workers only ever WRITE cells, never create.
+    cross_offsets: set[tuple[int, ...]] = set()
+    for A, B in cross_target_pairs:
+        off = tuple(int(B[i]) - int(A[i]) for i in range(ndim))
+        cross_offsets.add(off)
+        cross_offsets.add(tuple(-x for x in off))
+    # Same codec session as the level's other arrays: these are created here,
+    # after Phase A, so they need their own block — and it must close before
+    # the Phase B dispatch below.
+    _link_codec_ctx = (
+        level_group.batched_writes(compressor=compressor)
+        if compressor else nullcontext()
+    )
+    with _link_codec_ctx:
+        for off in sorted(cross_offsets):
+            create_links_array(
+                level_group, link_width=2, delta=0, sid_ndim=ndim,
+                offsets=(off,), directed=True,
+            )
+
     shard_shape = tuple(
-        min(CROSS_CHUNK_LINK_SHARD_AXIS, chunk_grid_shape[i % ndim])
+        min(CROSS_LINK_TASK_SHARD_AXIS, chunk_grid_shape[i % ndim])
         for i in range(2 * ndim)
     )
     shard_pairs: dict[tuple[int, ...], list] = defaultdict(list)
@@ -1148,58 +1219,46 @@ def coarsen_polyline_level(
         shard_pairs[shard].append((tcc, nb))
 
     n_cross = 0
-    try:
-        if shard_pairs:
-            payloadsB = []
-            for _shard, sps in shard_pairs.items():
-                need: set = set()
-                for A, B in sps:
-                    need.add(A)
-                    need.add(B)
-                sc_sub = [
-                    {"tcc": list(c), "path": sidecar_paths[c]}
-                    for c in need if c in sidecar_paths
-                ]
-                payloadsB.append({
-                    "pairs": [(list(A), list(B)) for A, B in sps],
-                    "sidecar_paths": sc_sub,
-                })
-            sharedB = {
-                "store_path": str(store_path),
-                "target_level": int(target_level),
-                "ndim": int(ndim),
-                "chunk_grid_shape": list(chunk_grid_shape),
-                "chunk_origin": list(chunk_origin),
-            }
-            for rb in executor(_polyline_cross_edge_shard, payloadsB, sharedB):
-                n_cross += int(rb.get("n_links", 0))
-            if n_cross:
-                finalize_cross_chunk_links(level_group, delta=0)
-                stamp_ccl_capabilities(root)
-    finally:
-        shutil.rmtree(sidecar_tmp_dir, ignore_errors=True)
+    if shard_pairs:
+        payloadsB = []
+        for _shard, sps in shard_pairs.items():
+            need: set = set()
+            for A, B in sps:
+                need.add(A)
+                need.add(B)
+            # Forward each needed chunk's anchor array inline; only the chunks
+            # this shard's pairs touch are carried, so a worker never receives
+            # the whole level's anchors.
+            sc_sub = [
+                {"tcc": list(c), "arr": sidecar_arrays[c]}
+                for c in need if c in sidecar_arrays
+            ]
+            payloadsB.append({
+                "pairs": [(list(A), list(B)) for A, B in sps],
+                "anchors": sc_sub,
+            })
+        sharedB = {
+            "store_path": str(store_path),
+            "target_level": int(target_level),
+            "ndim": int(ndim),
+            "chunk_grid_shape": list(chunk_grid_shape),
+            "chunk_origin": list(chunk_origin),
+        }
+        for rb in executor(_polyline_cross_edge_shard, payloadsB, sharedB):
+            n_cross += int(rb.get("n_links", 0))
 
-    if n_cross == 0:
-        # The kN arrays were pre-created (to give decentralized Phase-B
-        # workers a race-free place to write cells) before it was known
-        # whether this level would have ANY cross-target transitions — a
-        # coarse enough level can easily end up as a single chunk (no
-        # cross-chunk transitions are even possible) or otherwise produce
-        # zero links.  Left in place, that's a `cross_chunk_links/0/k2`
-        # array with valid metadata but zero shard files on disk, which
-        # neuroglancer's reader 404s on and fails outright (the same
-        # failure mode fixed for the never-populated k1 array — this is
-        # the k2 side of the same problem).  Remove only the kN
-        # sub-ARRAYS (each k{K} is a zarr array, not a group — the
-        # existing `_clear_kN_arrays` helper looks for group children via
-        # `list_subgroups` and silently finds nothing here, so it can't
-        # be reused) — NOT the parent cross_chunk_links/0 group itself,
-        # whose own meta (sid_ndim, link_width, directed) readers expect
-        # to find even on an empty/no-links level.
-        from zarr_vectors.core.arrays import cross_chunk_links_path
-        parent = cross_chunk_links_path(0)
-        for K in range(1, 3):
-            level_group.delete_subtree(f"{parent}/k{K}")
+    # Reconcile the links/0 family after the decentralized per-cell writes:
+    # recompute num_links and re-derive each offsets array's nonempty_chunks
+    # from the store listing.  Runs after every Phase-B worker has finished,
+    # once, and must be the last writer of family meta.
+    #
+    # Unconditional, not gated on n_cross: a level with zero cross-target
+    # transitions (a coarse level can collapse to a single chunk) still needs
+    # its counts stamped, and write_link_cells creates an offsets array only
+    # for records that exist — so zero links leaves zero arrays and there is
+    # nothing empty for a reader to 404 on.  create_links_family above already
+    # left the group meta readers expect to find on an empty level.
+    finalize_links(level_group, delta=0)
 
     _stamp_root_capability(root, CAP_PRESERVED_OBJECT_IDS)
 

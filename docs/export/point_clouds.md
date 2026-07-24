@@ -1,74 +1,71 @@
 # Point clouds
 
-Two export targets for the ZVF point-cloud geometry: CSV / XYZ text and
-PLY (binary or ASCII).
+Two targets for the ZVF `points` geometry: delimited text via `export_csv`
+and PLY via `export_ply`.
 
 ## CSV / XYZ — `export_csv`
 
 ```python
-from zarr_vectors_tools.export import export_csv
+from zarr_vectors_tools.export.csv_points import export_csv
 
-export_csv(
-    store_path="cloud.zv",
-    output_path="cloud.csv",
-    bbox=([-100.0]*3, [100.0]*3),
-    attribute_names=["intensity", "classification"],
+summary = export_csv(
+    "cloud.zv",                 # store_path
+    "cloud.csv",                # output_path
+    level=0,                    # resolution level to read
+    bbox=([-100.0] * 3, [100.0] * 3),   # (low_corner, high_corner)
+    object_ids=[3, 5],          # keep only these objects; AND-ed with bbox
+    chunks=None,                # whitelist of chunk-coordinate tuples
+    delimiter=",",              # column separator
+    header=True,                # write a header row
+    attribute_names=["intensity"],      # extra columns; None = positions only
 )
+summary["vertex_count"]         # → int
 ```
 
-Returns `{"vertex_count": int}`.
+Position columns are named `dim0`, `dim1`, … by the number of dimensions
+in the store, not `x`/`y`/`z`. An attribute is written as one column
+under its own name if it is 1-D, and as `<name>_0`, `<name>_1`, … if it
+has multiple channels. Values are written through `numpy.savetxt` with
+`fmt="%.6f"`, so every column — including integer attributes such as
+`classification` — lands as a fixed six-decimal float.
 
-**Notable options**
-
-`level`
-: Resolution level to export. Defaults to `0` (full resolution).
-
-`bbox`
-: `(low_corner, high_corner)` tuple. Only vertices inside are kept.
-
-`object_ids`
-: List of object IDs to keep. AND-ed with `bbox` / `chunks`.
-
-`chunks`
-: Whitelist of chunk-coordinate tuples; only data stored in those
-  chunks is exported.
-
-`delimiter`, `header`
-: Output formatting controls. `header=True` (default) writes a header
-  row with `dim0/dim1/dim2` plus any attribute columns.
-
-`attribute_names`
-: List of attribute names to include as extra columns. Default `None`
-  means positions only. Multi-channel attributes (e.g. `color`) expand
-  to `<name>_0`, `<name>_1`, … columns.
-
-If the source store was ingested with `ingest_csv(..., normalise=True)`,
-the offset/scale in the [`CSVHeader`](../headers.md) is applied during
-export so the output coordinates match the original file.
+:::{note}
+`attribute_names` is both the filter and the column order: an attribute
+present in the store but absent from the list is not written, and a name
+in the list that the store does not carry is silently skipped rather than
+raising.
+:::
 
 ## PLY — `export_ply`
 
 ```python
-from zarr_vectors_tools.export import export_ply
+from zarr_vectors_tools.export.ply import export_ply
 
-export_ply(
-    store_path="cloud.zv",
-    output_path="cloud.ply",
-    attribute_names=["color", "intensity"],
-    binary=True,
+summary = export_ply(
+    "cloud.zv",
+    "cloud.ply",
+    level=0,
+    bbox=None,
+    object_ids=None,
+    chunks=None,
+    attribute_names=["intensity", "colour"],
+    binary=True,                # True → binary PLY, False → ASCII
 )
+summary["vertex_count"]
 ```
 
-Requires `plyfile` (install with `pip install "zarr-vectors-tools[ply]"`).
+Needs the `ply` extra: `pip install "zarr-vectors-tools[ply]"`. The
+import is attempted lazily, so a missing `plyfile` surfaces as
+`ExportError` from the call rather than at import time.
 
-Returns `{"vertex_count": int}`.
-
-`binary`
-: `True` (default) writes binary PLY; `False` writes ASCII.
-
-All other options (`level`, `bbox`, `object_ids`, `chunks`,
-`attribute_names`) match `export_csv`.
+Stores of three dimensions or fewer get the conventional `x`, `y`, `z`
+property names; anything higher-dimensional falls back to `dim0`,
+`dim1`, …. Every property — positions and attributes alike — is written
+as `f4`, so a float64 store loses precision and integer attributes become
+floats on the way out.
 
 ## See also
 
-- [Ingest → point clouds](../ingest/point_clouds.md)
+- [Export overview](index.md) — shared call shape, `level=`, and the `chunks` filter.
+- [Ingest → point clouds](../ingest/point_clouds.md) — the symmetric direction.
+- [Headers](../headers.md) — `CSVHeader` and `LASHeader` hold what ingest preserved.

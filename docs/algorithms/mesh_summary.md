@@ -63,8 +63,13 @@ to sum to the global totals if shared fragments are present.
   summed.
 - **Edge count**: every triangle contributes three edges to a dedup
   set keyed on `((chunk_key, local_index), (chunk_key, local_index))`.
-  Cross-chunk records of arity ≥ 3 contribute their consecutive
-  endpoint pairs to the same set.
+  Records spanning two or more chunks, of arity ≥ 3, contribute their
+  consecutive endpoint pairs to the same set. Those come from
+  `read_cross_links(level_group, delta=0)` and **not** from a bare
+  `read_links`: the per-chunk `read_chunk_links` loop above has already
+  consumed every intra-chunk record from the same `links/0/<offsets>/`
+  family, so a whole-family read would double-count them. See the
+  double-count warning on the [algorithms index](index.md).
 - **Triangle meshes only** (`link_width=3`). Quad / polygon support
   requires fan-triangulation; not implemented in v0.
 

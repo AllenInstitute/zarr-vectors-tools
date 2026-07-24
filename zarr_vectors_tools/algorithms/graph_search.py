@@ -5,9 +5,10 @@ edges resolved via the public global-offset helper, cross-chunk edges
 merged in from the global cross array), then runs a standard frontier
 loop in memory. Memory cost: O(N + E).
 
-Cross-chunk edges now carry per-edge weights when the store has a
-matching ``cross_chunk_link_attributes/<weight>/0/`` array; otherwise a
-silent unit-weight fallback applies.
+Cross-chunk edges are not a special case: connectivity is one family, so
+they take per-edge weights from the same ``link_attributes/<weight>/0/``
+family as intra-chunk edges.  A store with no such family falls back to
+unit weights silently.
 """
 
 from __future__ import annotations
@@ -19,62 +20,15 @@ from typing import Any, Callable
 
 import numpy as np
 
-from zarr_vectors.constants import (
-    CROSS_CHUNK_LINK_ATTRIBUTES,
-    CROSS_CHUNK_LINKS,
-    LINK_FRAGMENTS,
-    LINKS,
-)
 from zarr_vectors.core.arrays import (
     list_chunk_keys,
-    read_chunk_links,
-    read_cross_chunk_link_attributes,
-    read_cross_chunk_links,
+    read_link_attributes,
+    read_links,
 )
-from zarr_vectors.core.paths import link_attributes_path
 from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 
-
-def _read_link_attribute_chunk(
-    level_group,
-    attr_name: str,
-    chunk_coords,
-    link_group_sizes: list[int],
-    *,
-    delta: int = 0,
-) -> list[np.ndarray] | None:
-    """Read a per-edge attribute for a single chunk.
-
-    Asymmetry: core ships ``read_cross_chunk_link_attributes`` (for
-    cross-chunk records) and ``read_chunk_attributes`` (per-vertex per
-    chunk), but no public per-chunk reader for ``link_attributes/<name>/
-    <delta>/``. We hit the bytes directly until that lands.
-
-    Returns ``None`` if the attribute isn't stored for this chunk or
-    the on-disk buffer disagrees with the expected size (stale write).
-    """
-    full_name = link_attributes_path(attr_name, delta)
-    try:
-        meta = level_group.read_array_meta(full_name)
-    except Exception:
-        return None
-    dtype = np.dtype(meta.get("dtype", "float32"))
-    key = ".".join(str(c) for c in chunk_coords)
-    try:
-        raw = level_group.read_bytes(full_name, key)
-    except Exception:
-        return None
-    flat = np.frombuffer(raw, dtype=dtype)
-    expected = int(sum(link_group_sizes))
-    if expected and len(flat) != expected:
-        return None
-    out: list[np.ndarray] = []
-    cursor = 0
-    for n in link_group_sizes:
-        out.append(np.ascontiguousarray(flat[cursor:cursor + n]))
-        cursor += n
-    return out
+from zarr_vectors_tools.algorithms._links import link_prefetch_plan
 
 
 def build_adjacency(
@@ -86,9 +40,11 @@ def build_adjacency(
 
     Public helper shared with ``graph_clustering``. The clustering
     algorithms (LPA, Louvain) need the same in-memory adjacency that
-    ``shortest_path`` builds, including the same fallback-to-unit-weight
-    behaviour for cross-chunk edges (the core's cross-link array has no
-    per-edge weight slot today).
+    ``shortest_path`` builds.
+
+    Cross-chunk edges are not a special case: connectivity is one family,
+    so they carry weights from the same ``link_attributes`` family as
+    intra-chunk edges and are read by the same call.
 
     Args:
         level_group: Resolution level group.
@@ -102,75 +58,38 @@ def build_adjacency(
     offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
     adj: list[list[tuple[int, float]]] = [[] for _ in range(n_vertices)]
 
-    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
-    prefetch_plan: list[tuple[str, list[str]]] = [
-        (f"{LINKS}/0", chunk_key_strs),
-        (LINK_FRAGMENTS, chunk_key_strs),
-        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
-    ]
-    if weight_attr is not None:
-        prefetch_plan.append((link_attributes_path(weight_attr, 0), chunk_key_strs))
-        prefetch_plan.append(
-            (f"{CROSS_CHUNK_LINK_ATTRIBUTES}/{weight_attr}/0", ["data"])
-        )
-
-    with level_group.batched_reads(prefetch_plan):
-        for chunk_key in chunk_keys:
-            try:
-                link_groups = read_chunk_links(level_group, chunk_key)
-            except Exception:
-                continue
-            base = offsets[chunk_key]
-
-            attrs_per_chunk = None
-            if weight_attr is not None:
-                attrs_per_chunk = _read_link_attribute_chunk(
-                    level_group,
-                    weight_attr,
-                    chunk_key,
-                    [len(g) for g in link_groups],
-                )
-
-            for gi, edges in enumerate(link_groups):
-                if len(edges) == 0:
-                    continue
-                arr = np.asarray(edges, dtype=np.int64)
-                if (
-                    attrs_per_chunk is not None
-                    and gi < len(attrs_per_chunk)
-                    and len(attrs_per_chunk[gi]) == len(arr)
-                ):
-                    weights = np.asarray(attrs_per_chunk[gi], dtype=np.float64)
-                else:
-                    weights = np.ones(len(arr), dtype=np.float64)
-
-                for (u_local, v_local), w in zip(arr, weights):
-                    u_g = int(u_local) + base
-                    v_g = int(v_local) + base
-                    adj[u_g].append((v_g, float(w)))
-                    adj[v_g].append((u_g, float(w)))
-
+    attrs = (weight_attr,) if weight_attr is not None else ()
+    with level_group.batched_reads(
+        link_prefetch_plan(level_group, chunk_keys, attrs=attrs)
+    ):
+        # One whole-family read: every record is already a tuple of
+        # (chunk_coords, local_index) endpoints, intra and cross alike.
+        # Adding a per-chunk read_chunk_links loop on top of this would
+        # union every intra edge twice and silently double its degree.
         try:
-            cross_links = read_cross_chunk_links(level_group, delta=0)
+            records = read_links(level_group, delta=0)
         except Exception:
-            cross_links = []
+            records = []
 
-        cross_weights: np.ndarray | None = None
-        if weight_attr is not None and cross_links:
+        weights: np.ndarray | None = None
+        if weight_attr is not None and records:
             try:
-                cross_weights = read_cross_chunk_link_attributes(
+                weights = read_link_attributes(
                     level_group, weight_attr, delta=0,
                 ).astype(np.float64, copy=False)
             except Exception:
-                cross_weights = None
-            if cross_weights is not None and len(cross_weights) != len(cross_links):
-                # Partial / stale write: fall back to unit weights.
-                cross_weights = None
+                weights = None
+            # read_links and read_link_attributes enumerate in the same
+            # (segment, cell) order — that shared order is the only thing
+            # aligning row i to record i — so a length mismatch means a
+            # partial/stale write and the rows cannot be trusted.
+            if weights is not None and len(weights) != len(records):
+                weights = None
 
-    for i, ((chunk_a, vi_a), (chunk_b, vi_b)) in enumerate(cross_links):
+    for i, ((chunk_a, vi_a), (chunk_b, vi_b)) in enumerate(records):
         ai = offsets[chunk_a] + int(vi_a)
         bi = offsets[chunk_b] + int(vi_b)
-        w = float(cross_weights[i]) if cross_weights is not None else 1.0
+        w = float(weights[i]) if weights is not None else 1.0
         adj[ai].append((bi, w))
         adj[bi].append((ai, w))
 

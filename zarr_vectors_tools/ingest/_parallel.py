@@ -1,11 +1,13 @@
-"""Dask-backed executor for the parallel ingest.
+"""Process-pool executors for the parallel ingest / coarsening.
 
 The core (`zarr_vectors`) coarsener and this package's ingest take an injectable
 ``executor`` — a ``map``-like callable ``executor(func, items) -> list`` that
 applies a picklable ``func`` to each item, in order.  The serial default runs
-in-process; :func:`dask_executor` returns one backed by a local Dask cluster of
-**process** workers (the hot loops are pure-Python / GIL-bound, so threads would
-not scale).
+in-process; :func:`process_pool_executor` returns one backed by the stdlib
+``ProcessPoolExecutor`` (no extra dependency), and :func:`dask_executor` returns
+one backed by a local Dask cluster (needs the ``parallel`` extra, and adds
+``scatter`` broadcast of the shared payload).  Both use **process** workers —
+the hot loops are pure-Python / GIL-bound, so threads would not scale.
 """
 from __future__ import annotations
 
@@ -13,6 +15,38 @@ import os
 from contextlib import contextmanager
 from typing import cast
 from typing import Any, Callable, Iterable
+
+
+@contextmanager
+def process_pool_executor(workers: int | None = None):
+    """Context manager yielding an ``executor(func, items, shared)`` callable
+    backed by a stdlib :class:`concurrent.futures.ProcessPoolExecutor` of
+    ``workers`` processes (default: cores-1).  No extra dependency.
+
+    Usage::
+
+        with process_pool_executor(8) as ex:
+            build_pyramid(..., executor=ex)
+
+    ``shared`` is re-pickled into each task (there is no broadcast, unlike
+    :func:`dask_executor`); keep it lightweight.  Suitable for the coarsener's
+    per-chunk workers, which already write their cells with
+    ``record_presence=False`` and rely on a coordinator manifest rebuild.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+    from functools import partial
+
+    n = workers if workers and workers > 0 else max(1, (os.cpu_count() or 2) - 1)
+    with ProcessPoolExecutor(max_workers=n) as pool:
+        def executor(
+            func: Callable[..., Any], items: Iterable[Any], shared: Any = None,
+        ) -> list:
+            items = list(items)
+            if not items:
+                return []
+            return list(pool.map(partial(func, shared=shared), items))
+
+        yield executor
 
 
 @contextmanager

@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 
 from zarr_vectors.core.arrays import (
-    read_cross_chunk_links,
-    write_cross_chunk_link_attributes,
+    read_links,
+    write_link_attributes,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.types.graphs import write_graph
@@ -174,15 +174,21 @@ class TestCrossChunkWeights:
         store, n_cross = _two_chunk_path_graph(tmp_path)
         assert n_cross == 1
 
-        # Manually attach a weight of 5.0 to the single cross-chunk edge.
+        # Attach a weight of 5.0 to the cross-chunk edge and 1.0 to the
+        # intra one.  Attributes are per-FAMILY now, and the only thing
+        # aligning row i to record i is that read_links and
+        # read_link_attributes share an enumeration order — so build the
+        # rows from read_links itself rather than assuming a position.
         root = open_store(str(store), mode="r+")
         level = get_resolution_level(root, 0)
-        cross_links = read_cross_chunk_links(level, delta=0)
-        assert len(cross_links) == 1
-        write_cross_chunk_link_attributes(
+        records = read_links(level, delta=0)
+        assert len(records) == 2  # one cross (0-1), one intra (1-2)
+        is_cross = [len({tuple(cc) for cc, _vi in r}) > 1 for r in records]
+        assert sum(is_cross) == 1
+        write_link_attributes(
             level, "weight",
-            np.array([5.0], dtype=np.float32),
-            num_links=len(cross_links),
+            np.array([5.0 if x else 1.0 for x in is_cross], dtype=np.float32),
+            num_links=len(records),
             delta=0,
         )
 
@@ -190,7 +196,6 @@ class TestCrossChunkWeights:
         unit = shortest_path(store, source=0, target=2)
         assert unit["cost"] == 2.0
 
-        # With weight kwarg: cross-chunk edge 0-1 now costs 5; intra 1-2 missing
-        # the attribute falls back to 1.0 → total 6.0.
+        # With weight kwarg: cross-chunk edge 0-1 costs 5, intra 1-2 costs 1.
         weighted = shortest_path(store, source=0, target=2, weight="weight")
         assert abs(weighted["cost"] - 6.0) < 1e-6

@@ -18,13 +18,14 @@ def run_pyramid(args) -> int:
     if args.cross_level_depth is not None:
         extra["cross_level_depth"] = args.cross_level_depth
 
-    with executor_ctx(args.workers) as ex:
+    with executor_ctx(args.workers, args.workers_backend) as ex:
         result = build_pyramid(
             str(args.store),
             factors=factors,
             chunk_scale_factors=args.chunk_scale,
             sparsity_strategy=args.sparsity_strategy,
             coarsen_mode=args.coarsen_mode,
+            compressor=(None if args.compressor == "none" else args.compressor),
             executor=ex,
             **extra,
         )

@@ -1,7 +1,7 @@
 """Post-hoc per-vertex mesh attributes (normals, mean curvature).
 
 Streaming intra-chunk accumulation. Cross-chunk faces (records of
-arity >= 3 from ``read_cross_chunk_links``) contribute their endpoints
+arity >= 3 spanning more than one chunk) contribute their endpoints
 to the boundary-vertex set but their per-face contributions are not
 accumulated — boundary-vertex normals/curvatures will be slightly off
 near chunk boundaries. The returned dict reports
@@ -21,9 +21,6 @@ from typing import Any
 import numpy as np
 
 from zarr_vectors.constants import (
-    CROSS_CHUNK_LINKS,
-    LINK_FRAGMENTS,
-    LINKS,
     VERTEX_FRAGMENTS,
     VERTICES,
 )
@@ -31,11 +28,16 @@ from zarr_vectors.core.arrays import (
     list_chunk_keys,
     read_chunk_links,
     read_chunk_vertices,
-    read_cross_chunk_links,
 )
 from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.lazy import open_zv
 from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
+
+from zarr_vectors_tools.algorithms._links import (
+    chunk_key_str,
+    link_prefetch_plan,
+    read_cross_links,
+)
 
 
 def _read_triangles(level_group, chunk_key):
@@ -112,13 +114,11 @@ def compute_vertex_normals(
 
     normals = np.zeros((n_vertices, 3), dtype=np.float64)
 
-    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    chunk_key_strs = [chunk_key_str(cc) for cc in chunk_keys]
     with level_group.batched_reads([
         (VERTICES, chunk_key_strs),
         (VERTEX_FRAGMENTS, chunk_key_strs),
-        (f"{LINKS}/0", chunk_key_strs),
-        (LINK_FRAGMENTS, chunk_key_strs),
-        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+        *link_prefetch_plan(level_group, chunk_keys),
     ]):
         for chunk_key in chunk_keys:
             positions, faces_list = _read_triangles(level_group, chunk_key)
@@ -138,8 +138,10 @@ def compute_vertex_normals(
                 for col in (0, 1, 2):
                     np.add.at(normals, faces[:, col] + base, face_n)
 
+        # Cross-only: the per-chunk loop above already consumed every
+        # intra record, so the whole-family read_links would double-count.
         try:
-            cross_links = read_cross_chunk_links(level_group, delta=0)
+            cross_links = read_cross_links(level_group, delta=0)
         except Exception:
             cross_links = []
     boundary = _count_boundary_vertex_set(cross_links)
@@ -201,13 +203,11 @@ def compute_mean_curvature(
         safe = np.where(cr == 0, 1.0, cr)
         return dot / safe
 
-    chunk_key_strs = [".".join(str(c) for c in cc) for cc in chunk_keys]
+    chunk_key_strs = [chunk_key_str(cc) for cc in chunk_keys]
     with level_group.batched_reads([
         (VERTICES, chunk_key_strs),
         (VERTEX_FRAGMENTS, chunk_key_strs),
-        (f"{LINKS}/0", chunk_key_strs),
-        (LINK_FRAGMENTS, chunk_key_strs),
-        (f"{CROSS_CHUNK_LINKS}/0", ["data"]),
+        *link_prefetch_plan(level_group, chunk_keys),
     ]):
         for chunk_key in chunk_keys:
             positions, faces_list = _read_triangles(level_group, chunk_key)
@@ -251,8 +251,10 @@ def compute_mean_curvature(
                 np.add.at(area_voronoi, global_1, contribution)
                 np.add.at(area_voronoi, global_2, contribution)
 
+        # Cross-only: the per-chunk loop above already consumed every
+        # intra record, so the whole-family read_links would double-count.
         try:
-            cross_links = read_cross_chunk_links(level_group, delta=0)
+            cross_links = read_cross_links(level_group, delta=0)
         except Exception:
             cross_links = []
 

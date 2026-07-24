@@ -15,8 +15,6 @@ from typing import Any
 import numpy as np
 
 from zarr_vectors.constants import (
-    LINK_FRAGMENTS,
-    LINKS,
     VERTEX_FRAGMENTS,
     VERTICES,
 )
@@ -28,6 +26,12 @@ from zarr_vectors.core.arrays import (
 from zarr_vectors.core.store import get_resolution_level, open_store, read_root_metadata
 from zarr_vectors.spatial.chunking import chunks_intersecting_bbox
 from zarr_vectors.typing import ChunkCoords
+
+from zarr_vectors_tools.algorithms._links import (
+    chunk_key_str,
+    link_prefetch_plan,
+    require_link_width,
+)
 
 
 # =====================================================================
@@ -198,19 +202,12 @@ def closest_point(
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
 
-    try:
-        lmeta = level_group.read_array_meta("links/0")
-        link_width = int(lmeta.get("link_width", 3))
-    except Exception:
-        link_width = 3
-    if link_width != 3:
-        raise NotImplementedError(
-            f"closest_point v0 supports triangle meshes only "
-            f"(link_width=3); store has link_width={link_width}."
-        )
+    require_link_width(
+        level_group, 3, what="closest_point v0 (triangle meshes only)",
+    )
 
     occupied = set(list_chunk_keys(level_group))
-    occupied_chunk_strs = [".".join(str(c) for c in cc) for cc in occupied]
+    occupied_chunk_strs = [chunk_key_str(cc) for cc in occupied]
 
     best_dist2 = (
         np.inf if max_distance is None else float(max_distance) ** 2
@@ -224,8 +221,7 @@ def closest_point(
     with level_group.batched_reads([
         (VERTICES, occupied_chunk_strs),
         (VERTEX_FRAGMENTS, occupied_chunk_strs),
-        (f"{LINKS}/0", occupied_chunk_strs),
-        (LINK_FRAGMENTS, occupied_chunk_strs),
+        *link_prefetch_plan(level_group, occupied),
     ]):
         for ring in range(max_expansion_rings + 1):
             radius = (ring + 0.5) * chunk_shape
@@ -336,16 +332,9 @@ def cast_ray(
 
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
-    try:
-        lmeta = level_group.read_array_meta("links/0")
-        link_width = int(lmeta.get("link_width", 3))
-    except Exception:
-        link_width = 3
-    if link_width != 3:
-        raise NotImplementedError(
-            f"cast_ray v0 supports triangle meshes only "
-            f"(link_width=3); store has link_width={link_width}."
-        )
+    require_link_width(
+        level_group, 3, what="cast_ray v0 (triangle meshes only)",
+    )
 
     occupied = set(list_chunk_keys(level_group))
     if not occupied:
@@ -353,7 +342,7 @@ def cast_ray(
             "hit": False, "t": float("inf"),
             "position": origin, "chunk_key": None, "face_index": None,
         }
-    occupied_chunk_strs = [".".join(str(c) for c in cc) for cc in occupied]
+    occupied_chunk_strs = [chunk_key_str(cc) for cc in occupied]
 
     # 3D DDA on chunk coordinates.
     start_chunk = tuple(int(np.floor(origin[d] / chunk_shape[d])) for d in range(3))
@@ -402,8 +391,7 @@ def cast_ray(
     with level_group.batched_reads([
         (VERTICES, occupied_chunk_strs),
         (VERTEX_FRAGMENTS, occupied_chunk_strs),
-        (f"{LINKS}/0", occupied_chunk_strs),
-        (LINK_FRAGMENTS, occupied_chunk_strs),
+        *link_prefetch_plan(level_group, occupied),
     ]):
         while travelled <= max_t:
             cur_key: ChunkCoords = tuple(cur)

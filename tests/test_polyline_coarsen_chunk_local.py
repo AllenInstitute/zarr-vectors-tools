@@ -39,8 +39,8 @@ from zarr_vectors.core.arrays import (
     read_all_object_manifests,
     read_chunk_fragment_attributes,
     read_chunk_vertices,
-    read_cross_chunk_links,
 )
+from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors.core.store import get_resolution_level, open_store
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
@@ -128,7 +128,7 @@ def test_directed_link_predecessor_successor_order_preserved(tmp_path):
     )
 
     lvl1 = get_resolution_level(open_store(str(store)), 1)
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
     assert len(records) == 1
     (ccA, _viA), (ccB, _viB) = records[0]
     assert tuple(ccA) == (0, 0, 0)
@@ -143,7 +143,7 @@ def test_directed_link_predecessor_successor_order_preserved(tmp_path):
         coarsen_mode="decimate",
     )
     lvl1b = get_resolution_level(open_store(str(store2)), 1)
-    records_b = read_cross_chunk_links(lvl1b, delta=0)
+    records_b = read_cross_links(lvl1b, delta=0)
     assert len(records_b) == 1
     (ccA2, _), (ccB2, _) = records_b[0]
     assert tuple(ccA2) == (1, 0, 0)
@@ -178,7 +178,7 @@ def test_diagonal_cross_target_jump_stitches_correctly(tmp_path):
         coarsen_mode="decimate",
     )
     lvl1 = get_resolution_level(open_store(str(store)), 1)
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
     assert len(records) == 1
     (ccA, _), (ccB, _) = records[0]
     assert tuple(ccA) == (0, 0, 0)
@@ -219,7 +219,7 @@ def test_object_revisiting_same_chunk_yields_two_fragments(tmp_path):
     assert ccs.count((0, 0, 0)) == 2
     assert ccs.count((1, 0, 0)) == 1
 
-    records = read_cross_chunk_links(lvl1, delta=0)
+    records = read_cross_links(lvl1, delta=0)
     assert len(records) == 2  # A->B and B->A, distinct link instances
 
 
