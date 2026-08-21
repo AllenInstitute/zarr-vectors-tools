@@ -337,6 +337,108 @@ class GraphHeader(Header):
 
 
 # ===================================================================
+# H5AD (AnnData / single-cell + spatial omics)
+# ===================================================================
+
+@dataclass
+class H5ADHeader(Header):
+    """AnnData ``.h5ad`` header metadata.
+
+    ZVF stores numeric per-vertex arrays, so three kinds of AnnData
+    information cannot survive in the arrays alone and live here instead:
+
+    - **Names.** ``obs`` columns and genes become attribute arrays whose
+      names are sanitised for Zarr paths, so the original labels are kept
+      in the ``*_names``/``*_attrs`` parallel lists.
+    - **Categories.** Categorical/string ``obs`` columns are stored as
+      integer codes; ``categories`` maps a column to its level labels so
+      export can rebuild the ``pandas.Categorical``.
+    - **Order and identity.** ZVF orders vertices by spatial chunk, not by
+      original row, so ``row_attr`` names the attribute holding each
+      cell's source row index and ``obs_index`` (when small enough to
+      inline) holds the original barcodes.
+    """
+
+    format_name: str = "h5ad"
+    spatial_key: str = "spatial"
+    spatial_ndim: int = 3
+    # Columns of obsm[spatial_key] that became positions, in order.
+    spatial_columns: list[int] = field(default_factory=list)
+    n_obs: int = 0
+    n_vars: int = 0
+    # obs columns: original label -> attribute array name (parallel lists).
+    obs_names: list[str] = field(default_factory=list)
+    obs_attrs: list[str] = field(default_factory=list)
+    # Expression columns: original var name -> attribute array name.
+    gene_names: list[str] = field(default_factory=list)
+    gene_attrs: list[str] = field(default_factory=list)
+    # Source of the expression values: None = adata.X, else layers[<name>].
+    layer: str | None = None
+    # obs column label -> ordered category labels (for code -> label decode).
+    categories: dict[str, list[str]] = field(default_factory=dict)
+    # obs column label -> source pandas dtype, for the types that do not
+    # survive as numpy arrays (bool -> uint8, datetime64 -> int64).
+    dtypes: dict[str, str] = field(default_factory=dict)
+    # Attribute holding the source obs row index (restores original order).
+    row_attr: str | None = None
+    # Original obs index (barcodes); None when omitted for size.
+    obs_index: list[str] | None = None
+    # obs column that became ZVF object_ids, plus its category labels.
+    object_id_column: str | None = None
+    object_id_categories: list[str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "format_name": self.format_name,
+            "spatial_key": self.spatial_key,
+            "spatial_ndim": self.spatial_ndim,
+            "spatial_columns": list(self.spatial_columns),
+            "n_obs": self.n_obs,
+            "n_vars": self.n_vars,
+            "obs_names": self.obs_names,
+            "obs_attrs": self.obs_attrs,
+            "gene_names": self.gene_names,
+            "gene_attrs": self.gene_attrs,
+            "layer": self.layer,
+            "categories": self.categories,
+            "dtypes": self.dtypes,
+            "row_attr": self.row_attr,
+            "obs_index": self.obs_index,
+            "object_id_column": self.object_id_column,
+            "object_id_categories": self.object_id_categories,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> H5ADHeader:
+        return cls(
+            spatial_key=d.get("spatial_key", "spatial"),
+            spatial_ndim=d.get("spatial_ndim", 3),
+            spatial_columns=d.get("spatial_columns", []),
+            n_obs=d.get("n_obs", 0),
+            n_vars=d.get("n_vars", 0),
+            obs_names=d.get("obs_names", []),
+            obs_attrs=d.get("obs_attrs", []),
+            gene_names=d.get("gene_names", []),
+            gene_attrs=d.get("gene_attrs", []),
+            layer=d.get("layer"),
+            categories=d.get("categories", {}),
+            dtypes=d.get("dtypes", {}),
+            row_attr=d.get("row_attr"),
+            obs_index=d.get("obs_index"),
+            object_id_column=d.get("object_id_column"),
+            object_id_categories=d.get("object_id_categories"),
+        )
+
+    def attr_to_obs(self) -> dict[str, str]:
+        """Map stored attribute name -> original ``obs`` column label."""
+        return dict(zip(self.obs_attrs, self.obs_names))
+
+    def attr_to_gene(self) -> dict[str, str]:
+        """Map stored attribute name -> original ``var`` (gene) name."""
+        return dict(zip(self.gene_attrs, self.gene_names))
+
+
+# ===================================================================
 # Dispatch helper
 # ===================================================================
 
@@ -348,6 +450,7 @@ HEADER_CLASSES: dict[str, type[Header]] = {
     "obj": OBJHeader,
     "csv": CSVHeader,
     "graph": GraphHeader,
+    "h5ad": H5ADHeader,
 }
 
 
