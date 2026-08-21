@@ -1,38 +1,30 @@
 # Benchmarks
 
-Three small notebooks that compare **loading and filtering** a
-zarr-vectors store against the canonical file format for each
-geometry type. All three follow the same shape — setup → build
-inputs → sweep → table → plot — and exercise reads only (writes
-happen once outside the timing loop).
+Two suites, answering two different questions. Both live here rather
+than in `zarr-vectors-py` so the core package keeps its dependency
+surface at `numpy` / `numcodecs` / `zarr` — the benchmarks need
+`pandas`, `matplotlib`, `jupyter`, and (for the format comparisons)
+the third-party readers this package already wraps.
 
-| Notebook | Axis | Fixed | Swept |
-|----------|------|-------|-------|
-| [`01_size_scaling.ipynb`](01_size_scaling.ipynb) | size (N) | three geometries: points, graph, mesh | `N ∈ {1e3, 1e4, 1e5}` |
-| [`02_data_types.ipynb`](02_data_types.ipynb)     | geometry type | `N = 50 000` | all six types, each vs its canonical competitor |
-| [`03_filtering.ipynb`](03_filtering.ipynb)       | subset fraction | `N = 100 000`, points + polylines | `fraction ∈ {0.001, 0.01, 0.1, 0.5, 1.0}` |
+| Suite | Question | Contents |
+|-------|----------|----------|
+| [`paper/`](paper/) | *The three claims the paper makes, and nothing else.* | scripts — 8 panels as separate files + one supplementary table |
+| [`formats/`](formats/) | *How does ZVF compare to the format I use today?* | 3 notebooks — ZVF reads/filters vs PLY, CSV, TRX, GraphML, SWC, OBJ |
+| [`internals/`](internals/) | *How does ZVF scale along axis X?* | 8 notebooks — size, geometry type, backend, pyramid, bbox query, chunk shape, codec, edit cost |
 
-For every measurement the notebook runs `N_RUNS = 10` repeats and
-reports the mean with a Student's-t **95 % CI half-width** (`T95_DF9
-= 2.262`). Size-scaling and filtering plots have **log-log axes**
-with shaded CI bands; the data-type comparison is a bar chart with
-error bars.
+`formats/` and `internals/` are exploratory: each has its own
+`README.md`, its own `_build.py`, and its own `01..N` numbering. They
+share no code; the small timing/stats helpers (`_time`, `_store_bytes`,
+`_mean_ci95`, `N_RUNS = 10`, `T95_DF9 = 2.262`) are duplicated into each
+generated notebook, which is what keeps a notebook runnable standalone.
 
-## What's compared
-
-| Geometry | Competitor | Reader | Subset op |
-| --- | --- | --- | --- |
-| point cloud | PLY | `plyfile.PlyData.read` | bbox |
-| line | CSV | `pandas.read_csv` | bbox |
-| polyline / streamline | TRX | `trx.trx_file_memmap.load` | object_ids (native partial read) |
-| graph | GraphML / edge-list CSV | `networkx.read_graphml` / `pd.read_csv` | bbox |
-| skeleton | SWC | text parse | bbox |
-| mesh | OBJ | pure-Python parser | bbox |
-
-**TRX is the only competitor with a native partial read.** Every
-other competitor reads the entire file and filters in numpy, which
-is the honest comparison — those formats simply have no other
-option.
+`paper/` is different in kind — it is a publication artefact, not an
+exploration. It is scripts rather than notebooks so that the measurement
+can be re-run on reference hardware and the panels regenerated from the
+committed CSV without re-measuring; the panels are written one per file
+so the figure can be composed wherever the paper is being written. Start there if you want the headline
+comparison; start in the other two if you want to understand a
+particular axis.
 
 ## Running
 
@@ -41,40 +33,28 @@ pip install -e ".[all]" jupyter matplotlib
 jupyter lab benchmarks/
 ```
 
-Then open one notebook and run all cells. Expected runtime on a
-laptop:
+Then open a notebook and run all cells. Budget ~5 minutes for the
+long ones (`formats/01_size_scaling`, `internals/01_size_scaling`,
+`internals/08_edit_operations`).
 
-- `01_size_scaling`: ~5 minutes (the 100 K mesh case is the long pole; the pure-Python OBJ parser dominates).
-- `02_data_types`: ~1 minute.
-- `03_filtering`: ~1 minute.
+## Regenerating
 
-Sections gated on optional deps (`networkx`, `trx-python`,
-`plyfile`) skip gracefully if the package isn't installed. To run
-the whole sweep install the `all` extra above.
-
-## Regenerating notebooks
-
-The notebooks are generated from `_build.py`. To edit them, change
-the cell templates there and re-run:
+Notebooks are generated; never edit the `.ipynb` directly.
 
 ```bash
-python benchmarks/_build.py
+python benchmarks/formats/_build.py     # rewrites formats/*.ipynb
+python benchmarks/internals/_build.py   # rewrites internals/*.ipynb
 ```
 
-This rewrites all three `.ipynb` files in place with fresh cell
-IDs. The notebooks themselves should be committed alongside the
-source script.
+## Shared caveats
 
-## Caveats
-
-- These numbers are machine-dependent and meant as **"what to
-  expect on my machine"** sanity plots. Don't quote them as
-  authoritative.
-- Wall time and on-disk size only — no memory profiling.
-- No CI gating; regressions aren't caught automatically. A
-  `tests/test_perf_*.py` style regression suite (along the lines of
-  `zarr-vectors-py`'s `test_perf_writes.py`) is a reasonable
-  follow-up but is intentionally out of scope here.
-- Synthetic data with `SEED = 0` everywhere. Realistic datasets
-  will have different sparsity / chunk-occupancy patterns and
-  consequently different scaling slopes.
+- Wall time and on-disk bytes only — no memory profiling.
+- No CI gating in either suite. The only automated performance guard
+  in the project is `tests/test_perf_writes.py` over in
+  `zarr-vectors-py`, which asserts loose (~3×) wall-clock ceilings to
+  catch order-of-magnitude regressions.
+- Synthetic data with `SEED = 0`. Real datasets have different
+  sparsity and chunk-occupancy patterns, and therefore different
+  scaling slopes.
+- Machine-dependent. These are "what to expect on my hardware" sanity
+  plots, not authoritative numbers.
