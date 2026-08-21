@@ -25,25 +25,48 @@ summary = ingest_trk_parallel(
 ```
 
 Note there is no `chunk_shape` parameter. The grid is derived from the
-TRK header's `dim × voxel_size` bounding box divided by `num_chunks`,
-which keeps chunks near-isotropic without you having to know the field of
-view in advance. Pass an explicit `(nx, ny, nz)` tuple to `num_chunks`
-when you do.
+geometry — see below — which keeps chunks near-isotropic without you
+having to know the field of view in advance. Pass an explicit
+`(nx, ny, nz)` tuple to `num_chunks` when you do.
 
 ## The pipeline
 
 | Phase | Runs | What it does |
 | --- | --- | --- |
-| 0 | serial | Parse the 1000-byte TRK header with `struct` (no `nibabel`); derive bounds and the chunk grid from `num_chunks`. |
-| 1 | serial | Offset-index scan: walk the file recording each streamline's byte offset, point count, and byte span. Partition into `n_parts` byte-balanced, non-overlapping parts. |
-| A | parallel over parts | Each worker reads its byte range, bins streamlines into spatial chunks via `split_polyline_at_boundaries`, and writes a `.npz` of segment descriptors plus raw vertices. |
+| 0 | serial | Parse the 1000-byte TRK header with `struct` (no `nibabel`); resolve the voxmm→RASmm affine if registering. |
+| 1 | serial | Offset-index scan: walk the file recording each streamline's byte offset, point count, byte span, and first vertex. Size `chunk_shape` from those vertices; partition into `n_parts` byte-balanced, non-overlapping parts. |
+| A | parallel over parts | Each worker reads its byte range, bins streamlines into spatial chunks via `split_polyline_at_boundaries`, and writes a `.npz` of segment descriptors plus raw vertices — and reports the exact bbox of what it wrote. |
+| — | serial | Union those bboxes into the store bounds and lay out the chunk grid. Refuse the grid if any chunk would exceed the per-cell ceiling (below). |
 | B | parallel over chunks | Each worker assembles one spatial chunk from all `n_parts` `.npz` files and writes level 0. |
 | Coordinator | serial | Rebuild `nonempty_chunks` manifests from the on-disk cells, write the object index, and write boundary-crossing links into `links/0/`. |
 | 5 | serial | Store CRS/affine metadata and a `TRKHeader` for round-trip export. |
 | 6 | parallel | Build the multiscale pyramid via `build_pyramid`. |
 
-Phase 1's scan is cheap — roughly 17 s for 5M streamlines — because it
-reads only each record's length prefix and seeks past the payload.
+Phase 1's scan is cheap — roughly 6 s for 5.6M streamlines — because it
+reads only each record's length prefix plus its first vertex, and seeks
+past the rest of the payload.
+
+### Why the grid comes from the data
+
+A TRK header's `dimensions × voxel_size` is a *declared* field of view,
+and nothing in the format checks it against the tracts. Files exist where
+it is simply wrong. On one 10.7 GB tractogram the header declared a
+152 mm axis whose points ran to 186 mm, and 780M of its 890M vertices
+(87.7%) fell outside the declared box altogether.
+
+So the grid is not built from the header. `chunk_shape` — chunk *size*
+only — comes from the bbox of one vertex per streamline, gathered free
+during the Phase 1 scan; on that file it landed within 0.12 mm of the
+true bbox on every axis. The grid's origin and extent then come from the
+exact bboxes Phase A reports, which is why the store is not created until
+Phase A has finished.
+
+The alternative is what the ingest used to do: clamp any vertex outside
+the header's box into the nearest edge chunk. That preserves coordinates
+but files them under a chunk coord that does not contain them, which
+breaks spatial queries, the chunk-local coarsener, and a viewer's
+per-chunk bounds. On that file it left one cell holding 415M vertices of
+which 96% were foreign to it — and, at 4.6 GiB, past the ceiling below.
 
 The manifest rebuild after Phase B is not optional bookkeeping. Phase B
 workers each read-modify-write the shared `nonempty_chunks` manifest from
@@ -70,6 +93,36 @@ raise peak memory, because a part is bounded by its byte range; raising
 order. Use it to shake out chunk-grid and pyramid settings on a subset
 before committing hours to the full file.
 :::
+
+### The 4 GiB per-chunk ceiling
+
+`num_chunks` has a hard floor set by the data, not by taste. Every
+per-chunk array is a Zarr v3 `vlen-bytes` array, and that codec records
+each cell's byte length as a **uint32** — so a chunk holding 4 GiB or
+more of vertices (358M xyz float32 vertices) wraps that header modulo
+2<sup>32</sup>. numcodecs range-checks nothing: all the bytes land on
+disk, the recorded length becomes `len % 2**32`, and every later read
+returns a truncated buffer. Compression does not buy headroom, because
+`vlen-bytes` writes the length before any bytes→bytes compressor runs.
+
+Averages hide this. A 10.7 GB tractogram over a 6×6×7 grid averages
+42 MB per cell, but tractography is not uniformly dense — only 16 of
+those 252 cells were occupied, and one held 415M vertices (4.6 GiB).
+
+The ingest checks for it after Phase A, once binning knows the exact
+per-chunk counts and before the store is created, and refuses the grid
+with the offending chunk and a suggested `num_chunks`:
+
+```text
+spatial grid too coarse for this input: chunk (5, 5, 6) holds 415,322,477
+vertices = 4.6 GiB. A single chunk's payload must stay under 4.0 GiB [...]
+Re-run with a finer grid — num_chunks (--num-chunks) of about 1,200 or more
+```
+
+The suggestion assumes the dense region subdivides evenly; for a tight
+bundle, go higher. Chunks that large are worth avoiding on their own
+merits anyway — a multi-gigabyte cell is a poor unit of progressive
+fetch for any viewer.
 
 ## Links and the merged layout
 

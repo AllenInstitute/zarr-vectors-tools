@@ -2,9 +2,13 @@
 
 Subcommands:
     convert   Ingest a file into a new zarr-vectors store (+ optional pyramid).
+    merge     Add a file's or another store's objects to an existing store.
+    split     Cut a store into one store per group, label or merged source.
     pyramid   Build a sparsity pyramid on an existing store.
     validate  Run core conformance validation on a store.
     info      Print a store's geometry, resolution levels, and metadata.
+    attach    Stage a table's columns onto a store's existing vertices.
+    shard     Repack per-chunk cells into shards, or undo it.
 
 Also runnable as ``python -m zarr_vectors_tools``.
 """
@@ -14,6 +18,10 @@ from __future__ import annotations
 import argparse
 import sys
 
+from zarr_vectors_tools.ingest.attach import DEFAULT_KEY_ATTRIBUTE
+
+from . import attach as _attach
+from . import compose as _compose
 from . import convert as _convert
 from . import pyramid as _pyramid
 from ._args import (
@@ -22,10 +30,12 @@ from ._args import (
     parse_int_list,
     parse_num_chunks,
     parse_shape,
+    parse_str_list,
 )
 
 _SPARSITY_STRATEGIES = (
     "random", "length", "spatial_coverage", "attribute", "point_thinning",
+    "group",
 )
 
 
@@ -154,6 +164,54 @@ def build_parser() -> argparse.ArgumentParser:
                    help="edgelist: path to the node CSV (second input)")
     c.add_argument("--knn-distance-k", type=int, dest="knn_distance_k", default=None,
                    help="points: k for kNN-distance enrichment (needs [points-enrichment])")
+    h = c.add_argument_group("h5ad (AnnData)")
+    h.add_argument("--spatial-key", dest="spatial_key", default="auto",
+                   metavar="KEY",
+                   help="h5ad: obsm key holding the coordinates (default: "
+                        "auto — tries spatial, X_spatial, spatial_fov, "
+                        "X_umap, X_tsne, X_pca)")
+    h.add_argument("--spatial-columns", type=parse_int_list,
+                   dest="spatial_columns", default=None, metavar="I,J[,K]",
+                   help="h5ad: which columns of the embedding to use as "
+                        "positions (default: the first up-to-3)")
+    h.add_argument("--obs-column", action="append", dest="obs_columns",
+                   default=None, metavar="NAME",
+                   help="h5ad: obs column to store as a vertex attribute "
+                        "(repeatable; default: all of them). Use --no-obs to "
+                        "store none")
+    h.add_argument("--no-obs", action="store_true", dest="no_obs",
+                   help="h5ad: do not store any obs columns")
+    h.add_argument("--gene", action="append", dest="genes", default=None,
+                   metavar="NAME",
+                   help="h5ad: store this gene's expression as a vertex "
+                        "attribute (repeatable; default: none)")
+    h.add_argument("--layer", dest="layer", default=None, metavar="NAME",
+                   help="h5ad: read expression from layers[NAME] instead of X")
+    h.add_argument("--object-id-column", dest="object_id_column", default=None,
+                   metavar="NAME",
+                   help="h5ad: obs column grouping cells into ZVF objects "
+                        "(e.g. cell_type, sample)")
+    h.add_argument("--backed", action="store_true", dest="backed",
+                   help="h5ad: leave X on disk (AnnData backed mode); helps "
+                        "on large files when --gene selects few columns")
+    h.add_argument("--drop-na", action="store_true", dest="drop_na",
+                   help="h5ad: drop cells whose coordinates contain NaN "
+                        "(table input drops them by default)")
+    t = c.add_argument_group("table (keyed delimited table)")
+    t.add_argument("--position-columns", type=parse_str_list,
+                   dest="position_columns", default=None, metavar="X,Y[,Z]",
+                   help="table: column names holding the coordinates, in axis "
+                        "order (required for --format table)")
+    t.add_argument("--key-column", dest="key_column", default=None, metavar="NAME",
+                   help="table: column holding the row identifier. Hashed into "
+                        "the join key so later files can be staged in with "
+                        "'zvtools attach'")
+    t.add_argument("--column", action="append", dest="columns", default=None,
+                   metavar="NAME",
+                   help="table: metadata column to store as a vertex attribute "
+                        "(repeatable; default: every non-position, non-key column)")
+    t.add_argument("--delimiter", default=",",
+                   help="table: column delimiter (default: ,)")
     c.set_defaults(func=_convert.run)
 
     # ---- pyramid -----------------------------------------------------------
@@ -190,6 +248,55 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("store", help="zarr-vectors store path")
     i.set_defaults(func=_pyramid.run_info)
 
+    # ---- attach ------------------------------------------------------------
+    a = sub.add_parser(
+        "attach", help="stage a file's columns into an existing store",
+        description="Add per-vertex attributes to an existing store, matching "
+                    "rows to points on a join key. Lets a dataset split across "
+                    "several files be imported one file at a time instead of "
+                    "being merged into a single large file first.",
+    )
+    a.add_argument("store", help="existing zarr-vectors store path (modified in place)")
+    a.add_argument("input", help="file to stage in (.h5ad, or a delimited table)")
+    a.add_argument("--format", choices=("auto", "h5ad", "table"), default="auto",
+                   help="source format (default: auto from extension)")
+    a.add_argument("--column", action="append", dest="columns", default=None,
+                   metavar="NAME",
+                   help="column to stage in (repeatable). h5ad: an obs column. "
+                        "table: any column. Default for tables: every non-key column")
+    a.add_argument("--gene", action="append", dest="genes", default=None,
+                   metavar="NAME",
+                   help="h5ad only: gene whose expression to stage in "
+                        "(repeatable). Matched against var_names, then gene_symbol")
+    a.add_argument("--gene-by", dest="gene_by", default=None, metavar="COL",
+                   help="h5ad only: var column to match --gene against")
+    a.add_argument("--layer", dest="layer", default=None, metavar="NAME",
+                   help="h5ad only: read expression from layers[NAME] instead of X")
+    a.add_argument("--key-column", dest="key_column", default=None, metavar="NAME",
+                   help="column holding the identifier to join on. Required for "
+                        "tables; for h5ad defaults to the obs index")
+    a.add_argument("--key-attribute", dest="key_attribute",
+                   default=DEFAULT_KEY_ATTRIBUTE, metavar="NAME",
+                   help=f"store attribute holding the join key "
+                        f"(default: {DEFAULT_KEY_ATTRIBUTE})")
+    a.add_argument("--delimiter", default=",",
+                   help="table only: column delimiter (default: ,)")
+    a.add_argument("--level", type=int, default=0,
+                   help="resolution level to write into (default: 0)")
+    a.add_argument("--missing", choices=("fill", "error"), default="fill",
+                   help="what to do for points absent from the incoming file "
+                        "(default: fill with NaN / -1)")
+    a.add_argument("--overwrite", action="store_true",
+                   help="replace attributes that already exist")
+    a.add_argument("--shard", type=parse_num_chunks, dest="shard", default=None,
+                   metavar="N|X,Y,Z",
+                   help="create the new attribute arrays sharded, packing N "
+                        "chunks per axis into one file. Set this when staging "
+                        "many columns: unsharded costs one file per chunk per "
+                        "attribute, and resharding afterwards has to reread "
+                        "every one. Match the value across attaches")
+    a.set_defaults(func=_attach.run_attach)
+
     # ---- shard -------------------------------------------------------------
     s = sub.add_parser(
         "shard", help="(re)shard or unshard an existing store's per-chunk arrays",
@@ -205,6 +312,99 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--unshard", action="store_true",
                    help="remove sharding (back to one file per chunk)")
     s.set_defaults(func=_convert.run_shard)
+
+    # ---- merge -------------------------------------------------------------
+    m = sub.add_parser(
+        "merge", help="add a file's or another store's objects to an existing store",
+        description="Append objects to a store that already exists, carrying "
+                    "their attributes, group taxonomy and format headers, and "
+                    "rebuilding the pyramid the write invalidates. Unlike "
+                    "convert, nothing already in the target is replaced.",
+    )
+    m.add_argument("target", help="store to merge into")
+    m.add_argument("sources", nargs="+",
+                   help="files and/or stores to merge in")
+    m.add_argument("--format", default=None, choices=(*FORMAT_REGISTRY, "auto"),
+                   help="input format for file sources (default: from extension)")
+    m.add_argument("--create", action="store_true",
+                   help="create the target if absent, sized from the sources")
+    m.add_argument("--cell-size", type=parse_shape, dest="cell_size", default=None,
+                   metavar="X,Y,Z", help="grid cell size for a created target")
+    m.add_argument("--space", default="voxmm", choices=("voxmm", "ras"),
+                   help="trk only: keep stored coordinates (voxmm, default) or "
+                        "apply the header affine to reach RAS mm")
+    m.add_argument("--transform", default=None, metavar="FILE|CSV",
+                   help="affine to apply to every source, as a .npy, a .json, "
+                        "or comma-separated numbers in row-major order")
+    m.add_argument("--group-by", dest="group_by", default=None, metavar="ATTR",
+                   help="turn this per-object attribute into named groups")
+    m.add_argument("--lut", default=None, metavar="FILE",
+                   help="JSON {name: code} lookup naming the --group-by values")
+    m.add_argument("--group-prefix", dest="group_prefix", default=None,
+                   help="namespace incoming group names (default: same name "
+                        "extends the existing group)")
+    m.add_argument("--source-attr", dest="source_attr", default=None, metavar="NAME",
+                   help="stamp a per-object attribute with each source's index")
+    m.add_argument("--on-out-of-bounds", dest="on_out_of_bounds", default="raise",
+                   choices=("raise", "skip", "expand"),
+                   help="geometry outside the target's grid: refuse (default), "
+                        "drop it, or grow the grid upwards to fit")
+    m.add_argument("--pyramid", default="rebuild", choices=("rebuild", "drop", "keep"),
+                   help="what to do with the coarse levels a merge invalidates "
+                        "(default: rebuild)")
+    m.add_argument("--pyramid-coarsen", type=parse_float_list,
+                   dest="pyramid_coarsen", default=None, metavar="C1,C2,...",
+                   help="per-level coarsen factors for the rebuild (default: "
+                        "inferred from the existing levels)")
+    m.add_argument("--pyramid-sparsity", type=parse_float_list,
+                   dest="pyramid_sparsity", default=None, metavar="S1,S2,...",
+                   help="per-level sparsity divisors for the rebuild")
+    m.add_argument("--sparsity-strategy", dest="sparsity_strategy",
+                   choices=_SPARSITY_STRATEGIES, default="random",
+                   help="which objects survive sparsification (default: "
+                        "random). 'group' thins each named group by the same "
+                        "factor with a floor of one, so no group is ever lost")
+    m.add_argument("--coarsen-mode", dest="coarsen_mode",
+                   choices=("rdp", "decimate"), default="rdp",
+                   help="streamline/polyline vertex reduction (default: rdp). "
+                        "Note rdp's tolerance is min(chunk_shape)*0.5*factor, "
+                        "so it does NOT compound across levels unless "
+                        "--chunk-scale grows the cells too; 'decimate' strides "
+                        "do compound")
+    m.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print the plan — ids, offsets, whether it fits — and stop")
+    m.set_defaults(func=_compose.run_merge)
+
+    # ---- split -------------------------------------------------------------
+    sp = sub.add_parser(
+        "split", help="cut a store into one store per group, label or source",
+        description="The inverse of merge. Each part keeps the parent's grid by "
+                    "default, so the pieces stay cell-aligned with it and with "
+                    "each other.",
+    )
+    sp.add_argument("store", help="store to split")
+    sp.add_argument("output", help="directory to write the parts into")
+    sp.add_argument("--by", default="groups",
+                    choices=("groups", "attribute", "objects", "provenance"),
+                    help="how to cut (default: the store's named object groups)")
+    sp.add_argument("--attribute", default=None, metavar="NAME",
+                    help="per-object attribute to cut on, for --by attribute")
+    sp.add_argument("--lut", default=None, metavar="FILE",
+                    help="JSON {name: code} lookup naming the attribute values")
+    sp.add_argument("--level", type=int, default=0,
+                    help="resolution level to read from (default: 0)")
+    sp.add_argument("--bounds", default="source", choices=("source", "fit"),
+                    help="keep the parent's grid (default) or size each part "
+                         "to its own contents")
+    sp.add_argument("--pyramid", default="drop", choices=("rebuild", "drop", "keep"),
+                    help="pyramid for each part (default: drop)")
+    sp.add_argument("--min-objects", type=int, dest="min_objects", default=1,
+                    metavar="N", help="skip parts with fewer than N objects")
+    sp.add_argument("--overwrite", action="store_true",
+                    help="replace parts that already exist")
+    sp.add_argument("--dry-run", action="store_true", dest="dry_run",
+                    help="print the parts and their sizes, and stop")
+    sp.set_defaults(func=_compose.run_split)
 
     return parser
 

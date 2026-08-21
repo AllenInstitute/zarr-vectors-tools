@@ -35,13 +35,13 @@ from functools import partial
 import numpy as np
 import pytest
 
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
     read_all_object_manifests,
     read_chunk_fragment_attributes,
     read_chunk_vertices,
 )
 from zarr_vectors_tools.algorithms._links import read_cross_links
-from zarr_vectors.core.store import get_resolution_level, open_store
+from zarr_vectors.building import get_resolution_level, open_store
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
 
@@ -98,7 +98,7 @@ def _level_object_count(store, level):
 
 
 def _level_vertex_count(store, level):
-    from zarr_vectors.core.arrays import list_chunk_keys
+    from zarr_vectors.building import list_chunk_keys
     g = get_resolution_level(open_store(str(store)), level)
     return sum(
         len(f) for cc in list_chunk_keys(g, "vertices")
@@ -279,7 +279,7 @@ def test_two_level_pyramid_shrinks_vertices_preserves_objects(tmp_path):
     # segment_id fragment attributes must be present at every level (the
     # new coarsener relies on this to recurse; the old one never wrote it).
     lvl2 = get_resolution_level(open_store(str(store)), 2)
-    from zarr_vectors.core.arrays import list_chunk_keys
+    from zarr_vectors.building import list_chunk_keys
     for cc in list_chunk_keys(lvl2, "vertices"):
         segs = read_chunk_fragment_attributes(lvl2, "segment_id", cc, dtype=np.uint64)
         n_frags = len(read_chunk_vertices(lvl2, cc, dtype=np.float32, ndim=3))

@@ -10,13 +10,14 @@ from collections import defaultdict
 import numpy as np
 import pytest
 
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_all_object_manifests,
     read_chunk_fragment_attributes,
     read_chunk_vertices,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
@@ -382,8 +383,12 @@ def test_links_have_no_phantom_indices(tmp_store):
     fragments + branch links with NO ``-1`` / out-of-range link indices
     (those rendered as edges to a phantom origin vertex in neuroglancer).
     Reconstruction must yield the connected tree (components == 1)."""
-    from zarr_vectors.core.store import open_store, get_resolution_level
-    from zarr_vectors.core.arrays import read_chunk_links, read_chunk_vertices
+    from zarr_vectors.building import (
+        get_resolution_level,
+        open_store,
+        read_chunk_links,
+        read_chunk_vertices,
+    )
 
     chunk_shape = (1000.0, 1000.0, 1000.0)
     bounds = ([0.0, 0.0, 0.0], [1000.0, 1000.0, 1000.0])

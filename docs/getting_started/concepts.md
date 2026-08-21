@@ -40,7 +40,7 @@ package provides:
 - The `write_points`, `write_mesh`, `write_graph`, `write_polylines` and
   `write_lines` writers that this package calls under the hood.
 - The fragment encoding that lets several objects share a chunk.
-- The `ZVWriter` mutation handle that
+- The `zarr_vectors.building` write helpers that
   `compute_connected_components(..., write_back=True)` and the
   mesh-attribute write-back paths route through.
 - A **basic** multiresolution layer — `per_object` binning plus `random`

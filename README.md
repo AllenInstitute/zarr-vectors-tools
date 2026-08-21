@@ -50,6 +50,8 @@ From the terminal:
 ```bash
 zvtools convert cells.csv cells.zarrvectors --chunk-shape 100,100,100
 zvtools pyramid cells.zarrvectors --coarsen 8,8 --sparsity 2,2
+zvtools merge cells.zarrvectors more_cells.csv       # append, don't replace
+zvtools split cells.zarrvectors parts/ --by groups
 zvtools info cells.zarrvectors
 zvtools validate cells.zarrvectors --level 3
 ```
@@ -71,6 +73,7 @@ build_pyramid("cells.zarrvectors", factors=[(8.0, 2.0), (8.0, 2.0)])
 | --- | --- |
 | `ingest` | CSV/XYZ, LAS/LAZ, PLY, line CSV, TCK, TRK, TRX, SWC, precomputed skeletons, OBJ, STL, edge-list CSV, GraphML |
 | `export` | CSV, PLY, TRK, TRX, SWC, OBJ |
+| `compose` | merge a file or another store into an existing one; split a store by group, label or merged source |
 | `multiresolution` | pyramid building: skeleton/polyline/point/mesh/graph coarsening, five object-selection strategies, cross-level links |
 | `algorithms` | streaming graph search, connected components, clustering; mesh summary, attributes, spatial queries |
 | `headers` | format-specific metadata preservation |

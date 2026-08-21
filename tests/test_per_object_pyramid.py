@@ -23,22 +23,19 @@ from zarr_vectors.constants import (
     CAP_SHARED_FRAGMENTS,
     COARSEN_PER_OBJECT,
 )
-from zarr_vectors.core.arrays import (
-    read_all_object_manifests,
-    read_chunk_vertices,
-    read_object_attribute_present_mask,
-    read_object_attributes,
-)
-from zarr_vectors.core.store import (
+from zarr_vectors.building import (
     get_resolution_level,
     list_resolution_levels,
     open_store,
+    read_all_object_manifests,
+    read_chunk_vertices,
     read_level_metadata,
+    read_object_attribute_present_mask,
+    read_object_attributes,
     read_root_metadata,
 )
-from zarr_vectors.lazy.store import open_zv
+from zarr_vectors.building import neighbouring_chunk_keys
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
-from zarr_vectors.spatial.chunking import neighbouring_chunk_keys
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 
 
@@ -127,11 +124,24 @@ def test_monotone_oid_drop_across_levels(tmp_path):
         sparsity_seed=42,
     )
 
-    zv = open_zv(str(store))
-    levels = list_resolution_levels(open_store(str(store)))
+    root = open_store(str(store))
+    levels = list_resolution_levels(root)
     assert levels == [0, 1, 2]
 
-    present_sets = {L: set(zv[L].present_oids.tolist()) for L in levels}
+    # "Present" == has a non-empty manifest.  Read from the manifests
+    # rather than through the lazy layer's ``present_oids``: that layer is
+    # deprecated, and the data-oriented replacement cannot express this --
+    # ``ObjectCatalog.ids()`` is ``arange(object_count)``, so a sparsified
+    # level reports every dropped OID as present.  Sparsity is this
+    # package's own output, so the check has to be manifest-level.
+    present_sets = {
+        L: {
+            oid for oid, m in enumerate(
+                read_all_object_manifests(get_resolution_level(root, L))
+            ) if len(m)
+        }
+        for L in levels
+    }
     assert present_sets[2] <= present_sets[1] <= present_sets[0]
     # Sparsity is CUMULATIVE per level: each level keeps 1/2 of the PREVIOUS
     # surviving count, not 1/2 of the original.  A <= subset check alone
@@ -142,9 +152,10 @@ def test_monotone_oid_drop_across_levels(tmp_path):
     assert n1 == round(n0 / 2), f"level 1: {n1} != {round(n0 / 2)}"
     assert n2 == round(n1 / 2), f"level 2: {n2} != {round(n1 / 2)} (cumulative)"
     assert n2 < n1, "level 2 must be strictly sparser than level 1"
-    # Object_levels for any surviving level-2 OID is a contiguous prefix.
+    # The levels an OID is visible at form a contiguous prefix — once it is
+    # dropped it never comes back.
     for oid in present_sets[2]:
-        visible = zv.object_levels(oid)
+        visible = [L for L in levels if oid in present_sets[L]]
         assert visible == list(range(max(visible) + 1))
 
 
@@ -204,7 +215,7 @@ def test_per_object_fragments_layout(tmp_path):
         "Per-(object, chunk) fragments must not be shared between objects."
     )
 
-    from zarr_vectors.core.arrays import list_chunk_keys
+    from zarr_vectors.building import list_chunk_keys
     on_disk = 0
     for cc in list_chunk_keys(lvl1):
         fragments = read_chunk_vertices(lvl1, cc, dtype=np.float32, ndim=3)
@@ -214,7 +225,7 @@ def test_per_object_fragments_layout(tmp_path):
     # Centroid-position sharing across fragments: at least one pair of
     # fragments inside the same chunk must contain a row at the same
     # coordinates (different streamlines crossing the same bin).
-    from zarr_vectors.core.arrays import list_chunk_keys as _lc
+    from zarr_vectors.building import list_chunk_keys as _lc
     found_position_overlap = False
     for cc in _lc(lvl1):
         fragments = read_chunk_vertices(lvl1, cc, dtype=np.float32, ndim=3)
@@ -306,10 +317,7 @@ def test_factors_via_build_pyramid(tmp_path):
 def test_object_attribute_present_mask_roundtrip(tmp_path):
     """When a parent level has object_attributes, the per-object coarsen
     writes the per-OID present_mask alongside the dense array."""
-    from zarr_vectors.core.arrays import (
-        create_object_attributes_array,
-        write_object_attributes,
-    )
+    from zarr_vectors.building import create_object_attributes_array, write_object_attributes
 
     store = _build_store(tmp_path, seed=10, n=20)
     root = open_store(str(store), mode="r+")

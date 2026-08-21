@@ -1,59 +1,40 @@
-"""HeaderRegistry — manages format-specific headers within a store.
+"""HeaderRegistry — typed format headers on top of core's dict registry.
 
-Headers are stored under ``/headers/<format>/.zattrs``.  The registry
-provides ``add``, ``get``, ``remove``, and ``available_formats`` for
-managing them.
+Headers live under ``/headers/<format>/.zattrs``.  Core owns the storage
+half (:class:`zarr_vectors.headers.HeaderRegistry`), which round-trips
+opaque JSON dicts and knows nothing about formats; this subclass adds the
+half that belongs to a format package — turning those dicts into the
+:class:`~zarr_vectors_tools.headers.formats.Header` dataclasses, and back.
+
+This used to be a full copy of core's class.  The copy carried two bugs
+that core has since fixed, and that a copy could only ever fix twice:
+``isinstance(..., FsGroup)`` (``FsGroup`` is returned only when the
+backing store is a ``LocalStore``, so a cloud-backed root fell through to
+``open_store(str(root))`` and tried to open a stringified Group as a path)
+and ``shutil.rmtree(hg.path)`` in ``remove`` (``.path`` raises for any
+non-local store, so removing a header worked on disk and nowhere else).
+Subclassing is what stops that from happening a third time.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-# Interim: replace with the public HeaderRegistry shim in zarr-vectors-py once it lands.
-from zarr_vectors.core.store import FsGroup, open_store
-from zarr_vectors_tools.headers.formats import Header, header_from_dict, HEADER_CLASSES
+from zarr_vectors.headers import HeaderRegistry as _CoreHeaderRegistry
+
+from zarr_vectors_tools.headers.formats import Header, header_from_dict
 
 
-class HeaderRegistry:
+class HeaderRegistry(_CoreHeaderRegistry):
     """Manages format-specific headers within a zarr vectors store.
 
-    Args:
-        store_path_or_root: Either a filesystem path (str/Path) to the
-            store, or an already-open :class:`FsGroup` root handle.
+    Same constructor as core's — a path/URL, or an already-open ``Group``
+    root handle.  ``add`` and ``get`` speak :class:`Header` rather than
+    ``dict``; ``available_formats``, ``has`` and ``remove`` are inherited
+    unchanged.
     """
 
-    def __init__(self, store_path_or_root: str | Path | FsGroup) -> None:
-        if isinstance(store_path_or_root, FsGroup):
-            self._root = store_path_or_root
-        else:
-            self._root = open_store(str(store_path_or_root), mode="r+")
-
-    def _headers_group(self, create: bool = False) -> FsGroup:
-        """Get or create the /headers/ group."""
-        if create:
-            return self._root.require_group("headers")
-        if "headers" not in self._root:
-            raise KeyError("No /headers/ group in store")
-        return self._root["headers"]
-
-    @property
-    def available_formats(self) -> list[str]:
-        """List of format names with stored headers."""
-        try:
-            hg = self._headers_group()
-        except KeyError:
-            return []
-        return sorted(
-            name for name in hg
-            if not name.startswith(".")
-        )
-
-    def has(self, format_name: str) -> bool:
-        """Check if a header exists for the given format."""
-        return format_name in self.available_formats
-
-    def get(self, format_name: str) -> Header:
+    def get(self, format_name: str) -> Header:  # type: ignore[override]
         """Read and deserialise a format header.
 
         Args:
@@ -65,19 +46,9 @@ class HeaderRegistry:
         Raises:
             KeyError: If no header exists for this format.
         """
-        try:
-            hg = self._headers_group()
-        except KeyError:
-            raise KeyError(f"No header stored for format '{format_name}'")
+        return header_from_dict(super().get(format_name))
 
-        if format_name not in hg:
-            raise KeyError(f"No header stored for format '{format_name}'")
-
-        fmt_group = hg[format_name]
-        attrs = fmt_group.attrs.to_dict()
-        return header_from_dict(attrs)
-
-    def add(self, format_name: str, header: Header) -> None:
+    def add(self, format_name: str, header: Header) -> None:  # type: ignore[override]
         """Store a format header.
 
         If a header for this format already exists, it is overwritten.
@@ -86,31 +57,10 @@ class HeaderRegistry:
             format_name: Format identifier.
             header: Header dataclass to store.
         """
-        hg = self._headers_group(create=True)
-        fmt_group = hg.require_group(format_name)
-        fmt_group.attrs.update(header.to_dict())
-
-    def remove(self, format_name: str) -> None:
-        """Remove a stored header.
-
-        Args:
-            format_name: Format to remove.
-
-        Raises:
-            KeyError: If no header exists for this format.
-        """
-        try:
-            hg = self._headers_group()
-        except KeyError:
-            raise KeyError(f"No header stored for format '{format_name}'")
-
-        if format_name not in hg:
-            raise KeyError(f"No header stored for format '{format_name}'")
-
-        import shutil
-        fmt_path = hg.path / format_name
-        shutil.rmtree(fmt_path)
+        payload: dict[str, Any] = (
+            header.to_dict() if isinstance(header, Header) else dict(header)
+        )
+        super().add(format_name, payload)
 
     def __repr__(self) -> str:
-        fmts = self.available_formats
-        return f"HeaderRegistry(formats={fmts})"
+        return f"HeaderRegistry(formats={self.available_formats})"

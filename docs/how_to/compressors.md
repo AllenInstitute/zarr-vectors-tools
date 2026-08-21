@@ -2,7 +2,7 @@
 
 Compression is off by default. Every write path in this package accepts a
 `compressor=` argument that is forwarded, unchanged, to core's
-`zarr_vectors.encoding.compression.resolve_compressor`; the CLI exposes
+core's compressor resolver; the CLI exposes
 the same choice as `--compressor {none,zstd,blosc}`.
 
 The decision is a straightforward trade of write throughput against

@@ -6,7 +6,7 @@ reusing each level's own stored settings so the result is byte-for-byte
 equivalent to a from-scratch `build_pyramid`.
 
 ```python
-from zarr_vectors.core.store import open_store
+from zarr_vectors.building import open_store
 from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
 
 root = open_store("tracts.zv", mode="r+")

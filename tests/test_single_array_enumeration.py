@@ -8,7 +8,7 @@ read-modify-write.  It is an array *attribute*, so it lives in ``zarr.json``
 and every cell write rewrites a file shared by the whole array.  The tools
 write per-chunk cells from *parallel worker processes*, so those RMWs race.
 The coordinators call
-:func:`zarr_vectors_tools._manifests.rebuild_nonempty_manifests` after each
+:func:`zarr_vectors.building.rebuild_presence` after each
 parallel phase to re-derive the manifest from the on-disk cells.
 
 These tests assert:
@@ -36,8 +36,7 @@ from functools import partial
 from pathlib import Path
 
 import numpy as np
-from zarr_vectors.core.arrays import list_chunk_keys
-from zarr_vectors.core.store import get_resolution_level, open_store
+from zarr_vectors.building import get_resolution_level, list_chunk_keys, open_store
 
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
@@ -198,7 +197,7 @@ def test_dense_parallel_cross_link_pyramid_completes(tmp_path):
         executor=_ppool_executor,
     )
 
-    from zarr_vectors.core.arrays import read_links
+    from zarr_vectors.building import read_links
 
     root = open_store(str(store))
     for lvl in (0, 1, 2):

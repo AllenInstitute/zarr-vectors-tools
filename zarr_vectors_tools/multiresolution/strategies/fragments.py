@@ -67,24 +67,22 @@ from zarr_vectors.constants import (
     CAP_SHARED_FRAGMENTS,
     VERTICES,
 )
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    LevelMetadata,
     create_object_index_array,
+    create_resolution_level,
     create_vertices_array,
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_all_object_manifests,
     read_chunk_vertices,
+    read_level_metadata,
+    read_root_metadata,
     read_vertex_fragment_index,
     write_chunk_fragments,
     write_chunk_vertices,
     write_object_index,
-)
-from zarr_vectors.core.metadata import LevelMetadata
-from zarr_vectors.core.multiscale import read_level_metadata
-from zarr_vectors.core.store import (
-    create_resolution_level,
-    get_resolution_level,
-    open_store,
-    read_root_metadata,
 )
 from zarr_vectors.exceptions import ArrayError
 

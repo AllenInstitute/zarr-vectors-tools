@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
     create_fragment_attribute_array,
+    get_resolution_level,
+    open_store,
     read_all_object_manifests,
     write_chunk_fragment_attributes,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store
 from zarr_vectors.types.polylines import read_polylines, write_polylines  # noqa: F401  (read_polylines re-exported for tests)
 
 

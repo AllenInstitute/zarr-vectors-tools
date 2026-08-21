@@ -29,6 +29,7 @@ from zarr_vectors.constants import (
     COARSEN_PER_OBJECT,
     DEFAULT_CROSS_LEVEL_DEPTH,
     DEFAULT_CROSS_LEVEL_STORAGE,
+    GEOM_MESH,
     LINKS_IMPLICIT_BRANCHES,
     LINKS_IMPLICIT_SEQUENTIAL,
     OBJECT_ATTRIBUTES,
@@ -38,35 +39,36 @@ from zarr_vectors.constants import (
     XLEVEL_NONE,
     VALID_XLEVEL_STORAGE,
 )
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    rebuild_presence,
+    LevelMetadata,
+    assign_chunks,
+    build_vertex_chunk_mapping,
     create_links_array,
     create_links_family,
     create_object_attributes_array,
     create_object_index_array,
+    create_resolution_level,
     create_vertices_array,
     finalize_links,
+    get_level_chunk_shape,
+    get_resolution_level,
     list_chunk_keys,
+    list_resolution_levels,
+    open_store,
+    partition_cross_level_edges,
     read_all_object_manifests,
     read_chunk_vertices,
+    read_level_metadata,
     read_links,
     read_object_attributes,
+    read_root_metadata,
+    update_root_metadata,
     write_chunk_links,
     write_chunk_vertices,
     write_links,
     write_object_attributes,
     write_object_index,
-)
-from zarr_vectors.core.metadata import (
-    LevelMetadata,
-    get_level_chunk_shape,
-)
-from zarr_vectors.core.store import (
-    create_resolution_level,
-    get_resolution_level,
-    list_resolution_levels,
-    open_store,
-    read_level_metadata,
-    read_root_metadata,
 )
 from zarr_vectors.exceptions import ArrayError, CoarseningError
 from zarr_vectors_tools.multiresolution.coarsen_implicit import (
@@ -74,18 +76,12 @@ from zarr_vectors_tools.multiresolution.coarsen_implicit import (
     positions_in_run,
     segment_object_by_coarse_chunk,
 )
-from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
 from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
 from zarr_vectors_tools.multiresolution.groupings import (
     propagate_groupings,
     surviving_oids_from,
 )
 from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-from zarr_vectors.spatial.boundary import (
-    build_vertex_chunk_mapping,
-    partition_cross_level_edges,
-)
-from zarr_vectors.spatial.chunking import assign_chunks
 from zarr_vectors.typing import ChunkCoords
 
 
@@ -128,12 +124,19 @@ def select_coarsener_key(root_meta: Any) -> str:
     """Pick the coarsener key for a store from its root metadata.
 
     Skeleton stores (``implicit_sequential_with_branches``) use the
-    skeleton-aware decimator; streamline stores (``implicit_sequential`` with
-    geometry_type ``"streamline"``) use the RDP polyline coarsener; everything
-    else uses the per-object pyramid.
+    skeleton-aware decimator; mesh stores use chunk-local vertex clustering;
+    streamline stores (``implicit_sequential`` with geometry_type
+    ``"streamline"``) use the RDP polyline coarsener; everything else uses the
+    per-object pyramid.
     """
     if root_meta.links_convention == LINKS_IMPLICIT_BRANCHES:
         return "skeleton"
+    # Meshes must not reach the per-object pyramid: it concatenates every
+    # fragment each object names (quadratic when objects share chunk-wide
+    # fragments) and rebuilds links at a hardcoded ``link_width=2``, which a
+    # triangle cannot survive.
+    if GEOM_MESH in (root_meta.geometry_types or []):
+        return "mesh"
     if (
         root_meta.links_convention == LINKS_IMPLICIT_SEQUENTIAL
         and "streamline" in (root_meta.geometry_types or [])
@@ -881,7 +884,7 @@ def _per_object_coarsen(
     # This coarsener writes serially (no cross-process manifest race), but
     # re-derive the per-array ``nonempty_chunks`` manifests from disk anyway for
     # uniformity with the parallel coarseners and idempotence.
-    rebuild_nonempty_manifests(level_group)
+    rebuild_presence(level_group)
 
     return {
         "vertex_count": int(n_metavertices),
@@ -1079,25 +1082,21 @@ def _write_empty_preserve_level(
 
 
 def _stamp_root_capability(root_group, cap: str) -> None:
-    """Add ``cap`` to root metadata's ``format_capabilities`` (idempotent)."""
-    attrs = root_group.attrs.to_dict()
-    zv = attrs.get("zarr_vectors", {})
-    caps = list(zv.get("format_capabilities", []))
-    if cap not in caps:
-        caps.append(cap)
-        zv["format_capabilities"] = caps
-        root_group.attrs.update({"zarr_vectors": zv})
+    """Add ``cap`` to root metadata's ``format_capabilities`` (idempotent).
+
+    A thin alias now: core owns the read-modify-write of its own attrs
+    block, which is what this hand-rolled while there was no primitive.
+    """
+    update_root_metadata(root_group, add_capabilities=[cap])
 
 
 def _stamp_root_cross_level(
     root_group, *, depth: int, storage: str,
 ) -> None:
     """Persist cross_level_depth/cross_level_storage on root metadata."""
-    attrs = root_group.attrs.to_dict()
-    zv = attrs.get("zarr_vectors", {})
-    zv["cross_level_depth"] = int(depth)
-    zv["cross_level_storage"] = storage
-    root_group.attrs.update({"zarr_vectors": zv})
+    update_root_metadata(
+        root_group, cross_level_depth=int(depth), cross_level_storage=storage,
+    )
 
 
 def _reconstruct_chunk_assignments(
@@ -1651,3 +1650,9 @@ from zarr_vectors_tools.multiresolution.strategies.fragments import (  # noqa: E
 )
 
 register_coarsener("per_fragment", _per_fragment_coarsener)
+
+from zarr_vectors_tools.multiresolution.strategies.meshes import (  # noqa: E402
+    _mesh_coarsener,
+)
+
+register_coarsener("mesh", _mesh_coarsener)

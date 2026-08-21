@@ -19,25 +19,24 @@ import numpy.typing as npt
 
 from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
 from zarr_vectors.types.points import read_points, write_points
-from zarr_vectors.core.store import (
-    create_resolution_level,
-    get_resolution_level,
-    open_store,
-    read_root_metadata,
-)
-from zarr_vectors.core.metadata import LevelMetadata
-from zarr_vectors.core.arrays import (
-    create_vertices_array,
-    create_object_index_array,
+from zarr_vectors.building import (
+    LevelMetadata,
+    assign_chunks,
     create_attribute_array,
+    create_object_index_array,
+    create_resolution_level,
+    create_vertices_array,
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_chunk_vertices,
-    write_chunk_vertices,
+    read_root_metadata,
     write_chunk_attributes,
+    write_chunk_vertices,
     write_object_index,
 )
-from zarr_vectors.spatial.chunking import assign_chunks
 from zarr_vectors.constants import VERTICES
+from zarr_vectors.exceptions import CoarseningError
 
 
 def coarsen_points(
@@ -194,3 +193,286 @@ def coarsen_points_store(
         "reduction_ratio": coarsened["reduction_ratio"],
         "source_count": n_source,
     }
+
+
+# ===================================================================
+# Random-subset pyramid (attribute-preserving)
+# ===================================================================
+
+def build_point_subset_pyramid(
+    store_path: str,
+    *,
+    levels: int = 5,
+    divisor: float = 8.0,
+    seed: int = 0,
+    source_level: int = 0,
+    attributes: bool = True,
+    attribute_names: list[str] | None = None,
+    attribute_batch: int = 100,
+    shard_shape: int | tuple[int, ...] | None = None,
+    resume: bool = False,
+    progress: bool = False,
+) -> dict[str, Any]:
+    """Build coarser levels, each a random subset of the level above.
+
+    The general :func:`~zarr_vectors_tools.multiresolution.coarsen.build_pyramid`
+    does not fit an object-less point cloud: its sparsity factor drops
+    *objects*, so a store whose points carry no object IDs is treated as a
+    single object and every level comes out identical. Its coarseners also
+    write ``vertices`` (and object attributes) only — per-vertex attributes
+    are dropped, which for a cell atlas means the coarse levels cannot be
+    coloured by gene or metadata.
+
+    This builder addresses both: each level keeps a uniformly random
+    ``1/divisor`` of its parent's points, and carries every per-vertex
+    attribute across, so any level can be rendered and coloured exactly
+    like level 0.
+
+    Sampling is drawn from a seeded generator, so the same ``seed`` gives
+    the same pyramid.  Levels nest — level *n+1* is a subset of level
+    *n* — which keeps a point's appearance/disappearance monotonic as a
+    viewer changes zoom.
+
+    Args:
+        store_path: Store to add levels to (modified in place).
+        levels: How many coarser levels to create.
+        divisor: Keep ``1/divisor`` of the parent's points per level.
+        seed: Seed for the subset draw.
+        source_level: Level to coarsen from.
+        attributes: Carry per-vertex attributes across. Turning this off
+            makes the build dramatically faster but leaves the coarse
+            levels geometry-only.
+        attribute_names: Attributes to carry (default: all at
+            ``source_level``).
+        attribute_batch: Attributes read per pass. Bounds peak memory to
+            roughly ``batch x source_points x 4`` bytes.
+        shard_shape: Shard the new levels' arrays (chunks per axis per
+            file). Strongly recommended — an unsharded level costs one
+            file per chunk per attribute.
+        resume: Keep levels that already exist and fill in only the
+            attributes that are missing or partially written. The subsets
+            are a pure function of ``seed``/``divisor``, so a resumed run
+            reproduces them exactly; the level's point count is checked
+            against that reproduction before anything is written. Without
+            this, an existing level is an error.
+        progress: Print per-level and per-batch progress.
+
+    Returns:
+        Summary dict with ``levels_created`` and a ``level_specs`` list of
+        per-level ``{level, vertex_count, chunk_count}``.
+    """
+    import zarr_vectors.building as B
+    from zarr_vectors.constants import VERTEX_ATTRIBUTES
+
+    root = open_store(str(store_path), "r+")
+    root_meta = read_root_metadata(root)
+    src_group = get_resolution_level(root, source_level)
+    src_meta = B.read_level_metadata(root, source_level)
+    chunk_shape = B.get_level_chunk_shape(root_meta, src_meta)
+
+    available = sorted(src_group.require_group(VERTEX_ATTRIBUTES).children())
+    carried = (
+        [a for a in (attribute_names if attribute_names is not None else available)]
+        if attributes else []
+    )
+    unknown = [a for a in carried if a not in available]
+    if unknown:
+        raise CoarseningError(f"attributes not at level {source_level}: {unknown}")
+
+    # Reference read: positions define the row order every later attribute
+    # read must agree with.  A key attribute, when present, lets that
+    # agreement be asserted rather than assumed.
+    key_attr = "zv_join_key" if "zv_join_key" in available else None
+    reference = read_points(
+        str(store_path), level=source_level,
+        attribute_names=[key_attr] if key_attr else None,
+    )
+    positions = np.asarray(reference["positions"])
+    reference_keys = (
+        np.asarray(reference["vertex_attributes"][key_attr]) if key_attr else None
+    )
+    n_source = len(positions)
+    if progress:
+        print(f"source level {source_level}: {n_source} points, "
+              f"{len(carried)} attribute(s) to carry", flush=True)
+
+    # ---- choose the nested subsets, then write geometry ------------------
+    rng = np.random.default_rng(seed)
+    kept = np.arange(n_source, dtype=np.int64)
+    per_level: list[dict[str, Any]] = []
+    existing_levels = set(B.list_resolution_levels(root))
+
+    for step in range(1, levels + 1):
+        target = source_level + step
+        size = int(len(kept) // divisor)
+        if size < 1:
+            if progress:
+                print(f"  level {target}: parent has {len(kept)} points; "
+                      f"stopping (a 1/{divisor:g} subset would be empty)", flush=True)
+            break
+        kept = np.sort(rng.choice(kept, size=size, replace=False))
+
+        level_positions = positions[kept]
+        assignments = assign_chunks(level_positions, chunk_shape)
+
+        if target in existing_levels:
+            # The subsets are a pure function of (seed, divisor, source
+            # order), so a resumed run recomputes exactly the same ``kept``
+            # without touching geometry.  Cross-check the count anyway: a
+            # mismatch means the level came from different parameters, and
+            # writing attributes against it would misalign every value.
+            if not resume:
+                raise CoarseningError(
+                    f"level {target} already exists; pass resume=True to keep "
+                    f"the existing levels and fill in missing attributes"
+                )
+            existing_meta = B.read_level_metadata(root, target)
+            if existing_meta.vertex_count != len(kept):
+                raise CoarseningError(
+                    f"level {target} holds {existing_meta.vertex_count} points "
+                    f"but seed={seed}/divisor={divisor:g} reproduces "
+                    f"{len(kept)}; refusing to resume against a level built "
+                    f"with different parameters"
+                )
+            level_group = get_resolution_level(root, target)
+            if progress:
+                print(f"  level {target}: reusing existing "
+                      f"{len(kept)} points", flush=True)
+        else:
+            level_meta = LevelMetadata(
+                level=target,
+                vertex_count=len(kept),
+                arrays_present=[VERTICES] + ([VERTEX_ATTRIBUTES] if carried else []),
+                # Subsetting removes points; it does not move or bin the ones
+                # it keeps, so the level occupies level 0's coordinate space
+                # unchanged.  bin_ratio becomes the NGFF scale transform, so it
+                # stays 1 here — unlike a binning coarsener, where the ratio
+                # records how far the grid was rescaled.
+                bin_shape=tuple(root_meta.effective_bin_shape),
+                bin_ratio=tuple(1 for _ in root_meta.effective_bin_shape),
+                coarsening_method="random_subset",
+                parent_level=target - 1,
+                object_sparsity=float(1.0 / divisor),
+            )
+            level_group = create_resolution_level(root, target, level_meta)
+
+            with _subset_session(B, level_group, root_meta, chunk_shape, shard_shape):
+                create_vertices_array(level_group, dtype="float32")
+                for chunk_coords, indices in sorted(assignments.items()):
+                    write_chunk_vertices(
+                        level_group, chunk_coords,
+                        [level_positions[indices].astype(np.float32)],
+                        dtype=np.float32,
+                    )
+            if progress:
+                print(f"  level {target}: {len(kept)} points in "
+                      f"{len(assignments)} chunks", flush=True)
+
+        per_level.append({
+            "level": target,
+            "vertex_count": len(kept),
+            "chunk_count": len(assignments),
+            "kept": kept,
+            "assignments": assignments,
+            "group": level_group,
+        })
+
+    # A resumed run only redoes attributes that are missing or partial.
+    # "Partial" matters as much as "missing": an interrupted write leaves an
+    # array whose chunk set is a strict subset of the level's, and reads that
+    # request it silently return fewer points rather than failing.
+    if resume and carried:
+        before = len(carried)
+        carried = [
+            name for name in carried
+            if not all(_attribute_complete(B, spec["group"], name) for spec in per_level)
+        ]
+        if progress:
+            print(f"  resume: {before - len(carried)} attribute(s) already "
+                  f"complete at every level, {len(carried)} to carry", flush=True)
+
+    # ---- carry attributes, one batch of names across all levels ----------
+    for start in range(0, len(carried), attribute_batch):
+        batch = carried[start:start + attribute_batch]
+        # Subsets are index-based, so every batch must come back in the
+        # same row order as the reference read. Carry the key attribute in
+        # each request and check it, rather than assuming the order is
+        # stable across a dozen independent reads.
+        request = batch if key_attr in batch or key_attr is None else [*batch, key_attr]
+        block = read_points(
+            str(store_path), level=source_level, attribute_names=request,
+        )
+        values = block["vertex_attributes"]
+
+        if reference_keys is not None:
+            got = np.asarray(values.get(key_attr))
+            if got is None or not np.array_equal(got, reference_keys):
+                raise CoarseningError(
+                    "attribute read returned a different row order than the "
+                    "reference read; cannot align subsets safely"
+                )
+
+        for spec in per_level:
+            with _subset_session(
+                B, spec["group"], root_meta, chunk_shape, shard_shape
+            ):
+                for name in batch:
+                    data = np.asarray(values[name])[spec["kept"]]
+                    create_attribute_array(
+                        spec["group"], name, dtype=str(data.dtype),
+                        channel_names=(
+                            [f"ch{i}" for i in range(data.shape[1])]
+                            if data.ndim == 2 else None
+                        ),
+                        exist_ok=True,
+                    )
+                    for chunk_coords, indices in sorted(spec["assignments"].items()):
+                        write_chunk_attributes(
+                            spec["group"], name, chunk_coords,
+                            [data[indices]], dtype=data.dtype,
+                        )
+        if progress:
+            print(f"  carried attributes {min(start + attribute_batch, len(carried))}"
+                  f"/{len(carried)}", flush=True)
+
+    for spec in per_level:
+        B.refresh_arrays_present(spec["group"])
+        spec.pop("kept", None)
+        spec.pop("assignments", None)
+        spec.pop("group", None)
+
+    return {
+        "levels_created": len(per_level),
+        "level_specs": per_level,
+        "attributes_carried": len(carried),
+        "divisor": divisor,
+        "seed": seed,
+    }
+
+
+def _attribute_complete(B, level_group, name: str) -> bool:
+    """True when ``name`` covers every chunk the level's vertices occupy.
+
+    A partially written attribute is worse than a missing one: reads that
+    request it come back short rather than raising, so completeness is
+    checked against the vertices grid rather than mere existence.
+    """
+    try:
+        expected = set(B.list_chunk_keys(level_group, VERTICES))
+        return set(B.list_chunk_keys(level_group, f"vertex_attributes/{name}")) == expected
+    except Exception:
+        return False
+
+
+def _subset_session(B, level_group, root_meta, chunk_shape, shard_shape):
+    """Sharded write session for a new level, or a no-op when unsharded."""
+    from contextlib import nullcontext
+
+    if shard_shape is None:
+        return nullcontext()
+    return B.open_write_session(
+        level_group,
+        shard_shape=shard_shape,
+        bounds=(list(root_meta.bounds[0]), list(root_meta.bounds[1])),
+        chunk_shape=chunk_shape,
+    )

@@ -201,7 +201,7 @@ why:
 | Shim | Waiting on |
 | --- | --- |
 | `_manifests.rebuild_nonempty_manifests` | `Group.rebuild_nonempty_manifests` |
-| `algorithms._chunk_neighbours.neighbouring_chunk_keys` | `zarr_vectors.spatial.chunking.neighbouring_chunk_keys` |
+| `algorithms._chunk_neighbours.neighbouring_chunk_keys` | `zarr_vectors.building.neighbouring_chunk_keys` |
 | `algorithms._links.list_link_cells` | a public `list_link_cells`; currently only implemented for `delta == 0` |
 | `headers.registry.HeaderRegistry` | a public `HeaderRegistry` shim in `zarr-vectors-py` |
 

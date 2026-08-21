@@ -12,9 +12,15 @@ the geometry itself must carry them.
 
 Pipeline
 --------
-Phase 0  Parse 1000-byte header; derive spatial grid from ``num_chunks``.
-Phase 1  Offset-index scan (~17 s for 5M streamlines); partition into N parts.
-Phase A  Parallel over N parts: bin streamlines → spatial chunks, write .npz.
+Phase 0  Parse 1000-byte header; resolve the registration affine.
+Phase 1  Offset-index scan (~6 s for 5.6M streamlines), also sampling one
+         vertex per streamline to size ``chunk_shape`` from ``num_chunks``;
+         partition into N parts.
+Phase A  Parallel over N parts: bin streamlines → spatial chunks, write .npz,
+         report each part's exact bbox.
+Grid     Single-process: union those bboxes into the store bounds and lay out
+         the chunk grid, then create the store.  The grid comes from the
+         geometry, not the header's declared FOV — see ingest_trk_parallel.
 Phase B  Parallel over S chunks: assemble from all N parts → write level-0.
 Coord    Single-process: reconstruct manifests + cross-chunk links.
 Phase 5  Store CRS/affine metadata + TRKHeader for round-trip.
@@ -33,26 +39,32 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    LevelMetadata,
     create_attribute_array,
     create_fragment_attribute_array,
     create_links_family,
     create_object_index_array,
+    create_resolution_level,
+    create_store,
     create_vertices_array,
+    get_resolution_level,
     level_grid_layout,
+    open_store,
+    rebuild_presence,
+    refresh_arrays_present,
+    split_polyline_at_boundaries,
+    update_level_metadata,
     write_chunk_attributes,
     write_chunk_fragment_attributes,
     write_chunk_vertices,
     write_links,
     write_object_index,
 )
-from zarr_vectors.core.metadata import LevelMetadata
-from zarr_vectors.core.store import create_resolution_level, create_store, open_store
 from zarr_vectors.exceptions import IngestError
-from zarr_vectors.spatial.boundary import split_polyline_at_boundaries
 from zarr_vectors.typing import ChunkShape
 
-from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
+from zarr_vectors_tools.ingest._cell_limits import check_vertex_cell_limit
 from zarr_vectors_tools.ingest._polyline_enrichments import (
     arc_length_normalized,
     compute_tangents,
@@ -177,6 +189,27 @@ def _transform_bounds(
     return out.min(axis=0).tolist(), out.max(axis=0).tolist()
 
 
+def _bounds_of_points(
+    points: npt.NDArray, fallback: tuple[list[float], list[float]],
+) -> tuple[list[float], list[float]]:
+    """Axis-aligned bbox of a point cloud, or ``fallback`` if it is empty."""
+    if points is None or len(points) == 0:
+        return fallback
+    p = np.asarray(points, dtype=np.float64)
+    return p.min(axis=0).tolist(), p.max(axis=0).tolist()
+
+
+def _bounds_contain(
+    outer: tuple[list[float], list[float]],
+    inner: tuple[list[float], list[float]],
+) -> bool:
+    """True when ``outer`` fully contains ``inner`` (inclusive)."""
+    return bool(
+        np.all(np.asarray(outer[0]) <= np.asarray(inner[0]))
+        and np.all(np.asarray(outer[1]) >= np.asarray(inner[1]))
+    )
+
+
 def _compute_chunk_shape(
     bounds: tuple[list[float], list[float]],
     num_chunks: int | tuple[int, int, int] | None = None,
@@ -223,6 +256,7 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
         byte_offset  int64 (O,)  byte position of each streamline's n_points int32
         n_points     int32 (O,)  point count per streamline
         nbytes       int64 (O,)  byte span of each streamline record (4 + n_pts*pt_stride + props)
+        first_point  float32 (O, 3)  each streamline's first vertex, on-disk voxmm
     """
     n_scalars = header["n_scalars"]
     n_properties = header["n_properties"]
@@ -231,9 +265,15 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
 
     byte_offsets = []
     n_points_list = []
+    # One vertex per streamline, collected as raw bytes and viewed as float32
+    # at the end — cheaper than 5M struct.unpack calls, and 12 bytes per
+    # streamline is a rounding error next to the offsets themselves.
+    first_pts = bytearray()
 
     path = Path(path)
-    with open(path, "rb") as f:
+    # Big buffer so the read/skip pair below stays inside one buffer fill for
+    # typical record sizes rather than round-tripping to the OS twice.
+    with open(path, "rb", buffering=1 << 20) as f:
         f.seek(1000)
         while True:
             pos = f.tell()
@@ -243,9 +283,18 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
             n = struct.unpack("<i", b)[0]
             if n <= 0:
                 break
+            # The first vertex costs nothing extra: the file is already
+            # positioned on it, so this reads 12 bytes it would have skipped.
+            # Its bbox over all streamlines is what sizes chunk_shape, because
+            # the header's declared FOV can be nothing like where the tracts
+            # actually are (see ingest_trk_parallel).
+            pt = f.read(12)
+            if len(pt) < 12:
+                break  # truncated final record — drop it, same as a short count
             n_points_list.append(n)
             byte_offsets.append(pos)
-            f.seek(n * pt_stride + prop_bytes, 1)
+            first_pts += pt
+            f.seek(n * pt_stride + prop_bytes - 12, 1)
 
     byte_offsets_arr = np.array(byte_offsets, dtype=np.int64)
     n_points_arr = np.array(n_points_list, dtype=np.int32)
@@ -257,6 +306,7 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
         "byte_offset": byte_offsets_arr,
         "n_points": n_points_arr,
         "nbytes": nbytes_arr,
+        "first_point": np.frombuffer(bytes(first_pts), dtype="<f4").reshape(-1, 3),
     }
 
 
@@ -314,8 +364,6 @@ def _phase_a_worker(
     trk_path = shared["trk_path"]
     header = shared["header"]
     chunk_shape = shared["chunk_shape"]
-    grid_shape = shared["grid_shape"]
-    grid_origin = shared["grid_origin"]
     affine_tv2ras = shared["affine_tv2ras"]
     intermediate_dir = shared["intermediate_dir"]
     dtype = shared["dtype"]
@@ -419,22 +467,15 @@ def _phase_a_worker(
                 write_cursor += n
                 local_cursor += n
                 seg_poly_ids.append(poly_id)
-                # Clamp the chunk assignment to the array grid derived from the
-                # TRK header bbox.  Vertices can sit fractionally outside that
-                # bbox (a point at z = -epsilon floors to chunk z = -1), which
-                # the single-array layout's grid bounds-check rejects.  Clamping
-                # the *assignment* (not the stored position) folds such boundary
-                # points into the edge chunk while keeping their exact
-                # coordinates, so no StoreError and no geometry change.
-                seg_chunk_x.append(
-                    min(max(int(cc[0]), grid_origin[0]), grid_origin[0] + grid_shape[0] - 1)
-                )
-                seg_chunk_y.append(
-                    min(max(int(cc[1]), grid_origin[1]), grid_origin[1] + grid_shape[1] - 1)
-                )
-                seg_chunk_z.append(
-                    min(max(int(cc[2]), grid_origin[2]), grid_origin[2] + grid_shape[2] - 1)
-                )
+                # Absolute, unclamped chunk coords.  The array grid is derived
+                # *from* these (via the exact bounds reported below) rather than
+                # the other way round, so every coord here is in range by
+                # construction and there is nothing to clamp against.  Clamping
+                # to a header-derived grid is what silently mis-binned 87% of a
+                # real tractogram into its edge chunks.
+                seg_chunk_x.append(int(cc[0]))
+                seg_chunk_y.append(int(cc[1]))
+                seg_chunk_z.append(int(cc[2]))
                 seg_vertex_counts.append(n)
 
             if compute_length:
@@ -452,6 +493,18 @@ def _phase_a_worker(
             if compute_vertex_count:
                 vertex_counts.append(int(len(verts)))
 
+    # Exact bbox of everything this part wrote, in stored (post-affine) space.
+    # One vectorised pass over the part's own memmap, so the coordinator can
+    # size the chunk grid from the geometry instead of the header's claim
+    # about it.  Taken before the memmap is released, below.
+    if write_cursor > 0:
+        _written = verts_mm[:write_cursor]
+        vert_min = _written.min(axis=0).astype(np.float64)
+        vert_max = _written.max(axis=0).astype(np.float64)
+    else:
+        vert_min = np.full(3, np.inf)
+        vert_max = np.full(3, -np.inf)
+
     # Flush and release the memmap — pages can now be evicted by the OS.
     del verts_mm
     for name in vertex_carry:
@@ -462,6 +515,8 @@ def _phase_a_worker(
     save_dict: dict[str, Any] = {
         "poly_id_base": np.int64(poly_id_base),
         "n_streamlines": np.int64(len(byte_offsets)),
+        "vert_min": vert_min,
+        "vert_max": vert_max,
         "seg_poly_ids": np.array(seg_poly_ids, dtype=np.int64),
         "seg_chunk_x": np.array(seg_chunk_x, dtype=np.int32),
         "seg_chunk_y": np.array(seg_chunk_y, dtype=np.int32),
@@ -607,7 +662,7 @@ def _phase_b_worker(
     # Write to zarr-vectors store
     root = open_store(str(store_path), mode="r+")
     # Level group must already exist (created in coordinator pre-phase-B)
-    from zarr_vectors.core.store import get_resolution_level
+    from zarr_vectors.building import get_resolution_level
     level_group = get_resolution_level(root, 0)
 
     # Reference the arrays already held in `records` (they are already
@@ -879,10 +934,10 @@ def ingest_trk_parallel(
         if progress:
             print(msg)
 
-    # --- Phase 0: header + grid -------------------------------------------
+    # --- Phase 0: header + affine -----------------------------------------
     _log("Phase 0: parsing TRK header...")
     header = parse_trk_header(input_path)
-    bounds = _compute_bounds_from_header(header)
+    header_bounds = _compute_bounds_from_header(header)
     # Register to RASmm world space by baking the trackvis-voxmm→RASmm affine
     # into the geometry (applied per streamline in Phase A).  Derive the store
     # bounds/chunk grid in that same RASmm space so the chunk layout matches the
@@ -890,19 +945,8 @@ def ingest_trk_parallel(
     # chunk-grid origin and axis-flipped relative to the source image.
     affine_tv2ras = _trackvis_to_rasmm_affine(input_path) if register_to_rasmm else None
     if affine_tv2ras is not None:
-        bounds = _transform_bounds(bounds, affine_tv2ras)
-    chunk_shape = _compute_chunk_shape(bounds, num_chunks)
-    lo, hi = bounds
-    # Use the SAME (origin, grid_shape) the single-array layout derives for the
-    # on-disk arrays (floor-based, +1 to hold a point exactly on the max
-    # boundary) so the chunk-assignment clamp in Phase A matches the array grid
-    # exactly.  A ceil-based grid is one cell short on axes whose extent is an
-    # exact multiple of the chunk size (e.g. 189/9 = 21 cells can't hold the
-    # boundary chunk 21, which needs a grid of 22).
-    grid_origin, grid_shape = level_grid_layout(bounds, chunk_shape)
-    _log(f"  bounds: {lo} → {hi} mm")
-    _log(f"  chunk_shape: {chunk_shape}")
-    _log(f"  grid: {grid_shape} = {grid_shape[0]*grid_shape[1]*grid_shape[2]} chunks")
+        header_bounds = _transform_bounds(header_bounds, affine_tv2ras)
+    _log(f"  header bbox: {header_bounds[0]} → {header_bounds[1]} mm")
 
     # --- Phase 1: offset index + partition --------------------------------
     _log("Phase 1: building offset index (scanning file)...")
@@ -919,8 +963,22 @@ def ingest_trk_parallel(
             "byte_offset": offset_index["byte_offset"][:max_streamlines],
             "n_points": offset_index["n_points"][:max_streamlines],
             "nbytes": offset_index["nbytes"][:max_streamlines],
+            # Sliced too, so a subset run sizes its chunks from the subset it
+            # actually ingests rather than the whole file's spread.
+            "first_point": offset_index["first_point"][:max_streamlines],
         }
         n_streamlines = len(offset_index["byte_offset"])
+
+    # Chunk *size* only.  One vertex per streamline is a good enough sample of
+    # where the tracts are, and the header's declared FOV is not: on a real
+    # tractogram the header box was 152 mm across an axis whose tracts ran to
+    # 186 mm, so chunks sized from it were both wrong-scaled and offset.  The
+    # grid's origin and extent come later, from Phase A's exact bounds.
+    seed_bounds = _bounds_of_points(offset_index["first_point"], header_bounds)
+    if affine_tv2ras is not None:
+        seed_bounds = _transform_bounds(seed_bounds, affine_tv2ras)
+    chunk_shape = _compute_chunk_shape(seed_bounds, num_chunks)
+    _log(f"  chunk_shape: {chunk_shape}")
 
     _n_workers = workers if workers and workers > 0 else max(1, (os.cpu_count() or 2) - 1)
     # n_parts controls file split granularity independently of worker count.
@@ -949,6 +1007,97 @@ def ingest_trk_parallel(
         _tmpdir_obj = None
 
     try:
+        # --- Phase A: per-part spatial binning ---------------------------
+        # Runs before the store exists.  Binning needs only chunk_shape, and
+        # deferring array creation until Phase A has reported the geometry's
+        # real extent is what lets the grid be derived from the data.  It also
+        # means a rejected grid (below) leaves no store behind at all.
+        _log(f"Phase A: binning streamlines ({len(part_specs)} parts)...")
+
+        shared_a = {
+            "trk_path": str(input_path),
+            "header": header,
+            "chunk_shape": chunk_shape,
+            "affine_tv2ras": affine_tv2ras,
+            "intermediate_dir": _intermediate_dir,
+            "dtype": dtype,
+            "compute_length": _need_length,
+            "compute_endpoints": _need_endpoints,
+            "compute_vertex_count": _need_vertex_count,
+            "vertex_carry": vertex_carry,
+            "part_specs": part_specs,
+        }
+
+        def _run_phase_a_serial(items: list[int], shared: dict) -> list[str]:
+            return [_phase_a_worker(i, shared) for i in items]
+
+        part_indices = list(range(len(part_specs)))
+
+        if executor is not None:
+            part_npz_paths = executor(_phase_a_worker, part_indices, shared=shared_a)
+        else:
+            part_npz_paths = _run_phase_a_serial(part_indices, shared_a)
+
+        _log(f"  wrote {len(part_npz_paths)} intermediate files")
+
+        # --- Grid layout, from the geometry ------------------------------
+        # Union of the exact per-part bboxes.  A TRK header's dim x voxel_size
+        # is a *declared* FOV and nothing checks it against the tracts: on a
+        # real 5.6M-streamline file 87% of vertices sat outside it, and a grid
+        # built from it therefore had to fold them into its edge chunks —
+        # storing them under coords that do not contain them, and piling 415M
+        # of them into one cell.  The data decides the grid instead.
+        _vmin = np.full(3, np.inf)
+        _vmax = np.full(3, -np.inf)
+        for npz_path in part_npz_paths:
+            with np.load(npz_path) as data:
+                _vmin = np.minimum(_vmin, data["vert_min"])
+                _vmax = np.maximum(_vmax, data["vert_max"])
+        if not np.all(np.isfinite(_vmin)):   # no vertices at all
+            bounds = header_bounds
+        else:
+            bounds = (_vmin.tolist(), _vmax.tolist())
+
+        # Same (origin, grid_shape) the single-array layout derives for the
+        # on-disk arrays: floor-based, +1 to hold a point exactly on the max
+        # boundary.  Because ``bounds`` is the exact extent of what Phase A
+        # binned, every chunk coord it recorded is inside this grid.
+        _grid_origin, grid_shape = level_grid_layout(bounds, chunk_shape)
+        _log(f"  bounds: {bounds[0]} → {bounds[1]} mm")
+        _log(f"  grid: {grid_shape} = {grid_shape[0]*grid_shape[1]*grid_shape[2]} chunks")
+        if not _bounds_contain(header_bounds, bounds):
+            _log("  note: geometry falls outside the TRK header's declared "
+                 "bbox; grid sized to the geometry")
+
+        # Enumerate all occupied chunk coords across all parts, totalling the
+        # vertices bound for each — those totals are exactly the cell payloads
+        # Phase B is about to write, so this is the last point at which an
+        # over-limit chunk can be caught before hours of writing.
+        chunk_vertex_counts: dict[tuple[int, int, int], int] = {}
+        for npz_path in part_npz_paths:
+            with np.load(npz_path) as data:
+                xs = data["seg_chunk_x"].tolist()
+                ys = data["seg_chunk_y"].tolist()
+                zs = data["seg_chunk_z"].tolist()
+                ns = data["seg_vertex_counts"].tolist()
+            for x, y, z, n in zip(xs, ys, zs, ns):
+                cc = (int(x), int(y), int(z))
+                chunk_vertex_counts[cc] = chunk_vertex_counts.get(cc, 0) + int(n)
+        all_chunk_coords: set[tuple[int, int, int]] = set(chunk_vertex_counts)
+        _log(f"  {len(all_chunk_coords)} occupied spatial chunks")
+
+        # A cell at or over 4 GiB is written without complaint and read back
+        # truncated (see _cell_limits), so refuse the grid rather than emit a
+        # store that fails much later, mid-pyramid, with a reshape error.
+        # Ahead of store creation, so a refusal writes nothing at all.
+        check_vertex_cell_limit(
+            chunk_vertex_counts,
+            ndim=3,
+            itemsize=np.dtype(dtype).itemsize,
+            grid_shape=grid_shape,
+            chunk_shape=chunk_shape,
+        )
+
         # --- Create zarr-vectors store ------------------------------------
         _log("Creating zarr-vectors store...")
         vox_to_ras = header["vox_to_ras"]
@@ -1044,48 +1193,6 @@ def ingest_trk_parallel(
                     level_group, _name, dtype="float32", channel_names=_cn,
                 )
 
-        # --- Phase A: per-part spatial binning ---------------------------
-        _log(f"Phase A: binning streamlines ({len(part_specs)} parts)...")
-
-        shared_a = {
-            "trk_path": str(input_path),
-            "header": header,
-            "chunk_shape": chunk_shape,
-            "grid_shape": grid_shape,
-            "grid_origin": grid_origin,
-            "affine_tv2ras": affine_tv2ras,
-            "intermediate_dir": _intermediate_dir,
-            "dtype": dtype,
-            "compute_length": _need_length,
-            "compute_endpoints": _need_endpoints,
-            "compute_vertex_count": _need_vertex_count,
-            "vertex_carry": vertex_carry,
-            "part_specs": part_specs,
-        }
-
-        def _run_phase_a_serial(items: list[int], shared: dict) -> list[str]:
-            return [_phase_a_worker(i, shared) for i in items]
-
-        part_indices = list(range(len(part_specs)))
-
-        if executor is not None:
-            part_npz_paths = executor(_phase_a_worker, part_indices, shared=shared_a)
-        else:
-            part_npz_paths = _run_phase_a_serial(part_indices, shared_a)
-
-        _log(f"  wrote {len(part_npz_paths)} intermediate files")
-
-        # Enumerate all occupied chunk coords across all parts
-        all_chunk_coords: set[tuple[int, int, int]] = set()
-        for npz_path in part_npz_paths:
-            with np.load(npz_path) as data:
-                xs = data["seg_chunk_x"].tolist()
-                ys = data["seg_chunk_y"].tolist()
-                zs = data["seg_chunk_z"].tolist()
-            for x, y, z in zip(xs, ys, zs):
-                all_chunk_coords.add((int(x), int(y), int(z)))
-        _log(f"  {len(all_chunk_coords)} occupied spatial chunks")
-
         # --- Phase B: per-chunk level-0 write ----------------------------
         _log(f"Phase B: writing level-0 ({len(all_chunk_coords)} chunks)...")
 
@@ -1111,7 +1218,7 @@ def ingest_trk_parallel(
         # Re-derive the manifests single-process from the on-disk cells before
         # anything downstream enumerates chunks (coarsening source scan,
         # algorithms readers).
-        rebuild_nonempty_manifests(level_group)
+        rebuild_presence(level_group)
 
         # --- Coordinator: manifests + cross-chunk links -------------------
         _log("Coordinator: building manifests and cross-chunk links...")
@@ -1177,7 +1284,7 @@ def ingest_trk_parallel(
                 ).astype(np.uint32)
 
         if obj_attrs_to_write:
-            from zarr_vectors.core.arrays import write_object_attributes
+            from zarr_vectors.building import write_object_attributes
             from zarr_vectors_tools.multiresolution.coarsen import create_object_attributes_array
             for attr_name, data in obj_attrs_to_write.items():
                 create_object_attributes_array(level_group, attr_name)
@@ -1232,22 +1339,16 @@ def ingest_trk_parallel(
         # Stamp level-0 metadata now that we know the true vertex count and
         # which arrays are present (create_resolution_level runs before Phase B
         # and leaves vertex_count=0 as a placeholder).
-        try:
-            import zarr as _zarr
-            _root_z = _zarr.open(str(output_path), mode="r+")
-            _lvl0_z = _root_z["0"]
-            _lvl0_attrs = dict(_lvl0_z.attrs)
-            if "zarr_vectors_level" in _lvl0_attrs:
-                _lvl0_attrs["zarr_vectors_level"]["vertex_count"] = total_vertices
-                _lvl0_attrs["zarr_vectors_level"]["arrays_present"] = [
-                    k for k in ["vertices", "vertex_fragments", "object_index",
-                                 "links", "object_attributes",
-                                 "vertex_attributes", "fragment_attributes"]
-                    if k in _lvl0_z
-                ]
-            _lvl0_z.attrs.update(_lvl0_attrs)
-        except Exception:
-            pass  # best-effort metadata stamp
+        # Was a raw ``import zarr`` inside ``except Exception: pass`` --
+        # the only reach past the API left in this package -- because core
+        # offered nothing between create_resolution_level and
+        # read_level_metadata.  ``refresh_arrays_present`` also derives the
+        # family list from what is on disk rather than from a hand-kept
+        # candidate list, which is how ``vertex_fragments`` used to go
+        # undeclared.
+        _lvl0 = get_resolution_level(root, 0)
+        refresh_arrays_present(_lvl0)
+        update_level_metadata(_lvl0, vertex_count=total_vertices)
 
         _log("Done.")
 

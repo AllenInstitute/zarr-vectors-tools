@@ -28,14 +28,24 @@ dependencies = [
     # multi-scale layer; the rich coarsening/compute layer lives here in
     # zarr_vectors_tools.multiresolution.
     #
-    # This package requires the merged links/<delta>/<offsets>/ layout (on-disk
-    # FORMAT 0.9.0): connectivity is one family and there is no cross_chunk_links/
-    # to fall back to.  That format ships in the current core dev line, whose
-    # PACKAGE version is still 0.2.x (setuptools-scm: 0.2.1.devN) -- format
-    # version and package version are independent, so the pin tracks the package.
-    # The pin can only exclude the feature-less 0.2.0 release; it cannot by
-    # itself guarantee the merged-links core, since that is unreleased. The real
-    # guarantee is an editable install of the core working tree that carries it.
+    # Two hard requirements on core, neither of which a version specifier can
+    # actually express, because both are unreleased:
+    #
+    #  1. The merged links/<delta>/<offsets>/ layout (on-disk FORMAT 0.9.0):
+    #     connectivity is one family and there is no cross_chunk_links/ to fall
+    #     back to.
+    #  2. The `zarr_vectors.building` surface.  Every import of core in this
+    #     package goes through it -- `zarr_vectors.core`, `.spatial`,
+    #     `.encoding`, `.lazy`, `.ops`, `.sharding` and `.multiresolution` are
+    #     documented internal as of that commit, and reaching into them is what
+    #     made each of core's last three layout refactors a downstream break.
+    #     Against a core without `building`, this package fails at import.
+    #
+    # Core's PACKAGE version is still 0.2.x (setuptools-scm: 0.2.1.devN) --
+    # format version, API surface and package version are all independent, so
+    # the pin tracks the package and can only exclude the feature-less 0.2.0
+    # release.  The real guarantee is an editable install of the core working
+    # tree that carries both.
     "zarr-vectors>=0.2.1.dev0",
     # Inherited transitively from core (format 0.9.0 is zarr v3 only), but
     # declared here because this package imports zarr semantics through core's
@@ -58,6 +68,9 @@ trx = ["trx-python>=0.3"]
 # Back-compat alias: both streamline formats, unchanged for existing users.
 streamlines = ["zarr-vectors-tools[trk,trx]"]
 graph = ["networkx>=3.0"]
+# AnnData (.h5ad) ingest/export -- single-cell and spatial-omics tables.
+# anndata pulls h5py + scipy, so it stays an extra rather than a core dep.
+h5ad = ["anndata>=0.10"]
 points-enrichment = ["scipy>=1.10"]
 # Mesh pyramid coarsening (quadric decimation + vertex clustering) in
 # zarr_vectors_tools.multiresolution.strategies.meshes.
@@ -76,6 +89,7 @@ all = [
     "nibabel>=5.0",
     "trx-python>=0.3",
     "networkx>=3.0",
+    "anndata>=0.10",
     "scipy>=1.10",
     "pyfqmr>=0.2",
     "cloud-volume>=8.0",
@@ -86,7 +100,12 @@ all = [
 dev = [
     "pytest>=7.0",
     "ruff>=0.4",
+    # Both benchmark suites under benchmarks/ are Jupyter notebooks that
+    # plot with matplotlib and tabulate with pandas (pandas is already a
+    # runtime dep above).  They live here rather than in zarr-vectors-py
+    # so the core package stays at numpy / numcodecs / zarr.
     "jupyter>=1.0",
+    "matplotlib>=3.7",
 ]
 
 [project.scripts]

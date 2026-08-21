@@ -38,6 +38,8 @@ Generated from `FORMAT_REGISTRY` in
 | CSV / XYZ point cloud | `csv` *(`.csv`, `.xyz`)* | `zarr_vectors_tools.ingest.csv_points.ingest_csv` | points | none |
 | LAS / LAZ | `las` *(`.las`, `.laz`)* | `zarr_vectors_tools.ingest.las.ingest_las` | points | `las` |
 | PLY (points) | `ply` *(`.ply`)* | `zarr_vectors_tools.ingest.ply.ingest_ply` | points | `ply` |
+| AnnData | `h5ad` *(`.h5ad`)* | `zarr_vectors_tools.ingest.h5ad.ingest_h5ad` | points | `h5ad` |
+| Keyed table | `table` *(no extension)* | `zarr_vectors_tools.ingest.cell_table.ingest_table` | points | none |
 | CSV line segments | `lines` *(no extension)* | `zarr_vectors_tools.ingest.lines.ingest_lines_csv` | lines | none |
 | TrackVis TRK | `trk` *(`.trk`)* | `zarr_vectors_tools.ingest.trk_parallel.ingest_trk_parallel` | streamlines | `parallel` |
 | TRX | `trx` *(`.trx`)* | `zarr_vectors_tools.ingest.trx.ingest_trx` | streamlines | `streamlines` |
@@ -52,12 +54,18 @@ Install an extra with `pip install "zarr-vectors-tools[las]"`, or
 `[all]` for the lot. Python 3.11 or newer is required.
 
 :::{warning}
-`lines` and `edgelist` register **no file extensions**, so they can never
-be auto-detected — the CLI requires an explicit `--format`. A `.csv`
-input with no `--format` resolves to `csv`, i.e. a point cloud, silently
-and successfully. Pass `--format lines` or `--format edgelist` when the
-CSV is not points.
+`lines`, `edgelist` and `table` register **no file extensions**, so they
+can never be auto-detected — the CLI requires an explicit `--format`. A
+`.csv` input with no `--format` resolves to `csv`, i.e. a point cloud,
+silently and successfully. Pass `--format lines`, `--format edgelist` or
+`--format table` when the CSV is not a numeric point table.
 :::
+
+`table` is the CSV path for rows carrying a stable identifier: it reads
+through pandas (so string and categorical columns work, where `csv`'s
+`numpy.loadtxt` path needs everything numeric) and hashes the identifier
+into a join key, so further files can be staged into the store afterwards.
+See [Single-cell and spatial omics](single_cell.md).
 
 `trk` is the only registry entry with `inline_pyramid=True`: the ingest
 builds the multiscale pyramid itself rather than leaving it to a
@@ -82,6 +90,8 @@ in Python when the file is small enough to hold in RAM and you want the
 ## Geometry pages
 
 - [Point clouds](point_clouds.md) — CSV/XYZ, LAS/LAZ, PLY
+- [Single-cell and spatial omics](single_cell.md) — AnnData `.h5ad`, keyed
+  tables, and staging a multi-file dataset into one store
 - [Lines](lines.md) — line-segment CSV
 - [Tractography](tractography.md) — TCK, TRK, TRX
 - [Tractography at scale](tractography_at_scale.md) — the parallel TRK pipeline

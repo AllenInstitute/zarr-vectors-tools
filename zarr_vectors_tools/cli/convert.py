@@ -42,6 +42,8 @@ def _print_summary(action: str, summary: dict) -> None:
     for k in (
         "streamline_count", "vertex_count", "object_count",
         "chunk_count", "cross_chunk_link_count", "chunk_shape", "bounds",
+        "spatial_key", "n_obs", "n_vars", "obs_columns_stored", "genes_stored",
+        "columns_stored", "dropped_na", "key_column",
     ):
         if k in summary:
             print(f"  {k}: {summary[k]}")
@@ -130,6 +132,40 @@ def run(args) -> int:
             f"not {fmt.name!r}"
         )
 
+    # The h5ad and table groups address side tables / named columns that the
+    # other formats have no equivalent of — reject rather than
+    # accept-and-ignore, as above.  Each flag lists the formats that read it.
+    flag_owners = {
+        "--spatial-key": ({"h5ad"}, getattr(args, "spatial_key", "auto") != "auto"),
+        "--spatial-columns": ({"h5ad"}, getattr(args, "spatial_columns", None) is not None),
+        "--obs-column": ({"h5ad"}, bool(getattr(args, "obs_columns", None))),
+        "--no-obs": ({"h5ad"}, bool(getattr(args, "no_obs", False))),
+        "--gene": ({"h5ad"}, bool(getattr(args, "genes", None))),
+        "--layer": ({"h5ad"}, getattr(args, "layer", None) is not None),
+        "--backed": ({"h5ad"}, bool(getattr(args, "backed", False))),
+        "--position-columns": ({"table"}, getattr(args, "position_columns", None) is not None),
+        "--key-column": ({"table"}, getattr(args, "key_column", None) is not None),
+        "--column": ({"table"}, bool(getattr(args, "columns", None))),
+        "--delimiter": ({"table"}, getattr(args, "delimiter", ",") != ","),
+        "--object-id-column": ({"h5ad", "table"},
+                               getattr(args, "object_id_column", None) is not None),
+        "--drop-na": ({"h5ad", "table"}, bool(getattr(args, "drop_na", False))),
+    }
+    rejected = [
+        (flag, owners) for flag, (owners, given) in flag_owners.items()
+        if given and fmt.name not in owners
+    ]
+    if rejected:
+        detail = "; ".join(
+            f"{flag} applies to {'/'.join(sorted(owners))} input" for flag, owners in rejected
+        )
+        raise SystemExit(f"error: {detail} — not {fmt.name!r}")
+
+    if fmt.name == "table" and not args.position_columns:
+        raise SystemExit(
+            "error: --position-columns X,Y[,Z] is required for --format table"
+        )
+
     _maybe_overwrite(args.output, args.overwrite)
 
     # The "length" pyramid strategy ranks by per-object length, which must be
@@ -156,6 +192,25 @@ def run(args) -> int:
             kwargs["compute_endpoints"] = args.compute_endpoints
         if fmt.geometry == "points" and args.knn_distance_k is not None:  # ply / las / csv
             kwargs["knn_distance_k"] = args.knn_distance_k
+        if fmt.name == "table":
+            kwargs["position_columns"] = args.position_columns
+            kwargs["key_column"] = args.key_column
+            kwargs["columns"] = args.columns
+            kwargs["delimiter"] = args.delimiter
+            kwargs["object_id_column"] = args.object_id_column
+            if args.drop_na:
+                kwargs["drop_na"] = True
+        if fmt.name == "h5ad":
+            kwargs["spatial_key"] = args.spatial_key
+            kwargs["spatial_columns"] = args.spatial_columns
+            # None = every obs column; [] = none.  --no-obs is the only way to
+            # spell the empty list on a repeatable append flag.
+            kwargs["obs_columns"] = [] if args.no_obs else args.obs_columns
+            kwargs["genes"] = args.genes
+            kwargs["layer"] = args.layer
+            kwargs["object_id_column"] = args.object_id_column
+            kwargs["backed"] = args.backed
+            kwargs["drop_na"] = args.drop_na
 
         try:
             if fmt.name == "edgelist":
@@ -194,7 +249,7 @@ def _maybe_shard(shard_shape, output) -> None:
     """
     if shard_shape is None:
         return
-    from zarr_vectors.sharding.io import shard_store
+    from zarr_vectors.building import shard_store
 
     print(f"sharding store (shard_shape={shard_shape}) ...")
     stats = shard_store(str(output), shard_shape=shard_shape)
@@ -206,7 +261,7 @@ def _maybe_shard(shard_shape, output) -> None:
 
 def run_shard(args) -> int:
     """``zvtools shard`` — (re)shard or unshard an existing store."""
-    from zarr_vectors.sharding.io import reshard
+    from zarr_vectors.building import reshard
 
     store = str(args.store)
     shape = None if args.unshard else args.shard_shape

@@ -96,6 +96,7 @@ Where to start
 
    ingest/index
    ingest/point_clouds
+   ingest/single_cell
    ingest/lines
    ingest/tractography
    ingest/tractography_at_scale
@@ -103,6 +104,13 @@ Where to start
    ingest/em_skeletons
    ingest/graphs
    ingest/meshes
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Compose
+   :hidden:
+
+   compose/index
 
 .. toctree::
    :maxdepth: 1
@@ -137,6 +145,7 @@ Where to start
 
    export/index
    export/point_clouds
+   export/single_cell
    export/streamlines
    export/skeletons
    export/meshes

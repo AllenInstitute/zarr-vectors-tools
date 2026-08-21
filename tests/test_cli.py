@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zarr_vectors.core.store import list_resolution_levels, open_store
+from zarr_vectors.building import list_resolution_levels, open_store
 
 from zarr_vectors_tools.cli import build_parser, main
 from zarr_vectors_tools.cli._args import (
@@ -251,11 +251,14 @@ class TestTrk:
         """--object-attr / --vertex-attr generate colorable test attributes,
         present and correct at level 0 AND every coarser pyramid level."""
         pytest.importorskip("nibabel")
-        from zarr_vectors.core.arrays import (
-            VERTICES, list_chunk_keys, read_chunk_attributes,
-            read_chunk_vertices, read_object_attributes,
+        from zarr_vectors.building import (
+            VERTICES,
+            get_resolution_level,
+            list_chunk_keys,
+            read_chunk_attributes,
+            read_chunk_vertices,
+            read_object_attributes,
         )
-        from zarr_vectors.core.store import get_resolution_level
 
         trk = _write_smooth_trk(tmp_path / "s.trk", n=200, npts=60)
         out = tmp_path / "s.zv"

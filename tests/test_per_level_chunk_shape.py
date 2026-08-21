@@ -7,17 +7,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from zarr_vectors.core.metadata import (
+from zarr_vectors.building import (
     LevelMetadata,
     RootMetadata,
     chunk_scale_factor,
     get_level_chunk_shape,
-    validate_level_chunk_shape_against_root,
-)
-from zarr_vectors.core.store import (
     open_store,
     read_level_metadata,
     read_root_metadata,
+    validate_level_chunk_shape_against_root,
 )
 from zarr_vectors.exceptions import MetadataError
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid

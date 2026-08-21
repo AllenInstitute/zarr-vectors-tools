@@ -18,7 +18,7 @@ class TestPointCloudPipeline:
         from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors.validate import validate
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
-        from zarr_vectors.core.store import list_resolution_levels, open_store
+        from zarr_vectors.building import list_resolution_levels, open_store
         from zarr_vectors_tools.export.csv_points import export_csv
 
         rng = np.random.default_rng(42)

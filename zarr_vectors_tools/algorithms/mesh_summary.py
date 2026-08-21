@@ -29,14 +29,16 @@ from zarr_vectors.constants import (
     VERTEX_FRAGMENTS,
     VERTICES,
 )
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_all_object_manifests,
     read_chunk_links,
     read_chunk_vertices,
     read_fragment,
+    read_root_metadata,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store, read_root_metadata
 from zarr_vectors.typing import ChunkCoords
 
 from zarr_vectors_tools.algorithms._links import (

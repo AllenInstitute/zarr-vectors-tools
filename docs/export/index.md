@@ -30,6 +30,7 @@ import from the module (`zarr_vectors_tools.export.ply`) every time.
 | --- | --- | --- | --- | --- |
 | points | `zarr_vectors_tools.export.csv_points.export_csv` | CSV / XYZ text | `bbox`, `object_ids`, `chunks` | none |
 | points | `zarr_vectors_tools.export.ply.export_ply` | PLY (binary or ASCII) | `bbox`, `object_ids`, `chunks` | `ply` |
+| points | `zarr_vectors_tools.export.h5ad.export_h5ad` | AnnData `.h5ad` | `bbox`, `chunks` *(see note)* | `h5ad` |
 | polylines | `zarr_vectors_tools.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks` | `trk` |
 | polylines | `zarr_vectors_tools.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks` | `trx` |
 | graphs (trees) | `zarr_vectors_tools.export.swc.export_swc` | SWC | `chunks` | none |
@@ -40,6 +41,13 @@ Install an extra with `pip install "zarr-vectors-tools[trk]"`.
 Filters AND together: `bbox=(...)` *and* `object_ids=[3, 5]` means
 "objects 3 and 5, intersected with the bounding box". Passing `None`
 (the default) disables that filter.
+
+:::{note}
+`export_h5ad` accepts `object_ids` only alongside `attribute_names=[]`.
+Core's object-filtered read path drops vertex attributes, which for an
+`.h5ad` would mean silently writing an empty `obs`; it raises instead.
+See [Single-cell and spatial omics](single_cell.md).
+:::
 
 ## Exporting from a coarser level
 

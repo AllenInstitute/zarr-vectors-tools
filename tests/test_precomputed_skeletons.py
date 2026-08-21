@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from zarr_vectors_tools.algorithms._links import read_cross_links
-from zarr_vectors.core.store import get_resolution_level, open_store
+from zarr_vectors.building import get_resolution_level, open_store
 from zarr_vectors.types import skeletons as sk
 
 

@@ -22,8 +22,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
-from zarr_vectors.constants import GROUP_ATTRIBUTES
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
     create_groupings_array,
     create_groupings_attributes_array,
     read_all_groupings,
@@ -31,6 +30,7 @@ from zarr_vectors.core.arrays import (
     write_groupings,
     write_groupings_attributes,
 )
+from zarr_vectors.constants import GROUP_ATTRIBUTES
 
 __all__ = ["propagate_groupings"]
 
@@ -41,6 +41,36 @@ def _group_attribute_names(level_group) -> list[str]:
         return sorted(set(grp.array_keys()) | set(grp.group_keys()))
     except Exception:  # noqa: BLE001
         return []
+
+
+def _carry_group_names(src_group, dst_group) -> list[str]:
+    """Copy the row labels alongside the rows.
+
+    Memberships live in the ``groups`` array; the names live in that
+    array's own metadata, under ``group_names``.  Carrying only the first
+    leaves a coarse level whose rows are addressable as ``group_0`` and
+    nothing else — which is precisely the "a store cannot be understood
+    without the writing application's source next to it" problem the
+    names were added to fix, reintroduced one level up.
+
+    Row ids are preserved by every coarsener here, so the labels transfer
+    positionally with no remapping.
+    """
+    from zarr_vectors.constants import GROUPS
+
+    try:
+        names = list(src_group.read_array_meta(GROUPS).get("group_names") or [])
+    except Exception:  # noqa: BLE001 - an unnamed source has nothing to carry
+        return []
+    if not names:
+        return []
+    try:
+        meta = dict(dst_group.read_array_meta(GROUPS))
+        meta["group_names"] = [str(n) for n in names]
+        dst_group.write_array_meta(GROUPS, meta)
+    except Exception:  # noqa: BLE001 - names are additive, never load-bearing
+        return []
+    return [str(n) for n in names]
 
 
 def propagate_groupings(
@@ -89,6 +119,7 @@ def propagate_groupings(
 
     create_groupings_array(dst_group)
     write_groupings(dst_group, out)
+    _carry_group_names(src_group, dst_group)
 
     # Group attributes are indexed by group id, and group ids are unchanged, so
     # they copy across verbatim.

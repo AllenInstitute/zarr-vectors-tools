@@ -20,21 +20,19 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
     create_object_index_array,
+    create_store,
     create_vertices_array,
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_all_object_manifests,
     read_chunk_vertices,
+    read_level_metadata,
     write_chunk_fragments,
     write_chunk_vertices,
     write_object_index,
-)
-from zarr_vectors.core.store import (
-    create_store,
-    get_resolution_level,
-    open_store,
-    read_level_metadata,
 )
 
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
@@ -189,7 +187,7 @@ def test_root_capabilities_advertise_the_sharing(shared_fragment_store):
     # dedupe by fragment identity. Leaving it unstamped would say "no" when the
     # answer is yes — the exact inverse of the per-object path's situation.
     from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS, CAP_SHARED_FRAGMENTS
-    from zarr_vectors.core.store import read_root_metadata
+    from zarr_vectors.building import read_root_metadata
 
     store = shared_fragment_store
     coarsen_level(str(store), 0, 1, coarsen_factor=2.0, method="per_fragment")
@@ -293,7 +291,7 @@ def test_coarsen_factors_compound_across_levels(shared_fragment_store):
     instead makes level 2 a near-identity re-bin of level 1, so a three-level
     pyramid silently collapses to two useful ones.
     """
-    from zarr_vectors.core.store import read_level_metadata
+    from zarr_vectors.building import read_level_metadata
 
     store = shared_fragment_store
     build_pyramid(
@@ -315,12 +313,10 @@ def test_an_empty_link_family_still_carries_its_counts(tmp_path):
     family carrying policy but no counts. Compounding factors makes deep levels
     collapse routinely, so this stopped being a corner case.
     """
-    from zarr_vectors.core.arrays import (
+    from zarr_vectors.building import (
+        get_resolution_level,
         links_group_path,
         list_link_deltas,
-    )
-    from zarr_vectors.core.store import (
-        get_resolution_level,
         list_resolution_levels,
     )
     from zarr_vectors.types.graphs import write_graph
@@ -361,8 +357,11 @@ def test_group_taxonomy_reaches_every_level(shared_fragment_store, method):
     coarse level has an object index but no way to say what any object *is* —
     a reader asking for "the network object" at level 2 gets nothing.
     """
-    from zarr_vectors.core.arrays import read_all_groupings
-    from zarr_vectors.core.store import get_resolution_level, list_resolution_levels
+    from zarr_vectors.building import (
+        get_resolution_level,
+        list_resolution_levels,
+        read_all_groupings,
+    )
 
     store = shared_fragment_store
     # Give the fixture a named group taxonomy to carry.
@@ -372,7 +371,7 @@ def test_group_taxonomy_reaches_every_level(shared_fragment_store, method):
         {oid: [((0, 0, 0), f) for f in frags] for oid, frags in _OBJECTS.items()},
         sid_ndim=3,
     )
-    from zarr_vectors.core.arrays import create_groupings_array, write_groupings
+    from zarr_vectors.building import create_groupings_array, write_groupings
 
     create_groupings_array(lg0)
     write_groupings(lg0, {0: [0, 1], 1: [2, 3], 2: [4]})
@@ -398,13 +397,13 @@ def test_sparsified_objects_leave_their_groups(shared_fragment_store):
     Dropped OIDs keep their slot with an empty manifest, so a stale membership
     would hand a reader an empty object and call it a member.
     """
-    from zarr_vectors.core.arrays import (
+    from zarr_vectors.building import (
         create_groupings_array,
+        get_resolution_level,
         read_all_groupings,
         read_all_object_manifests,
         write_groupings,
     )
-    from zarr_vectors.core.store import get_resolution_level
 
     store = shared_fragment_store
     lg0 = get_resolution_level(open_store(str(store), mode="r+"), 0)

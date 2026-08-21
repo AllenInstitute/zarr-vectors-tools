@@ -11,16 +11,14 @@ from __future__ import annotations
 import numpy as np
 
 from zarr_vectors.constants import CAP_MULTISCALE_LINKS, XLEVEL_EXPLICIT
-from zarr_vectors.core.arrays import (
-    list_link_deltas,
-    read_all_object_manifests,
-    read_chunk_vertices,
-)
-from zarr_vectors.core.paths import links_group_path
-from zarr_vectors.core.store import (
+from zarr_vectors.building import (
     get_resolution_level,
+    links_group_path,
+    list_link_deltas,
     list_resolution_levels,
     open_store,
+    read_all_object_manifests,
+    read_chunk_vertices,
     read_level_metadata,
     read_root_metadata,
 )

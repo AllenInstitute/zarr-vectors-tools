@@ -16,13 +16,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from zarr_vectors.core.arrays import (
-    list_chunk_keys,
-    read_all_object_manifests,
-    read_chunk_vertices,
-)
+from zarr_vectors.building import list_chunk_keys, read_all_object_manifests, read_chunk_vertices
 from zarr_vectors_tools.algorithms._links import read_cross_links
-from zarr_vectors.core.store import (
+from zarr_vectors.building import (
     get_resolution_level,
     open_store,
     read_level_metadata,

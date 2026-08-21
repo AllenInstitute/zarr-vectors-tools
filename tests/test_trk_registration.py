@@ -29,8 +29,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from zarr_vectors.core.arrays import list_chunk_keys, read_chunk_vertices
-from zarr_vectors.core.store import get_resolution_level, open_store
+from zarr_vectors.building import (
+    get_resolution_level,
+    list_chunk_keys,
+    open_store,
+    read_chunk_vertices,
+)
 
 from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
 

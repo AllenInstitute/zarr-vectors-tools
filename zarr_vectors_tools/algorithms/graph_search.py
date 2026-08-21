@@ -20,13 +20,14 @@ from typing import Any, Callable
 
 import numpy as np
 
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    chunk_local_to_global_offsets,
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_link_attributes,
     read_links,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 
 from zarr_vectors_tools.algorithms._links import link_prefetch_plan
 

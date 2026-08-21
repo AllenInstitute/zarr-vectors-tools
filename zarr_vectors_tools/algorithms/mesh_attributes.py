@@ -8,7 +8,7 @@ near chunk boundaries. The returned dict reports
 ``incomplete_boundary_vertices`` so callers can quantify the effect.
 
 ``write_back=True`` persists the result via
-:class:`zarr_vectors.lazy.ZVWriter.add_node_attribute_sync` under
+:func:`zarr_vectors_tools._attributes.write_vertex_attribute` under
 ``attributes/<name>/`` (``vertex_normal`` for normals,
 ``mean_curvature`` for curvature).
 """
@@ -24,15 +24,16 @@ from zarr_vectors.constants import (
     VERTEX_FRAGMENTS,
     VERTICES,
 )
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    chunk_local_to_global_offsets,
+    get_resolution_level,
     list_chunk_keys,
+    open_store,
     read_chunk_links,
     read_chunk_vertices,
 )
-from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors.lazy import open_zv
-from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
 
+from zarr_vectors_tools._attributes import write_vertex_attribute
 from zarr_vectors_tools.algorithms._links import (
     chunk_key_str,
     link_prefetch_plan,
@@ -95,7 +96,7 @@ def compute_vertex_normals(
             unit face normals.
         write_back: When True, persist the result under
             ``attributes/vertex_normal/`` via
-            :meth:`ZVWriter.add_node_attribute_sync`.
+            :func:`~zarr_vectors_tools._attributes.write_vertex_attribute`.
 
     Returns:
         Dict with:
@@ -151,11 +152,11 @@ def compute_vertex_normals(
     normals_unit = (normals / safe).astype(np.float32)
 
     if write_back:
-        zv = open_zv(str(store_path))
-        with zv[level].writer() as w:
-            w.add_node_attribute_sync(
-                "vertex_normal", normals_unit, dtype=np.float32,
-            )
+        # A second, writable handle: the read path above opens mode="r".
+        write_vertex_attribute(
+            get_resolution_level(open_store(str(store_path), mode="r+"), level),
+            "vertex_normal", normals_unit, dtype=np.float32,
+        )
 
     return {
         "normals": normals_unit,
@@ -182,7 +183,7 @@ def compute_mean_curvature(
         level: Resolution level.
         write_back: When True, persist the result under
             ``attributes/mean_curvature/`` via
-            :meth:`ZVWriter.add_node_attribute_sync`.
+            :func:`~zarr_vectors_tools._attributes.write_vertex_attribute`.
 
     Returns:
         Dict with:
@@ -265,11 +266,11 @@ def compute_mean_curvature(
     boundary = _count_boundary_vertex_set(cross_links)
 
     if write_back:
-        zv = open_zv(str(store_path))
-        with zv[level].writer() as w:
-            w.add_node_attribute_sync(
-                "mean_curvature", mean_curv, dtype=np.float32,
-            )
+        # A second, writable handle: the read path above opens mode="r".
+        write_vertex_attribute(
+            get_resolution_level(open_store(str(store_path), mode="r+"), level),
+            "mean_curvature", mean_curv, dtype=np.float32,
+        )
 
     return {
         "mean_curvature": mean_curv,

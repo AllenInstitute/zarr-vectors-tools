@@ -57,7 +57,7 @@ from typing import Any, Sequence
 import numpy as np
 import numpy.typing as npt
 
-from zarr_vectors.core.arrays import write_object_attributes
+from zarr_vectors.building import write_object_attributes
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
@@ -695,8 +695,11 @@ def run_ingest_plain(
         if pyramid_workers:
             from zarr_vectors_tools.ingest._parallel import dask_executor
             from zarr_vectors.constants import VERTICES
-            from zarr_vectors.core.arrays import list_chunk_keys
-            from zarr_vectors.core.store import get_resolution_level, open_store as _open
+            from zarr_vectors.building import (
+                get_resolution_level,
+                list_chunk_keys,
+                open_store as _open,
+            )
 
             # Use adaptive per-level worker count — same logic as run_ingest.
             root_for_counts = _open(str(out_store), mode="r")

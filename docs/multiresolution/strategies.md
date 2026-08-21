@@ -5,7 +5,7 @@ root metadata, calls `select_coarsener_key` to get a dispatch key, and
 looks that key up in the coarsener registry. The geometry decides.
 
 ```python
-from zarr_vectors.core.store import open_store, read_root_metadata
+from zarr_vectors.building import open_store, read_root_metadata
 from zarr_vectors_tools.multiresolution.coarsen import (
     get_coarsener,
     register_coarsener,
