@@ -15,6 +15,7 @@ be restyled for a journal's column width without re-running anything.
 
 ```
 run_sweep.py         measure -> results/measurements.csv + results/environment.json
+run_large.py         the same sweep, one decade further -> results/large/
 make_figure.py       plot    -> results/panels/*.{png,pdf} + results/supplementary_table.{md,csv}
 profile_hotspots.py  why the timings look the way they do (see below)
 _harness.py          timing, statistics, synthetic datasets
@@ -39,6 +40,14 @@ results/panels/A_storage_per_vertex.{png,pdf}   +  A_storage_per_vertex_key
                 H_read_one_vs_chunks               H_read_one_vs_chunks_key
                 H2_read_one_vs_fragments           H2_read_one_vs_fragments_key
 ```
+
+**Both region panels are log-log on all three scales** — size across the
+bottom, query time on the left, box volume on the right. They have to be
+once the sweep runs to 10⁷: the times on one panel span 2.7 ms to 55 s,
+and the box shrinks from the whole domain to ~0.0014 % of it. A linear
+pair flattens everything under the mesh series onto the axis.
+`_region_panel(..., linear=True)` restores the old linear scales, which
+read well only over a narrow range of N.
 
 **F comes in two versions and only one belongs in the figure.** `F` sizes
 the query box to ~100 *objects*, which is a different box per geometry —
@@ -78,7 +87,8 @@ over) and precomputed's `by_id` index in the chunked block, which is one
 file per annotation — a million files per write at the top size.
 
 `--quick` shrinks the sweep to two small vertex sizes and two small
-object counts for a smoke test.
+object counts for a smoke test. `--sizes 1000,10000,1000000` sweeps
+exactly those vertex counts instead of the default decades.
 `--workdir DIR` puts the scratch stores somewhere with room — the sweep
 touches a few GB of transient files at the top size, and **it must be a
 filesystem that takes a million small files in one directory**: the
@@ -94,6 +104,100 @@ rows without dropping anything, which is only right when the new rows are
 a series the file does not already hold. Either way `environment.json`
 records which blocks were re-run under `mixed_run`, and keeps the
 superseded package versions under `previous_run` if they changed.
+
+### The long run — 10³ to 10⁷
+
+`run_sweep.py` stops at 10⁶ because that is what a decade costs: one more
+point per line roughly triples the wall time, and most runs of this
+script are checking that nothing regressed rather than producing a
+figure. The extra decade is not dropped, only moved.
+
+```bash
+python benchmarks/paper/run_large.py --workdir /scratch   # ~1.5 h
+python benchmarks/paper/make_figure.py --results benchmarks/paper/results/large
+```
+
+`run_large.py` is a driver, not a second implementation — it runs
+`run_sweep.py` once per block over `LARGE_SIZES`, so a point on a curve
+means the same thing at 10⁷ as it does at 10³. What it adds is what a
+multi-hour run needs:
+
+- **Its own results directory.** Output goes to `results/large/`, so an
+  interrupted or mis-configured run cannot overwrite the committed
+  reference artefact. `--into-main` writes to `results/` instead, for
+  when the large sweep *is* the artefact.
+- **Resumability.** Each block is a separate process appending to one
+  CSV, and `run_sweep.py` writes its CSV once at the end — so a block
+  contributes either all its rows or none, and `--resume` restarts a
+  killed run at the block it died on. A block that fails does not stop
+  the ones after it; the summary names it.
+- **A time budget you can read afterwards.** Every block is timed, and
+  `results/large/run_large.log` keeps the per-block breakdown and total.
+
+`--dry-run` prints the plan and the exact commands without measuring
+anything. `--blocks`, `--geometries`, `--sizes` and `--workdir` pass
+through to the sweep; `--figure` regenerates the panels when it finishes.
+
+Three competitors stay capped below 10⁷, and each cap skips a point whose
+shape is already settled at 10⁶ while its cost is superlinear in the
+*writer* rather than in the format: GraphML above 10⁵ (networkx builds
+the whole XML tree in memory), the per-point object index above 10⁶
+(quadratic in points per chunk — see below), and precomputed annotations
+above 10⁶ (`by_id` is one file per annotation, so 10⁷ is ten million
+files, per repeat). Every cap logs its skip as the sweep reaches it, so
+the omission is in the run's own output.
+
+**What the top point actually costs.** One repeat of each operation at
+N = 10⁷, measured on the reference machine, is what sets the run's
+length — the sweep takes 2 to 3 samples of most of these:
+
+| | point cloud | streamlines | meshes |
+|---|---|---|---|
+| generate | 0.1 s | 4.7 s | 0.7 s |
+| ZV write all | 4.6 s | 44.4 s | 153.2 s |
+| ZV read all | 0.1 s | 7.7 s | 41.5 s |
+| ZV fetch one | <0.1 s | <0.1 s | 53.3 s |
+| ZV replace one | <0.1 s | 9.8 s | — |
+| competitor write | 0.2 s (PLY) | 10.3 s (TRK) | 3.0 s (STL) |
+| competitor read | 0.1 s (PLY) | 2.6 s (TRK) | 0.6 s (STL) |
+| store on disk | 0.10 GB | 0.12 GB | 0.10 GB |
+| competitor on disk | 0.12 GB (PLY) | 0.12 GB (TRK) | 0.84 GB (STL) |
+
+Mesh `fetch_one` is the outlier, and it is the curve continuing rather
+than a new cliff: `read_mesh` has no `object_ids=` filter, so a patch
+arrives inside its chunks and is filtered locally, and at a fixed
+125-chunk grid those chunks get denser with N. The `detail` column
+records the amplification per row — 1× at 10³, 10× at 10⁵, 70× at 10⁶,
+and ~700× at 10⁷. See "Selective reads for polylines and meshes are
+dominated by Python assembly" below.
+
+Budget **around 1.5 hours** in total, and expect a **peak RSS of about
+12 GB** during the mesh writes — the generator holds vertices, faces and
+object ids for 10⁷ vertices while the writer builds its chunks. This is
+not a sweep for a 16 GB laptop.
+
+**The storage bars retarget themselves.** `A_storage_per_vertex` and
+`B_size_ratio` are drawn at the largest N in the file, so plotting
+`results/large/` moves them from 10⁶ to 10⁷ — where the three capped
+competitors above are absent and simply have no bar. That is the right
+default (the bars should show the largest measured dataset) but it does
+mean the per-point-index price and the GraphML bar are on the 10⁶ figure
+and not on the 10⁷ one. If the figure wants them, draw the storage
+panels from `results/` and the curves from `results/large/`; which N a
+panel targets is a layout decision, which is why `make_figure.py` takes
+`--results` rather than deciding for you.
+
+Repeat counts step down at the top size: the timing block takes
+`LARGE_TIMING_RUNS = 3` samples rather than 5, and `n_runs()` drops to 2
+for whole-dataset writes. The CSV records `n_runs` per row, so the wider
+confidence interval at 10⁷ is visible rather than implied.
+
+The blocks that hold N fixed rather than sweeping it — the
+selected-fraction spatial sweep at 10⁶, fidelity at 10⁵, and the
+chunk-count and fragmentation blocks at 10⁶ — are re-measured at those
+same fixed sizes. Leaving them out would leave `results/large/` unable to
+draw half the panels; re-measuring them is what makes every number in
+that directory one machine state.
 
 ## What the panels show
 

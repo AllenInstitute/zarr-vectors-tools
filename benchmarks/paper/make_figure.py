@@ -285,9 +285,10 @@ def _line(ax, x, y, hw, geom, zv, label=None):
 def _axes(ax, xlabel, ylabel, title, letter, xlog=True, ylog=True):
     """Scales, labels, grid and letter for one panel.
 
-    Log on both axes is the default and what most of these panels want --
-    the series span four decades of size and five of time.  The region
-    panels are drawn linear instead, deliberately: see ``_region_panel``.
+    Log on both axes is the default and what every panel here wants --
+    the series span four decades of size and five of time.  ``_region_panel``
+    can still be asked for linear scales via its ``linear`` flag, which
+    nothing does by default.
     """
     ax.set_xscale("log" if xlog else "linear")
     ax.set_yscale("log" if ylog else "linear")
@@ -725,17 +726,24 @@ def _volume_axis(ax, curves, *, per_geometry, log=True):
 
 def _region_panel(ax, df, block, title, letter, key, *, per_geometry,
                   linear=False):
-    """``linear`` puts time and box volume on linear scales.
-
-    Size stays logarithmic either way: the sweep is a decade apart per
-    point, and a linear size axis stacks three of the four measurements
-    against the left spine.
-    """
     """The region-query panel, in its two variants.
 
     ``per_geometry`` says whether the box was sized per geometry (~100
     objects each, so three volume curves) or once for all of them (~100
     vertices, so one).
+
+    Both y axes are logarithmic: query time on the left and box volume on
+    the right.  They have to be, now that the sweep runs to 10^7 -- the
+    times on one panel span from 2.7 ms to 55 s, four and a half decades,
+    and on a linear axis everything below the mesh series is flattened
+    onto the x axis.  The right axis spans as far: sizing the box to ~100
+    objects takes it from the whole domain down to about 0.0014 % of it.
+    ``linear=True`` restores the old linear pair for both, which is
+    readable only over a narrow range of N.
+
+    Size is logarithmic either way -- the sweep is a decade apart per
+    point, and a linear size axis stacks four of the five measurements
+    against the left spine.
     """
     sub = df[df["block"] == block]
     vol = []
@@ -792,7 +800,7 @@ def panel_fixed(ax, df, letter="F", key=False):
     """
     return _region_panel(ax, df, "spatial_fixed",
                          "Read one region\n(box sized to ~100 objects)",
-                         letter, key, per_geometry=True, linear=True)
+                         letter, key, per_geometry=True)
 
 
 def panel_equal_box(ax, df, letter="F2", key=False):
@@ -808,7 +816,7 @@ def panel_equal_box(ax, df, letter="F2", key=False):
     """
     return _region_panel(ax, df, "spatial_volume",
                          "Read one region\n(equal box, ~100 vertices)",
-                         letter, key, per_geometry=False, linear=True)
+                         letter, key, per_geometry=False)
 
 
 def panel_chunks(ax, df, letter="H", key=False):

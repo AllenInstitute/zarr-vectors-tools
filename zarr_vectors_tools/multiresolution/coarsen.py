@@ -1656,3 +1656,13 @@ from zarr_vectors_tools.multiresolution.strategies.meshes import (  # noqa: E402
 )
 
 register_coarsener("mesh", _mesh_coarsener)
+
+from zarr_vectors_tools.multiresolution.strategies.mesh_decimate_level import (  # noqa: E402
+    _mesh_decimate_coarsener,
+)
+
+# Quadric edge collapse. Registered under its own key rather than replacing
+# "mesh", so a store can be rebuilt either way and the two compared on the
+# same data; select_coarsener_key still routes mesh stores to the incumbent
+# unless build_pyramid is given method="mesh_decimate".
+register_coarsener("mesh_decimate", _mesh_decimate_coarsener)

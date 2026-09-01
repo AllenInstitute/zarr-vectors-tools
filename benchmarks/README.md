@@ -37,6 +37,20 @@ Then open a notebook and run all cells. Budget ~5 minutes for the
 long ones (`formats/01_size_scaling`, `internals/01_size_scaling`,
 `internals/08_edit_operations`).
 
+`paper/` is scripts, not notebooks, so it runs from a shell instead:
+
+```bash
+python benchmarks/paper/run_sweep.py     # 10^3..10^6, ~20-30 min
+python benchmarks/paper/run_large.py     # 10^3..10^7, ~1.5 h, resumable
+python benchmarks/paper/make_figure.py   # seconds
+```
+
+The default sweep stops at 10^6 because one more decade roughly triples
+its wall time, and it is mostly run to check that nothing regressed.
+`run_large.py` drives the same measurement code one decade further, block
+by block into `paper/results/large/`, so the long run is opt-in and a
+killed one can be resumed. See [`paper/README.md`](paper/README.md).
+
 ## Regenerating
 
 Notebooks are generated; never edit the `.ipynb` directly.

@@ -1125,7 +1125,19 @@ def coarsen_skeleton_level(
     attr_names: list[str] = []
     attr_dtypes: dict[str, np.dtype] = {}
     if VERTEX_ATTRIBUTES in src:
-        for name in src[VERTEX_ATTRIBUTES]:
+        # `.children()`, NOT bare iteration. `Group.__iter__` yields sub-GROUPS
+        # only (it is `sorted(self._zarr.group_keys())`), while each per-vertex
+        # attribute is an ARRAY — so `for name in src[VERTEX_ATTRIBUTES]`
+        # silently yielded nothing, `attr_names` stayed empty, and every coarse
+        # level was written with no `vertex_attributes/` at all. Nothing
+        # errored: the store just lost `radius`/`compartment` above level 0,
+        # and the reader zero-fills the missing arrays, so `prop_radius()`
+        # evaluated to 0.0 at every level the camera actually uses.
+        #
+        # `Group.children()` exists precisely for this and says so in its
+        # docstring; `strategies/polylines.py` already uses it here. This is
+        # the only remaining site that did not.
+        for name in src[VERTEX_ATTRIBUTES].children():
             try:
                 meta = src.read_array_meta(f"{VERTEX_ATTRIBUTES}/{name}")
                 attr_dtypes[name] = np.dtype(meta.get("dtype", "float32"))

@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Measure everything the paper figure needs, once, into a tidy CSV.
 
-    python run_sweep.py                 # full sweep, ~20 min
+    python run_sweep.py                 # full sweep, 10^3..10^6, ~20 min
     python run_sweep.py --quick         # smoke test, ~1 min
     python run_sweep.py --workdir /scratch
+    python run_large.py                 # 10^3..10^7, ~1.5 h, resumable
 
 Measurement is deliberately separated from plotting.  This script writes
 ``results/measurements.csv`` and ``results/environment.json``; nothing
@@ -44,7 +45,18 @@ per-object index.  The storage block additionally reports the
 uncompressed and un-indexed variants so the cost of each can be read off.
 
 Timing measurements are ``TIMING_RUNS`` repeats each, fixed rather than
-adaptive.
+adaptive -- ``LARGE_TIMING_RUNS`` at the top of the large sweep, where a
+single repeat is a whole-dataset write of 10^7 vertices.
+
+Sizes
+-----
+``--sizes`` sets the swept vertex counts; the default is one point per
+decade to 10^6 and ``--large`` extends that by one more.  The sub-blocks
+that hold N fixed rather than sweeping it -- the selected-fraction
+spatial sweep at 10^6, round-trip fidelity at 10^5, and the chunk-count
+and fragmentation blocks at 10^6 -- stay pinned wherever the sweep ends,
+so extending the range adds points to the curves without moving anything
+that was measured at a fixed size.
 """
 
 from __future__ import annotations
@@ -74,14 +86,27 @@ from zarr_vectors.types.polylines import (  # noqa: E402
 
 RESULTS = Path(__file__).resolve().parent / "results"
 
-# One point per decade, 10^3 to 10^6.  Span matters more than resolution
-# inside a decade -- these curves are close to straight on log-log, so
-# extra points bought precision on a slope that was never in doubt while
-# making every panel dense enough to be hard to read -- but the top of
-# the range is set by what a decade costs: 10^7 roughly tripled the
-# sweep's wall time for one more point per line.
+# One point per decade.  Span matters more than resolution inside a
+# decade -- these curves are close to straight on log-log, so extra
+# points bought precision on a slope that was never in doubt while making
+# every panel dense enough to be hard to read.
+#
+# The default stops at 10^6 because that is what a decade costs: 10^7
+# roughly triples the sweep's wall time for one more point per line, and
+# most of the time this script is run it is being run to check that
+# nothing regressed, not to produce a figure.  The extra decade is not
+# dropped, only moved -- ``run_large.py`` drives this same script over
+# ``LARGE_SIZES`` block by block, into its own results directory, so the
+# long run is opt-in rather than the price of every run.
 SIZES = [1_000, 10_000, 100_000, 1_000_000]
+LARGE_SIZES = [1_000, 10_000, 100_000, 1_000_000, 10_000_000]
 QUICK_SIZES = [1_000, 10_000]
+
+# Above this the sweep is in "large" territory: single writes run to tens
+# of seconds, competitor text writers to minutes, and the repeat counts
+# below step down accordingly.  Named rather than inlined because three
+# separate decisions key off it.
+LARGE_N = 10_000_000
 
 # Objects come along for the ride: every geometry has a fixed number of
 # vertices per object (1 per point, 12 per streamline, 144 per mesh
@@ -96,6 +121,19 @@ QUICK_SIZES = [1_000, 10_000]
 # would otherwise keep sampling up to 200 times.  Confidence intervals on
 # the cheap operations are correspondingly wider.
 TIMING_RUNS = 5
+
+# ... except at the top of the large sweep, where "five runs of
+# everything" is five whole-dataset writes of 10^7 vertices per geometry
+# per implementation.  Three still gives a confidence interval (t on 2
+# degrees of freedom is wide, and the CSV records ``n_runs`` per row so
+# the widening is visible rather than implied), and it is the difference
+# between the timing block taking an hour and taking most of an evening.
+LARGE_TIMING_RUNS = 3
+
+
+def timing_runs(n: int) -> int:
+    """Repeats for the timing block at vertex target ``n``."""
+    return LARGE_TIMING_RUNS if n >= LARGE_N else TIMING_RUNS
 
 # Selected-volume fractions for the spatial sweep at fixed N.
 FRACTIONS = [0.001, 0.01, 0.1, 0.5, 1.0]
@@ -116,8 +154,13 @@ def n_runs(op: str, n: int) -> int:
     ``H.repeat`` adds more where a call is cheap enough that seven
     samples would be mostly clock noise, so this only needs to say when
     to *stop* early.  The timing block does not use it -- it takes
-    exactly ``TIMING_RUNS`` samples of everything.
+    exactly ``timing_runs(n)`` samples of everything.
     """
+    if n >= LARGE_N:
+        # A single write of 10^7 vertices is tens of seconds and a single
+        # bbox query still returns in milliseconds, so the floor splits
+        # further here rather than holding at the 300k tier's 3 and 5.
+        return 2 if op in ("write_full", "replace_one") else 3
     if n >= 300_000:
         return 3 if op in ("write_full", "replace_one") else 5
     return 7
@@ -421,7 +464,7 @@ def block_timing(rows, sizes, ws):
                          n_runs=runs, detail=detail)
 
             # ---- write everything -----------------------------------
-            r = TIMING_RUNS
+            r = timing_runs(n_obj)
             m, hw, k = H.repeat(
                 lambda tag: ZV_WRITERS[geom](ws.store(tag), data),
                 r,
@@ -1095,10 +1138,36 @@ def _fidelity_competitors(geom, data, ws):
 
 # --------------------------------------------------------------------
 
+def _size(token: str) -> int:
+    """Parse one ``--sizes`` entry.
+
+    Accepts what anyone would type at a shell for a vertex count that
+    runs to eight digits: ``10000000``, ``10_000_000`` and ``1e7`` are
+    the same number, and a float that is not one is an error rather than
+    a silent truncation.
+    """
+    t = token.strip().replace("_", "")
+    try:
+        v = float(t)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a size: {token!r}") from None
+    if v != int(v) or v < 1:
+        raise argparse.ArgumentTypeError(f"not a positive whole size: {token!r}")
+    return int(v)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--quick", action="store_true",
                     help="small sizes only, for a smoke test")
+    ap.add_argument("--large", action="store_true",
+                    help="extend the sweep by one decade, to 10^7; hours "
+                         "rather than minutes, so see run_large.py, which "
+                         "drives this block by block and can resume")
+    ap.add_argument("--sizes", default=None,
+                    help="comma-separated vertex counts to sweep, "
+                         "overriding --quick/--large, e.g. '1000,10000'. "
+                         "Underscores and 1e6 notation are accepted")
     ap.add_argument("--workdir", default=None,
                     help="parent directory for scratch stores")
     ap.add_argument("--out", default=str(RESULTS / "measurements.csv"))
@@ -1120,7 +1189,20 @@ def main():
                          "file")
     args = ap.parse_args()
 
-    sizes = QUICK_SIZES if args.quick else SIZES
+    if args.sizes:
+        try:
+            sizes = sorted({_size(t) for t in args.sizes.split(",")
+                            if t.strip()})
+        except argparse.ArgumentTypeError as exc:
+            ap.error(str(exc))
+    elif args.quick:
+        sizes = QUICK_SIZES
+    elif args.large:
+        sizes = LARGE_SIZES
+    else:
+        sizes = SIZES
+    if not sizes:
+        ap.error("--sizes named no sizes")
     wanted = {b.strip() for b in args.blocks.split(",") if b.strip()}
     if args.geometries:
         keep = {g.strip() for g in args.geometries.split(",") if g.strip()}
@@ -1211,7 +1293,7 @@ def main():
             env["mixed_run"] = sorted(set(env.get("mixed_run", [])) | wanted)
     env.update(H.environment())
     env["sizes"] = sizes
-    env["timing_runs"] = TIMING_RUNS
+    env["timing_runs"] = {str(n): timing_runs(n) for n in sizes}
     env["verts_per_object"] = dict(H.VERTS_PER_OBJECT)
     env["codec"] = CODEC
     env["workdir"] = str(args.workdir or "(system temp)")

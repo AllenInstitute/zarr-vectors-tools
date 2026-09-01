@@ -177,18 +177,48 @@ def path_bytes(path) -> int:
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
 
 
+class _Counter:
+    """Write sink that keeps the length and throws the bytes away."""
+
+    def __init__(self):
+        self.n = 0
+
+    def write(self, b) -> int:
+        self.n += len(b)
+        return len(b)
+
+    def flush(self) -> None:
+        pass
+
+
+GZIP_CHUNK = 8 << 20   # 8 MiB
+
+
 def gzip_bytes(path, level: int = 6) -> int:
     """Size of ``path`` after gzip, without keeping the compressed copy.
 
     Used to give every text competitor its best-case storage number, so
     the size comparison is not merely "binary versus ASCII".
+
+    Streamed rather than ``gzip.compress(fh.read())``: at the top of the
+    large sweep a text competitor is a multi-gigabyte file, and the
+    one-shot form holds the source, the compressed result and gzip's own
+    copy of the source in memory at once for a number that is a single
+    integer.  Chunked through a counting sink it is bounded by
+    ``GZIP_CHUNK`` regardless of the file, and the result is identical --
+    gzip's window is 32 KiB, well under the chunk size, so the framing
+    does not change what the compressor sees.
     """
-    n = 0
-    src = Path(path)
-    with open(src, "rb") as fh:
-        comp = gzip.compress(fh.read(), compresslevel=level)
-        n = len(comp)
-    return n
+    sink = _Counter()
+    with open(Path(path), "rb") as fh, \
+            gzip.GzipFile(fileobj=sink, mode="wb", compresslevel=level,
+                          mtime=0) as gz:
+        while True:
+            block = fh.read(GZIP_CHUNK)
+            if not block:
+                break
+            gz.write(block)
+    return sink.n
 
 
 class Workspace:
