@@ -33,7 +33,7 @@ Generated from `FORMAT_REGISTRY` in
 `zarr_vectors_tools/cli/_args.py` — the single place that maps a
 `--format` key to extensions, module, entry function, and extra.
 
-| Format | CLI `--format` key | Ingest function | ZVF geometry | Extra required |
+| Format | CLI `--format` key | Ingest function | Zarr Vectors geometry | Extra required |
 | --- | --- | --- | --- | --- |
 | CSV / XYZ point cloud | `csv` *(`.csv`, `.xyz`)* | `zarr_vectors_tools.ingest.csv_points.ingest_csv` | points | none |
 | LAS / LAZ | `las` *(`.las`, `.laz`)* | `zarr_vectors_tools.ingest.las.ingest_las` | points | `las` |

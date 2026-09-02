@@ -1,4 +1,4 @@
-"""Ingest point clouds from PLY files into ZVF.
+"""Ingest point clouds from PLY files into Zarr Vectors.
 
 Requires the ``plyfile`` package: ``pip install plyfile``.
 Detects whether the PLY contains mesh faces or just points and
@@ -30,11 +30,11 @@ def ingest_ply(
     knn_distance_k: int | None = None,
     per_object_vertex_count: bool = False,
 ) -> dict[str, Any]:
-    """Ingest a PLY file as a ZVF point cloud.
+    """Ingest a PLY file as a Zarr Vectors point cloud.
 
     Args:
         input_path: Path to the input PLY file.
-        output_path: Path for the output ZVF store.
+        output_path: Path for the output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension.
         dtype: Dtype for position data.
         include_attributes: Whether to include non-position

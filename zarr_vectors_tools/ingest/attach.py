@@ -1,4 +1,4 @@
-"""Attach attributes to an existing ZVF store, joined by key.
+"""Attach attributes to an existing Zarr Vectors store, joined by key.
 
 Ingest normally builds a store from one file. That breaks down when a
 dataset is split across files that share cells but not rows — the Allen
@@ -20,12 +20,12 @@ per-vertex attributes:
 
 Two properties make this work at scale.
 
-**The join.** ZVF orders vertices by spatial chunk, not by source row, and
+**The join.** Zarr Vectors orders vertices by spatial chunk, not by source row, and
 the incoming file has its own order and its own cell subset. So each
 vertex carries a *join key* attribute written at ingest, and attach maps
 incoming rows onto vertices through it. Keys that are absent from the
 incoming file get a fill value rather than failing the whole import.
-:func:`hash_keys` reduces string identifiers to int64 because ZVF
+:func:`hash_keys` reduces string identifiers to int64 because Zarr Vectors
 attributes are numeric — and because the atlas's own ``cell_label`` is a
 39-digit (128-bit) value that does not fit an integer column anyway.
 
@@ -144,7 +144,7 @@ def attach_attributes(
     """Write new per-vertex attributes into an existing store.
 
     Args:
-        store_path: Path to the ZVF store to add to (modified in place).
+        store_path: Path to the Zarr Vectors store to add to (modified in place).
         values: Attribute name -> ``(M,)`` or ``(M, C)`` array of incoming
             values, all sharing the row order of ``keys``.
         keys: ``(M,)`` join keys for the rows of ``values``. Strings are
@@ -362,7 +362,7 @@ def register_attached(
     none (a store built from a CSV will not).
 
     Args:
-        store_path: Path to the ZVF store.
+        store_path: Path to the Zarr Vectors store.
         obs_names: Attribute name -> original ``obs`` column label.
         gene_names: Attribute name -> original ``var`` (gene) name.
         categories: Original column label -> ordered category labels.

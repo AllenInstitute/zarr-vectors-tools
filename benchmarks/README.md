@@ -9,8 +9,8 @@ the third-party readers this package already wraps.
 | Suite | Question | Contents |
 |-------|----------|----------|
 | [`paper/`](paper/) | *The three claims the paper makes, and nothing else.* | scripts — 8 panels as separate files + one supplementary table |
-| [`formats/`](formats/) | *How does ZVF compare to the format I use today?* | 3 notebooks — ZVF reads/filters vs PLY, CSV, TRX, GraphML, SWC, OBJ |
-| [`internals/`](internals/) | *How does ZVF scale along axis X?* | 8 notebooks — size, geometry type, backend, pyramid, bbox query, chunk shape, codec, edit cost |
+| [`formats/`](formats/) | *How does Zarr Vectors compare to the format I use today?* | 3 notebooks — Zarr Vectors reads/filters vs PLY, CSV, TRX, GraphML, SWC, OBJ |
+| [`internals/`](internals/) | *How does Zarr Vectors scale along axis X?* | 8 notebooks — size, geometry type, backend, pyramid, bbox query, chunk shape, codec, edit cost |
 
 `formats/` and `internals/` are exploratory: each has its own
 `README.md`, its own `_build.py`, and its own `01..N` numbering. They

@@ -9,7 +9,7 @@ return a summary dict.
 from zarr_vectors_tools.export.ply import export_ply
 
 result = export_ply(
-    "cloud.zv",             # store_path — source ZVF store
+    "cloud.zv",             # store_path — source Zarr Vectors store
     "cloud.ply",            # output_path — file to write
     level=0,                # resolution level to read from
     bbox=([-100.0] * 3, [100.0] * 3),   # optional filters, AND-ed together
@@ -94,7 +94,7 @@ one tree or surface into several disconnected pieces.
 
 ## Format headers
 
-Ingest preserves format-specific metadata that the ZVF geometry model
+Ingest preserves format-specific metadata that the Zarr Vectors geometry model
 cannot hold — TRK affines, SWC comment lines, OBJ object names, CSV
 normalisation parameters — under `/headers/<format>/` on the store.
 

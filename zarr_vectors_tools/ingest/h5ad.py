@@ -1,10 +1,10 @@
-"""Ingest AnnData ``.h5ad`` files into ZVF point clouds.
+"""Ingest AnnData ``.h5ad`` files into Zarr Vectors point clouds.
 
 An ``.h5ad`` file is a cell-by-gene table with side tables; the only part
 of it that is *spatial* is an ``obsm`` embedding — ``obsm["spatial"]`` for
 spatial transcriptomics (Visium, Xenium, MERFISH, CosMx), or a
 dimensionality reduction such as ``obsm["X_umap"]`` for dissociated data.
-That embedding becomes the ZVF point cloud: one point per cell.
+That embedding becomes the Zarr Vectors point cloud: one point per cell.
 
 Everything else rides along as per-vertex attributes:
 
@@ -13,10 +13,10 @@ Everything else rides along as per-vertex attributes:
   :class:`~zarr_vectors_tools.headers.formats.H5ADHeader` so export can
   rebuild the ``pandas.Categorical``.
 - Selected genes.  Expression is a wide matrix (often 20k+ columns) and a
-  ZVF attribute is one array per name, so genes are opt-in via ``genes=``
+  Zarr Vectors attribute is one array per name, so genes are opt-in via ``genes=``
   and pulled from ``X`` or from ``layers[layer]``.
 
-Two details make the round-trip exact.  ZVF orders vertices by spatial
+Two details make the round-trip exact.  Zarr Vectors orders vertices by spatial
 chunk rather than by source row, so the source row index is stored as its
 own attribute and export sorts on it.  And attribute names must be valid
 Zarr path segments, so labels are sanitised and the originals kept in the
@@ -112,11 +112,11 @@ def ingest_h5ad(
     knn_distance_k: int | None = None,
     per_object_vertex_count: bool = False,
 ) -> dict[str, Any]:
-    """Ingest an AnnData ``.h5ad`` file into a ZVF point cloud store.
+    """Ingest an AnnData ``.h5ad`` file into a Zarr Vectors point cloud store.
 
     Args:
         input_path: Path to the input ``.h5ad`` file.
-        output_path: Path for the output ZVF store.
+        output_path: Path for the output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension. Must have one entry
             per spatial dimension (2 for a 2D embedding, 3 for 3D).
         bin_shape: Optional intra-chunk sub-binning.
@@ -134,7 +134,7 @@ def ingest_h5ad(
             and each gene costs one array.
         layer: Pull expression from ``adata.layers[layer]`` instead of
             ``adata.X``.
-        object_id_column: ``obs`` column grouping cells into ZVF objects
+        object_id_column: ``obs`` column grouping cells into Zarr Vectors objects
             (e.g. ``"cell_type"`` or ``"sample"``). Categorical labels are
             encoded as integer codes; the labels go in the header.
         backed: Open the file in AnnData's backed mode, leaving ``X`` on
@@ -503,7 +503,7 @@ def attach_h5ad(
     it. Neither ``X`` nor the unused ``obs`` columns are read in full.
 
     Args:
-        store_path: ZVF store to add attributes to.
+        store_path: Zarr Vectors store to add attributes to.
         h5ad_path: Source ``.h5ad``.
         genes: ``var`` names (or symbols, see ``gene_by``) to stage in.
         obs_columns: ``obs`` columns to stage in.

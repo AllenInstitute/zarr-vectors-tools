@@ -7,15 +7,21 @@
 
 **File format workflows, algorithms, and multiresolution for Zarr Vectors.**
 
-`zarr-vectors-tools` is the companion workflow package to [`zarr-vectors-py`](https://github.com/Andrew-Keenlyside/zarr-vectors-py). The core read/write APIs (chunking, sharding, spatial binning, links, lazy access) live in the `zarr_vectors` package. This package adds the layers built on top of it: format-conversion workflows wrapping third-party readers and writers, streaming graph and mesh algorithms, the rich multiresolution coarsening layer, and the `zvtools` CLI.
+**`zarr-vectors-tools` is an extension of [`zarr-vectors-py`](https://github.com/Andrew-Keenlyside/zarr-vectors-py).** It is not a standalone library, and neither this README nor its documentation restates that package's.
 
-*Aligned to the Zarr Vectors specification by Forrest Collman, Allen Institute for Brain Sciences.*
+`zarr-vectors-py` owns **Zarr Vectors** — the specification and the Python API over it: store layout, chunk and bin geometry, fragments, links, the object model, resolution-level metadata, validation, and the two supported surfaces `zarr_vectors.api` and `zarr_vectors.building`. Anything about the format or the core API is documented [there](https://zarr-vectors-py.readthedocs.io/en/latest) and only there.
+
+This package adds the layers built on top of it: format-conversion workflows wrapping third-party readers and writers, streaming graph and mesh algorithms, the rich multiresolution coarsening layer, and the `zvtools` CLI.
+
+*Zarr Vectors was originally specified by Forrest Collman, Allen Institute for Brain Sciences.*
 
 | | |
 | --- | --- |
-| Documentation | [zarr-vectors-tools docs](https://zarr-vectors-tools.readthedocs.io/en/latest) |
-| Core library | [zarr-vectors-py](https://github.com/Andrew-Keenlyside/zarr-vectors-py) · [docs](https://zarr-vectors-py.readthedocs.io/en/latest) |
-| Specification | [AllenInstitute/zarr_vectors](https://github.com/AllenInstitute/zarr_vectors) · [spec site](https://alleninstitute.github.io/zarr_vectors/) |
+| Documentation (this package) | [zarr-vectors-tools docs](https://zarr-vectors-tools.readthedocs.io/en/latest) |
+| **Parent package** | [zarr-vectors-py](https://github.com/Andrew-Keenlyside/zarr-vectors-py) · [docs](https://zarr-vectors-py.readthedocs.io/en/latest) |
+| **Specification** | [Zarr Vectors specification](https://zarr-vectors-py.readthedocs.io/en/latest/spec/index.html) |
+| **Core API reference** | [zarr_vectors.api / zarr_vectors.building](https://zarr-vectors-py.readthedocs.io/en/latest/api/index.html) |
+| Upstream specification | [AllenInstitute/zarr_vectors](https://github.com/AllenInstitute/zarr_vectors) |
 
 ---
 

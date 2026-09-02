@@ -1,6 +1,6 @@
 # Single-cell and spatial omics
 
-`export_h5ad` reads the ZVF `points` geometry and writes an AnnData
+`export_h5ad` reads the Zarr Vectors `points` geometry and writes an AnnData
 `.h5ad`. It is the inverse of
 [`ingest_h5ad`](../ingest/single_cell.md), and it is also how a store
 assembled by [staged attach](../ingest/single_cell.md#staged-attach-datasets-split-across-files)
@@ -34,7 +34,7 @@ summary["vertex_count"], summary["n_vars"], summary["order_restored"]
 | recorded in the header as an `obs` column | `obs`, under its original label |
 | categorical (header has its levels) | `obs` as a `pandas.Categorical` |
 | multi-channel (2-D) | `obsm[name]` — no single `obs` column fits it |
-| `h5ad_row` / `table_row`, `zv_join_key` | nothing — ZVF bookkeeping |
+| `h5ad_row` / `table_row`, `zv_join_key` | nothing — Zarr Vectors bookkeeping |
 | anything else | `obs`, under its stored name |
 
 Positions always become `obsm[spatial_key]`.
@@ -46,7 +46,7 @@ is data, and surfacing them would put a column of hashes in every exported
 
 ## Order and identity
 
-ZVF orders vertices by spatial chunk, not by source row. With the
+Zarr Vectors orders vertices by spatial chunk, not by source row. With the
 row-index attribute present (written by default at ingest) `export_h5ad`
 sorts on it and `order_restored` comes back `True`, so an
 ingest → export round-trip returns cells in their original order. When the

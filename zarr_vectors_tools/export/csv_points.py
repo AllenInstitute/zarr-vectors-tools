@@ -1,4 +1,4 @@
-"""Export ZVF point clouds to CSV/XYZ text files."""
+"""Export Zarr Vectors point clouds to CSV/XYZ text files."""
 
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ def export_csv(
     header: bool = True,
     attribute_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Export a ZVF point cloud to a CSV file.
+    """Export a Zarr Vectors point cloud to a CSV file.
 
     Args:
-        store_path: Path to the ZVF store.
+        store_path: Path to the Zarr Vectors store.
         output_path: Path for the output CSV file.
         level: Resolution level to export.
         bbox: Optional bounding box filter.

@@ -1,6 +1,6 @@
 # Single-cell and spatial omics
 
-Two related workflows, both writing the **points** ZVF geometry with one
+Two related workflows, both writing the **points** Zarr Vectors geometry with one
 vertex per cell:
 
 - **[`ingest_h5ad`](#anndata-h5ad-ingest-h5ad)** — a self-contained
@@ -30,7 +30,7 @@ summary = ingest_h5ad(
     spatial_key="auto",            # obsm key; "auto" resolves it (below)
     obs_columns=None,              # None = every obs column; [] = none
     genes=["EPCAM", "PTPRC"],      # expression columns, opt-in
-    object_id_column="cell_type",  # groups cells into ZVF objects
+    object_id_column="cell_type",  # groups cells into Zarr Vectors objects
 )
 print(summary["spatial_key"], summary["vertex_count"])
 ```
@@ -40,14 +40,14 @@ print(summary["spatial_key"], summary["vertex_count"])
 over an embedding when both are present. A 2D embedding stays 2D — pass a
 2-tuple `chunk_shape` for it.
 
-`genes` is opt-in because expression is wide: a ZVF attribute is one array
+`genes` is opt-in because expression is wide: a Zarr Vectors attribute is one array
 per name, so storing 20 000 genes would mean 20 000 arrays. `obs` columns
 default to all, since there are usually few and they are what colouring is
 driven by.
 
 ### What is stored, and how it round-trips
 
-| AnnData | ZVF |
+| AnnData | Zarr Vectors |
 | --- | --- |
 | `obsm[spatial_key]` | vertex positions |
 | numeric `obs` column | vertex attribute, dtype preserved |
@@ -58,7 +58,7 @@ driven by.
 | source row index | `h5ad_row` attribute |
 | hashed `obs_names` | `zv_join_key` attribute |
 
-ZVF orders vertices by spatial chunk, not by source row, so exporting
+Zarr Vectors orders vertices by spatial chunk, not by source row, so exporting
 without the `h5ad_row` attribute would return the cells permuted. It is
 stored by default and [`export_h5ad`](../export/single_cell.md) sorts on
 it, making the round-trip exact:
@@ -167,7 +167,7 @@ indistinguishable from columns written at ingest.
 ### The join key
 
 Identifiers are reduced to int64 by `hash_keys` (FNV-1a over the UTF-8
-bytes) because ZVF attributes are numeric, and because the atlas's own
+bytes) because Zarr Vectors attributes are numeric, and because the atlas's own
 `cell_label` is a 39-digit value that no integer column can hold. The hash
 ignores the zero padding that fixed-width numpy byte-string arrays carry,
 so the same label hashes identically whether it arrives in an `S39` or an
@@ -196,7 +196,7 @@ attach_attributes(
 
 :::{warning}
 Pass `--shard` on **every** attach when staging a wide panel. Unsharded, a
-ZVF store costs one file per spatial chunk *per attribute*, so the file
+Zarr Vectors store costs one file per spatial chunk *per attribute*, so the file
 count is `chunks × attributes`. On the atlas store above — 2,742 chunks and
 1,122 genes — that is **3.1 million files**, and `zvtools shard` afterwards
 has to read every one of them back: measured at ~3 arrays/min, roughly

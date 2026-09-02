@@ -427,7 +427,7 @@ TYPES_CELLS: list[tuple[str, str]] = [
 # Data-type comparison -- loading and filtering
 
 At a fixed dataset size (`N = 50_000` vertices / elements), how does
-loading and filtering compare across the six ZVF geometry types, each
+loading and filtering compare across the six Zarr Vectors geometry types, each
 against its canonical competitor format?
 
 | Geometry | Competitor | Reader | Subset op |

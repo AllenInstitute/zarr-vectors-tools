@@ -179,7 +179,8 @@ mapping, ingest module, and required extra all live there.
 ## Root modules
 
 **`__init__.py`** — import side effects only. It registers this package's
-coarseners and selectors into `zarr_vectors.multiresolution.registry`, so
+coarseners and selectors into the parent package's strategy registry
+(via the supported `zarr_vectors.building.register_*` entry points), so
 core can dispatch into tools without depending on tools. Degrades
 silently on a core too old to have the registry. It does **not** define
 `__version__`; the CLI reads the version via `importlib.metadata`.

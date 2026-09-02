@@ -189,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="h5ad: read expression from layers[NAME] instead of X")
     h.add_argument("--object-id-column", dest="object_id_column", default=None,
                    metavar="NAME",
-                   help="h5ad: obs column grouping cells into ZVF objects "
+                   help="h5ad: obs column grouping cells into Zarr Vectors objects "
                         "(e.g. cell_type, sample)")
     h.add_argument("--backed", action="store_true", dest="backed",
                    help="h5ad: leave X on disk (AnnData backed mode); helps "

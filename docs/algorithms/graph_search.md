@@ -4,7 +4,7 @@ Frontier search over a chunked graph (or skeleton) store. Both
 algorithms in this module use the same in-memory adjacency map, built
 once per call via the internal `build_adjacency` helper.
 
-At format {{ zvf_version }} connectivity is a single family, so
+At format {{ zv_version }} connectivity is a single family, so
 `build_adjacency` performs **one whole-family `read_links(delta=0)`**
 rather than a per-chunk pass followed by a separate cross-chunk merge.
 Edge weights come from `read_link_attributes(level_group, weight_attr,

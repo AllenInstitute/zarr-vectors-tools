@@ -1,6 +1,6 @@
 # Lines
 
-A **line** in ZVF is a single, independent two-endpoint segment — not a
+A **line** in Zarr Vectors is a single, independent two-endpoint segment — not a
 chain of segments (those are polylines, see
 [Tractography](tractography.md)). One ingest covers it:
 `ingest_lines_csv`.

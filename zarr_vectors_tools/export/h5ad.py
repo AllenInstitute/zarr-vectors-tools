@@ -1,4 +1,4 @@
-"""Export ZVF point clouds to AnnData ``.h5ad`` files.
+"""Export Zarr Vectors point clouds to AnnData ``.h5ad`` files.
 
 The inverse of :mod:`zarr_vectors_tools.ingest.h5ad`: positions become
 ``obsm[spatial_key]``, per-vertex attributes become ``obs`` columns, and
@@ -87,10 +87,10 @@ def export_h5ad(
     decode_categoricals: bool = True,
     compression: str | None = "gzip",
 ) -> dict[str, Any]:
-    """Export a ZVF point cloud to an AnnData ``.h5ad`` file.
+    """Export a Zarr Vectors point cloud to an AnnData ``.h5ad`` file.
 
     Args:
-        store_path: Path to the ZVF store.
+        store_path: Path to the Zarr Vectors store.
         output_path: Path for the output ``.h5ad`` file.
         level: Resolution level to export.
         bbox: Optional bounding box filter.
@@ -197,7 +197,7 @@ def export_h5ad(
     obs_data: dict[str, Any] = {}
     obsm_extra: dict[str, np.ndarray] = {}
     for name, values in attrs.items():
-        # The row index and join key are ZVF bookkeeping, not data: one
+        # The row index and join key are Zarr Vectors bookkeeping, not data: one
         # restores ordering, the other exists so further files can be
         # staged in. Neither belongs in the exported obs table.
         if name in gene_map or name == row_attr or name == DEFAULT_KEY_ATTRIBUTE:

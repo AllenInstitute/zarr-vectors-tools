@@ -1,7 +1,7 @@
 # Meshes
 
 Two mesh ingests, both pure Python with no extra to install: Wavefront
-OBJ and STL. Both write the **mesh** ZVF geometry. PLY is points-only in
+OBJ and STL. Both write the **mesh** Zarr Vectors geometry. PLY is points-only in
 this package — see [Point clouds](point_clouds.md).
 
 ## Wavefront OBJ — `ingest_obj`

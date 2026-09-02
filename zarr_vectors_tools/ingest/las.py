@@ -1,4 +1,4 @@
-"""Ingest point clouds from LAS/LAZ files into ZVF.
+"""Ingest point clouds from LAS/LAZ files into Zarr Vectors.
 
 Requires the ``laspy`` package: ``pip install laspy``.
 """
@@ -27,11 +27,11 @@ def ingest_las(
     knn_distance_k: int | None = None,
     per_object_vertex_count: bool = False,
 ) -> dict[str, Any]:
-    """Ingest a LAS or LAZ file into a ZVF point cloud store.
+    """Ingest a LAS or LAZ file into a Zarr Vectors point cloud store.
 
     Args:
         input_path: Path to the input LAS/LAZ file.
-        output_path: Path for the output ZVF store.
+        output_path: Path for the output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension (3D).
         dtype: Dtype for position data.
         include_attributes: Whether to include intensity,

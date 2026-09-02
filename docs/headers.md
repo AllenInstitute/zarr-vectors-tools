@@ -1,6 +1,6 @@
 # Headers
 
-Format-specific metadata that doesn't fit into the ZVF geometry model
+Format-specific metadata that doesn't fit into the Zarr Vectors geometry model
 itself — TRK voxel-to-RAS affines, SWC `coordinate_space` comments,
 OBJ object-name lists, CSV normalisation parameters — is preserved
 alongside the data so the matching `export_*` can recover the original
@@ -113,7 +113,7 @@ Written by `ingest_edgelist` and `ingest_graphml` when
 ### `H5ADHeader`
 
 The widest of the headers, because AnnData carries three kinds of
-information that numeric ZVF attribute arrays cannot hold on their own:
+information that numeric Zarr Vectors attribute arrays cannot hold on their own:
 
 - **Names.** `obs` columns and genes become attribute arrays whose names
   are sanitised for Zarr paths, so the originals live in the parallel
@@ -122,7 +122,7 @@ information that numeric ZVF attribute arrays cannot hold on their own:
   so export can rebuild the `pandas.Categorical`; `dtypes` records the
   source dtype for the encodings that are lossy in name only (`bool` →
   uint8, `datetime64` → int64).
-- **Order and identity.** ZVF orders vertices by spatial chunk, not by
+- **Order and identity.** Zarr Vectors orders vertices by spatial chunk, not by
   source row, so `row_attr` names the attribute holding each cell's source
   row index and `obs_index` inlines the barcodes when the cell count is
   under `max_obs_index`.

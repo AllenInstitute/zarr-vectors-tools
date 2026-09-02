@@ -1,4 +1,4 @@
-"""Ingest graphs from CSV edge-lists into ZVF.
+"""Ingest graphs from CSV edge-lists into Zarr Vectors.
 
 Two input CSVs:
 - ``edges_path``: rows are ``source,target`` plus optional weight/attr columns.
@@ -73,7 +73,7 @@ def ingest_edgelist(
             ``edge_attribute_columns``).
         nodes_path: CSV with at least ``node_id_col`` and ``position_columns``.
             Extra columns become node attributes.
-        output_path: Path for the output ZVF store.
+        output_path: Path for the output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension.
         use_cudf: Read both CSVs via cuDF on GPU. Requires a RAPIDS install.
         source_col, target_col: Column names in the edge CSV.

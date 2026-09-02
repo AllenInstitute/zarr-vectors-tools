@@ -85,7 +85,7 @@ checking the store's CRS metadata first.
 
 ## TRX — `ingest_trx`
 
-TRX is structurally the closest format to ZVF — both keep positions,
+TRX is structurally the closest format to Zarr Vectors — both keep positions,
 offsets, and per-vertex/per-object data in separate arrays.
 
 ```python
@@ -100,7 +100,7 @@ ingest_trx(
 )
 ```
 
-| TRX field | ZVF destination |
+| TRX field | Zarr Vectors destination |
 | --- | --- |
 | `positions` | `vertices/` |
 | `offsets` | vertex group boundaries (one group per streamline) |

@@ -18,7 +18,7 @@ algorithm in `zarr_vectors_tools.algorithms`.
 :::{warning}
 **The core dependency is not yet on PyPI at the version this package
 needs.** `zarr-vectors-tools` requires the merged
-`links/<delta>/<offsets>/` layout — on-disk format {{ zvf_version }} — in
+`links/<delta>/<offsets>/` layout — on-disk format {{ zv_version }} — in
 which connectivity is a single family and there is no
 `cross_chunk_links/` to fall back to.
 

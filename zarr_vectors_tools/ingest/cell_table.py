@@ -86,11 +86,11 @@ def ingest_table(
     preserve_index: bool = True,
     max_index: int = DEFAULT_MAX_INDEX,
 ) -> dict[str, Any]:
-    """Ingest a delimited table of identified points into a ZVF store.
+    """Ingest a delimited table of identified points into a Zarr Vectors store.
 
     Args:
         input_path: Path to the input table (CSV/TSV).
-        output_path: Path for the output ZVF store.
+        output_path: Path for the output Zarr Vectors store.
         chunk_shape: Spatial chunk size, one entry per position column.
         position_columns: Column names holding the coordinates, in axis
             order (e.g. ``["x", "y", "z"]``).
@@ -104,7 +104,7 @@ def ingest_table(
         bin_shape: Optional intra-chunk sub-binning.
         dtype: Dtype for position data.
         delimiter: Column delimiter.
-        object_id_column: Column grouping rows into ZVF objects.
+        object_id_column: Column grouping rows into Zarr Vectors objects.
         drop_na: Drop rows whose coordinates contain NaN. On by default —
             coordinate tables routinely carry unregistered rows, and NaN
             coordinates cannot be assigned to a chunk.
@@ -287,7 +287,7 @@ def attach_table(
     neither the same order nor the same row set as the store.
 
     Args:
-        store_path: ZVF store to add attributes to (modified in place).
+        store_path: Zarr Vectors store to add attributes to (modified in place).
         input_path: Table to read.
         key_column: Column holding the identifier to join on.
         columns: Columns to stage in. Default (None) takes every column

@@ -139,7 +139,7 @@ class TestH5ADRoundTrip:
         )
 
     def test_object_ids_group_cells(self, tmp_path: Path, h5ad_file) -> None:
-        """An obs column can drive ZVF object grouping."""
+        """An obs column can drive Zarr Vectors object grouping."""
         src, adata = h5ad_file
         store = tmp_path / "grouped.zarr"
 

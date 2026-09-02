@@ -1,6 +1,6 @@
 # Streamlines
 
-Two targets for the ZVF `polylines` geometry: TrackVis TRK and TRX. Each
+Two targets for the Zarr Vectors `polylines` geometry: TrackVis TRK and TRX. Each
 has its own extra, and `streamlines` installs both:
 
 ```bash

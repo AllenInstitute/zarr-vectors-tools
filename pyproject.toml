@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zarr-vectors-tools"
 version = "0.2.0"
-description = "Ingest and export workflows for the Zarr Vector Format (ZVF). Wraps third-party readers/writers (nibabel, laspy, plyfile, networkx, trx-python) on top of zarr-vectors."
+description = "Ingest and export workflows for the Zarr Vectors. Wraps third-party readers/writers (nibabel, laspy, plyfile, networkx, trx-python) on top of zarr-vectors."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.11"
@@ -124,7 +124,7 @@ select = ["E", "F", "W", "I", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = [
-    # ZVF stores every per-chunk array as Zarr's variable-length-bytes dtype,
+    # Zarr Vectors stores every per-chunk array as Zarr's variable-length-bytes dtype,
     # which has no stable Zarr v3 spec yet — the warning fires on every array
     # and drowns the test output.  Silence just that one category.
     "ignore::zarr.errors.UnstableSpecificationWarning",

@@ -344,7 +344,7 @@ class GraphHeader(Header):
 class H5ADHeader(Header):
     """AnnData ``.h5ad`` header metadata.
 
-    ZVF stores numeric per-vertex arrays, so three kinds of AnnData
+    Zarr Vectors stores numeric per-vertex arrays, so three kinds of AnnData
     information cannot survive in the arrays alone and live here instead:
 
     - **Names.** ``obs`` columns and genes become attribute arrays whose
@@ -353,7 +353,7 @@ class H5ADHeader(Header):
     - **Categories.** Categorical/string ``obs`` columns are stored as
       integer codes; ``categories`` maps a column to its level labels so
       export can rebuild the ``pandas.Categorical``.
-    - **Order and identity.** ZVF orders vertices by spatial chunk, not by
+    - **Order and identity.** Zarr Vectors orders vertices by spatial chunk, not by
       original row, so ``row_attr`` names the attribute holding each
       cell's source row index and ``obs_index`` (when small enough to
       inline) holds the original barcodes.
@@ -383,7 +383,7 @@ class H5ADHeader(Header):
     row_attr: str | None = None
     # Original obs index (barcodes); None when omitted for size.
     obs_index: list[str] | None = None
-    # obs column that became ZVF object_ids, plus its category labels.
+    # obs column that became Zarr Vectors object_ids, plus its category labels.
     object_id_column: str | None = None
     object_id_categories: list[str] | None = None
 

@@ -1,4 +1,4 @@
-"""Generate the eight ZVF-internals benchmark notebooks.
+"""Generate the eight Zarr Vectors internals benchmark notebooks.
 
 Run once and commit the output:
 

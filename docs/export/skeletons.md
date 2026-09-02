@@ -1,6 +1,6 @@
 # Skeletons
 
-The ZVF `graphs` geometry writes out to the seven-column SWC format via
+The Zarr Vectors `graphs` geometry writes out to the seven-column SWC format via
 `export_swc`. No third-party dependency.
 
 ```python

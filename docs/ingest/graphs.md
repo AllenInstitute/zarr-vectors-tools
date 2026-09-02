@@ -1,6 +1,6 @@
 # Graphs
 
-A ZVF **graph** is nodes at explicit positions plus arbitrary edges — the
+A Zarr Vectors **graph** is nodes at explicit positions plus arbitrary edges — the
 natural shape for a connectome, where each node is a neuron or region at
 its centroid and each edge is a measured connection. Two ingests:
 `ingest_edgelist` (a pair of CSVs) and `ingest_graphml` (via networkx).

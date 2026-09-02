@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Collapse ``object_attributes/<name>`` columns to a single Zarr chunk.
 
-The ZVF spec chunks a per-object attribute column at 65,536 rows
+The Zarr Vectors specification chunks a per-object attribute column at 65,536 rows
 (``docs/spec/layout/chunk_arrays.md``), so a store with more objects than
 that splits the column across ``c/0``, ``c/1``, ....  Neuroglancer's
 zarr-vectors reader reads only ``c/0`` and then fails a byte-count check

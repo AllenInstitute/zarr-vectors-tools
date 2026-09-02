@@ -1,4 +1,4 @@
-"""Ingest line segments from CSV text files into ZVF.
+"""Ingest line segments from CSV text files into Zarr Vectors.
 
 Six-column CSV format: ``x0,y0,z0,x1,y1,z1`` (one row per segment),
 plus optional per-line attribute columns. Mirrors ``ingest_csv`` for
@@ -33,7 +33,7 @@ def ingest_lines_csv(
     drop_na: bool = False,
     drop_duplicates: bool = False,
 ) -> dict[str, Any]:
-    """Ingest a CSV of line segments into a ZVF line store.
+    """Ingest a CSV of line segments into a Zarr Vectors line store.
 
     Expected layout: the first ``2 * ndim`` columns hold endpoint
     coordinates in ``(x0, y0, z0, x1, y1, z1)`` order. Remaining columns
@@ -42,7 +42,7 @@ def ingest_lines_csv(
 
     Args:
         input_path: Path to the CSV file.
-        output_path: Path for the output ZVF store.
+        output_path: Path for the output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension.
         ndim: Spatial dimensionality (default 3).
         delimiter: Column delimiter.

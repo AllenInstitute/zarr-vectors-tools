@@ -18,7 +18,7 @@ pip install "zarr-vectors-tools[precomputed]"   # cloud-volume, mapbuffer, cloud
 
 Both produce the same thing — a multiscale skeleton store whose object
 index preserves the original uint64 segment IDs, so a segment picked in
-Neuroglancer resolves to the same object in the ZVF store.
+Neuroglancer resolves to the same object in the Zarr Vectors store.
 
 ## Spatially indexed sources — `run_ingest`
 
@@ -172,7 +172,7 @@ working set.
 The plain path converts the layer's inline property table to per-object
 arrays via `write_object_attributes`, mapped by property type:
 
-| Precomputed property type | ZVF object attribute dtype |
+| Precomputed property type | Zarr Vectors object attribute dtype |
 | --- | --- |
 | `number` | the declared `data_type` (`uint8` … `float32`) |
 | `label`, `string`, `description` | `S256` fixed-width bytes — decode as UTF-8 |

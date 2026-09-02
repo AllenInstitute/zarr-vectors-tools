@@ -16,7 +16,7 @@ copyright = (
 )
 author = "BRIDGE Neuroscience"
 # Package version. Independent of the on-disk FORMAT version this package
-# targets, which is ZVF 0.9.0 (the merged links/<delta>/<offsets>/ layout).
+# targets, which is Zarr Vectors 0.9.0 (the merged links/<delta>/<offsets>/ layout).
 release = "0.2.0"
 version = release
 
@@ -24,17 +24,17 @@ version = release
 # format version quoted throughout the prose.
 #
 # It has to be wired up twice, because the two parsers do not share a
-# substitution mechanism: rst_prolog covers the .rst pages (|zvf_version|),
-# myst_substitutions covers the .md pages ({{ zvf_version }}). rst_prolog
-# alone leaves the literal "|zvf_version|" in the rendered Markdown.
-zvf_format_version = "0.9.0"
+# substitution mechanism: rst_prolog covers the .rst pages (|zv_version|),
+# myst_substitutions covers the .md pages ({{ zv_version }}). rst_prolog
+# alone leaves the literal "|zv_version|" in the rendered Markdown.
+zv_format_version = "0.9.0"
 
 rst_prolog = f"""
-.. |zvf_version| replace:: {zvf_format_version}
+.. |zv_version| replace:: {zv_format_version}
 """
 
 myst_substitutions = {
-    "zvf_version": zvf_format_version,
+    "zv_version": zv_format_version,
 }
 
 # -- General configuration ----------------------------------------------------
@@ -61,7 +61,7 @@ myst_enable_extensions = [
     "fieldlist",        # field lists
     "tasklist",         # - [ ] checkboxes
     "attrs_inline",     # inline attribute syntax
-    "substitution",     # {{ zvf_version }} - see myst_substitutions above
+    "substitution",     # {{ zv_version }} - see myst_substitutions above
 ]
 myst_heading_anchors = 3
 

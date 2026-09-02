@@ -14,8 +14,8 @@ in the source tree:
 | Suite | Question it answers | Contents |
 |-------|--------------------|----------|
 | `benchmarks/paper/` | The three claims the paper makes, and nothing else | scripts: one 8-panel figure, one supplementary table |
-| `benchmarks/formats/` | How does ZVF compare to the format I use today? | 3 notebooks |
-| `benchmarks/internals/` | How does ZVF scale along one axis? | 8 notebooks |
+| `benchmarks/formats/` | How does Zarr Vectors compare to the format I use today? | 3 notebooks |
+| `benchmarks/internals/` | How does Zarr Vectors scale along one axis? | 8 notebooks |
 
 `formats/` and `internals/` are exploratory notebooks. Both follow the
 same shape (setup → build inputs → sweep → table → plot), and both
@@ -171,7 +171,7 @@ read, pandas silently widens every column to `float64` unless
 stored.
 
 The constant ~0.1 s "Read one" floor for zarr-vectors at every `N` is
-the lazy reader (`zarr_vectors.lazy.open_zv`) opening the store,
+the parent package's lazy read path opening the store,
 listing chunks once, and decoding a single Blosc-compressed
 `vertices/<i.j.k>` chunk — no scan, no offset table to walk.
 

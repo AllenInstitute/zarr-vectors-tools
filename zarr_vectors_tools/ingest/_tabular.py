@@ -1,6 +1,6 @@
 """Shared helpers for ingesting tabular per-vertex data.
 
-ZVF attributes are numeric arrays with Zarr-path names, while ``obs``
+Zarr Vectors attributes are numeric arrays with Zarr-path names, while ``obs``
 tables and CSV columns are arbitrarily named and arbitrarily typed. These
 two helpers are the bridge, and they live here so the ``.h5ad`` and
 delimited-table ingesters encode identically — a column staged in from a

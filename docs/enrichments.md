@@ -3,7 +3,7 @@
 Several ingest functions can compute extra attributes during import.
 Some are derived directly from the source format (LAS `intensity`, SWC
 `radius`), others are pure computations (`length`, `knn_distance`,
-`strahler`). All land in the standard ZVF attribute slots — per-vertex
+`strahler`). All land in the standard Zarr Vectors attribute slots — per-vertex
 under `attributes/<name>/`, per-object under
 `object_attributes/<name>/` — so they're accessible to any reader of
 the store, not just this package.
