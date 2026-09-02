@@ -52,19 +52,33 @@ format registry. The shape of a driver script:
 
 ```python
 from zarr_vectors_tools.ingest._parallel import dask_executor
-from zarr_vectors_tools.ingest.precomputed_skeletons import run_ingest
+from zarr_vectors_tools.ingest.precomputed_skeletons import (
+    PrecomputedFragsReader, enumerate_frag_keys, run_ingest,
+)
 
 if __name__ == "__main__":                      # required: workers re-import __main__
+    reader = PrecomputedFragsReader("gs://flywire_v141_m783/skeletons_mip_1")
+    # `keys` and `bounds_nm` are both derived from a real .frags chunk
+    # corner — see the worked example for how they are computed.
+    keys, bounds = enumerate_frag_keys(reader.info, anchor, counts), bounds_nm
+
     with dask_executor(8) as ex:
         run_ingest(
-            "gs://flywire_v141_m783/skeletons_mip_1",
+            reader,
             "cutout.zarrvectors",
-            anchor=(120_000, 60_000, 2_000),
-            counts=(8, 8, 4),
+            keys,
+            bounds_nm=bounds,
             drop_interior_below=3,              # discard tiny chunk-interior fragments
             executor=ex,
         )
 ```
+
+`run_ingest` takes a **reader object and an explicit key list**, not a URL
+and a bounding box — the keys are enumerated from an anchor rather than
+listed, because a bucket-wide listing on a production EM layer is
+prohibitively slow. [Skeletons in EM](../ingest/em_skeletons.md) has the
+full worked example, including how `anchor`, `counts` and `bounds_nm` are
+computed from the layer's `info`.
 
 :::{warning}
 The `if __name__ == "__main__":` guard is **not optional**. Both executor
