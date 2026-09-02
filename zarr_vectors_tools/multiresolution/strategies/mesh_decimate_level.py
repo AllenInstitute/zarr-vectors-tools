@@ -109,7 +109,7 @@ def _unpermute(tri: npt.NDArray, perm: npt.NDArray, link_width: int):
     """
     import math
 
-    from zarr_vectors.spatial.boundary import apply_perm_inverse
+    from zarr_vectors.building import apply_perm_inverse
 
     out = np.empty_like(tri)
     n_perm = math.factorial(link_width)

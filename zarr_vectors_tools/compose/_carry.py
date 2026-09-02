@@ -72,7 +72,7 @@ def expand_grid(
     deeper.
     """
     from zarr_vectors.building import per_chunk_array_paths
-    from zarr_vectors.core.store import update_root_metadata
+    from zarr_vectors.building import update_root_metadata
 
     group = level.store
     want = tuple(int(v) for v in needed)
@@ -388,7 +388,7 @@ def infer_pyramid_factors(dataset: Any) -> list[tuple[float, float]] | None:
     Returns ``None`` when a level is missing either number, because a
     guessed pyramid is worse than an honest refusal.
     """
-    from zarr_vectors.core.store import read_level_metadata
+    from zarr_vectors.building import read_level_metadata
 
     levels = sorted(int(i) for i in dataset.levels)
     if len(levels) < 2:
@@ -443,7 +443,7 @@ def handle_pyramid(
         least find out.  For when the merge is one of several and the
         rebuild is deferred to the end.
     """
-    from zarr_vectors.core.store import remove_resolution_level, update_level_metadata
+    from zarr_vectors.building import remove_resolution_level, update_level_metadata
 
     levels = stale_levels(dataset)
     if policy == "keep":

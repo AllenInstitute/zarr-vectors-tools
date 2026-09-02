@@ -562,7 +562,7 @@ def _preload_attributes(
     """
     if not names or not parts:
         return
-    from zarr_vectors.spatial.chunking import assign_chunks
+    from zarr_vectors.building import assign_chunks
 
     touched: set[tuple[int, ...]] = set()
     for part in parts:
@@ -855,11 +855,11 @@ def _refresh_level_metadata(dataset: Any, level: Any, fallback: int) -> int:
     added to.
     """
     from zarr_vectors.building import refresh_arrays_present
-    from zarr_vectors.core.store import update_level_metadata
+    from zarr_vectors.building import update_level_metadata
 
     total = fallback
     try:
-        from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
+        from zarr_vectors.building import chunk_local_to_global_offsets
 
         _offsets, _keys, counted = chunk_local_to_global_offsets(level.store)
         total = int(counted)

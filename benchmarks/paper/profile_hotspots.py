@@ -227,10 +227,9 @@ def hotspot_4(data):
     """
     print("4. types/meshes.py:541  face reassembly on read")
     from run_sweep import ZV_WRITERS
-    from zarr_vectors.building import open_store
+    from zarr_vectors.building import link_endpoint_scales, open_store
     from zarr_vectors.core.arrays import (
         _link_cell_rows,
-        _link_scales,
         _parse_chunk_key,
         cell_endpoint_chunks,
         links_group_path,
@@ -271,7 +270,7 @@ def hotspot_4(data):
             fam = links_group_path(0)
             meta = lg.read_array_meta(fam)
             width, ndim = int(meta["link_width"]), int(meta["sid_ndim"])
-            scale_src, scale_trg = _link_scales(lg, 0, ndim)
+            scale_src, scale_trg = link_endpoint_scales(lg, 0, ndim)
             blocks = []
             for seg in list_link_offsets(lg, 0):
                 name = f"{fam}/{seg}"
