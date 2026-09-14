@@ -67,7 +67,19 @@ def export_ply(
         raise ExportError(f"Failed to read store: {e}") from e
 
     positions = result["positions"]
-    attrs = result.get("attributes", {})
+    # ``read_points`` returns the per-vertex arrays under
+    # ``vertex_attributes``; reading ``attributes`` silently produced an
+    # empty dict, so every requested attribute was dropped from the output
+    # file without a word.  The fallback keeps older cores working.
+    attrs = result.get("vertex_attributes")
+    if attrs is None:
+        attrs = result.get("attributes", {})
+    missing = [n for n in (attribute_names or []) if n not in attrs]
+    if missing:
+        raise ExportError(
+            f"attribute(s) not present at level {level}: {missing}. "
+            f"Available: {sorted(attrs) or '(none)'}"
+        )
     n_pts, ndim = positions.shape
 
     # Build structured array for plyfile

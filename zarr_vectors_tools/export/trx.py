@@ -45,7 +45,7 @@ def export_trx(
         ExportError: If trx-python is not installed or export fails.
     """
     try:
-        from trx.trx_file_memmap import TrxFile
+        from trx.trx_file_memmap import TrxFile, save as trx_save
     except ImportError as e:
         raise ExportError(
             "trx-python is required for TRX export. "
@@ -75,13 +75,14 @@ def export_trx(
         full = np.concatenate(segments, axis=0).astype(np.float32)
         streamlines.append(full)
 
-    # Build positions + offsets arrays (TRX layout)
-    all_positions = np.concatenate(streamlines, axis=0)
-    offsets = np.zeros(n_streamlines, dtype=np.int64)
-    cum = 0
-    for i, s in enumerate(streamlines):
-        offsets[i] = cum
-        cum += len(s)
+    # Build positions + offsets + lengths arrays (TRX layout).  All three are
+    # required: the reader slices ``_data`` by ``_lengths``, so a file written
+    # with the zero-filled default comes back as N empty streamlines.
+    all_positions = np.concatenate(streamlines, axis=0).astype(np.float32)
+    lengths = np.asarray([len(s) for s in streamlines], dtype=np.uint32)
+    offsets = np.concatenate(
+        [[0], np.cumsum(lengths[:-1])],
+    ).astype(np.uint32)
 
     try:
         output_path = Path(output_path)
@@ -91,9 +92,22 @@ def export_trx(
             nb_vertices=len(all_positions),
             nb_streamlines=n_streamlines,
         )
-        trx.streamlines._data = all_positions
+        # REPLACE the pre-allocated arrays rather than assigning into them.
+        # ``TrxFile`` allocates ``_data`` as **float16**, so writing into it
+        # silently quantises every coordinate (measured: 7.8e-4 mm of error on
+        # ordinary RASmm positions).  Rebinding hands the saver the float32
+        # buffer instead, and the round-trip is then exact.
+        trx.streamlines._data = np.ascontiguousarray(
+            all_positions, dtype=np.float32,
+        )
         trx.streamlines._offsets = offsets
-        trx.save(str(output_path))
+        trx.streamlines._lengths = lengths
+        # Module-level ``save``, not ``TrxFile.save`` -- there is no such
+        # method, so every export raised AttributeError, wrapped as
+        # "Failed to write TRX" by the except below and never noticed
+        # because the test asserted only that *something* was raised.
+        trx_save(trx, str(output_path))
+        trx.close()
     except Exception as e:
         raise ExportError(f"Failed to write TRX '{output_path}': {e}") from e
 
