@@ -40,8 +40,9 @@ class TestLazyFilterChain:
     """Lazy API: open → filter by group → filter by bbox → compute."""
 
     def test_lazy_filter_pipeline(self, tmp_path: Path) -> None:
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors.lazy import open_zv
+
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 100)
@@ -77,8 +78,8 @@ class TestLazyDaskParallel:
     def test_dask_compute_chunks(self, tmp_path: Path) -> None:
         import pytest
         dask = pytest.importorskip("dask")  # optional; not a core dependency
-        from zarr_vectors.types.points import write_points
         from zarr_vectors.lazy import open_zv
+        from zarr_vectors.types.points import write_points
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "pts.zv")
@@ -102,12 +103,13 @@ class TestShardReshardChain:
     """Shard → reshard → unshard round-trip with data integrity."""
 
     def test_shard_chain(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points, read_points
-        from zarr_vectors.building import reshard, get_shard_info
+        from zarr_vectors.building import get_shard_info, reshard
+
         # The store-wide question. Core's array-level helper is now named
         # array_is_sharded, so the two no longer collide; building exports
         # get_shard_info() for this one.
         from zarr_vectors.sharding.io import is_sharded
+        from zarr_vectors.types.points import read_points, write_points
         from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
@@ -150,15 +152,16 @@ class TestShardedPyramid:
     """Build pyramid then shard — all levels survive."""
 
     def test_pyramid_then_shard(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points, read_points
-        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
-        from zarr_vectors.building import reshard
+        from zarr_vectors.building import list_resolution_levels, open_store, reshard
+
         # The store-wide question. Core's array-level helper is now named
         # array_is_sharded, so the two no longer collide; building exports
         # get_shard_info() for this one.
         from zarr_vectors.sharding.io import is_sharded
-        from zarr_vectors.building import open_store, list_resolution_levels
+        from zarr_vectors.types.points import read_points, write_points
         from zarr_vectors.validate import validate
+
+        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "pyr.zv")
@@ -191,9 +194,10 @@ class TestRechunkByGroup:
     """Rechunk by group → prefix-scan reads."""
 
     def test_group_rechunk(self, tmp_path: Path) -> None:
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
-        from zarr_vectors.rechunk import rechunk, RechunkSpec
         from zarr_vectors.building import list_chunk_keys, open_store, read_chunk_vertices
+        from zarr_vectors.rechunk import RechunkSpec, rechunk
+
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 60)
@@ -228,9 +232,10 @@ class TestRechunkByAttribute:
     """Rechunk by attribute:length with explicit bins."""
 
     def test_length_rechunk(self, tmp_path: Path) -> None:
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
-        from zarr_vectors.rechunk import rechunk, RechunkSpec
         from zarr_vectors.building import list_chunk_keys, open_store
+        from zarr_vectors.rechunk import RechunkSpec, rechunk
+
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 80)
@@ -257,8 +262,9 @@ class TestRechunkViaLazy:
     """Rechunk via lazy API: zv[0].rechunk()."""
 
     def test_lazy_rechunk(self, tmp_path: Path) -> None:
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors.lazy import open_zv
+
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 40)
@@ -282,10 +288,10 @@ class TestCompositeStore:
     """Composite: points + graph + mesh in one store."""
 
     def test_composite_pipeline(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors.composite import add_geometry, read_composite
-        from zarr_vectors.validate import validate
         from zarr_vectors.lazy import open_zv
+        from zarr_vectors.types.points import read_points, write_points
+        from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "brain.zv")
@@ -326,12 +332,14 @@ class TestBackwardCompat:
     """All original store types work unchanged with new code."""
 
     def test_all_types(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points, read_points
-        from zarr_vectors.types.lines import write_lines, read_lines
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines, read_polylines
-        from zarr_vectors.types.meshes import write_mesh, read_mesh
-        from zarr_vectors.types.graphs import write_graph, read_graph
+        from zarr_vectors.types.graphs import read_graph, write_graph
+        from zarr_vectors.types.lines import read_lines, write_lines
+        from zarr_vectors.types.meshes import read_mesh, write_mesh
+        from zarr_vectors.types.points import read_points, write_points
         from zarr_vectors.validate import validate
+
+        from tests._source_helpers import read_polylines
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         rng = np.random.default_rng(42)

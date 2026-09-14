@@ -27,25 +27,24 @@ testable offline with :class:`InMemoryFragsReader`.
 
 from __future__ import annotations
 
-from zarr_vectors.building import rebuild_presence
-
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
+from zarr_vectors.building import rebuild_presence
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
+
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
     coarsen_skeleton_level,
 )
-
 
 # Per-worker cache for lazily constructed external readers used by dask tasks.
 # Keyed by (base_url, frags_dir).
@@ -430,7 +429,10 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
     else:
         spec = sh.get("reader_spec")
         if not isinstance(spec, dict):
-            raise RuntimeError("_l0_extract_write expected shared['reader'] or shared['reader_spec']")
+            raise RuntimeError(
+                "_l0_extract_write expected shared['reader'] or "
+                "shared['reader_spec']"
+            )
         base_url = str(spec["base_url"])
         frags_dir = str(spec.get("frags_dir", ""))
         cache_key = (base_url, frags_dir)
@@ -747,8 +749,9 @@ def run_ingest(
             # Adaptive per-level scheduling: use at most one worker per target
             # chunk (and no Dask when a level has only one target chunk).
             if executor is None and workers:
-                from zarr_vectors.constants import VERTICES
                 from zarr_vectors.building import get_resolution_level, list_chunk_keys, open_store
+                from zarr_vectors.constants import VERTICES
+
                 from zarr_vectors_tools.ingest._parallel import dask_executor
 
                 if _dask_cm is not None:

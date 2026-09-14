@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import heapq
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
-
 from zarr_vectors.building import (
     chunk_local_to_global_offsets,
     get_resolution_level,
-    list_chunk_keys,
     open_store,
     read_link_attributes,
     read_links,

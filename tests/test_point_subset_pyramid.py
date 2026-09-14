@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import zarr_vectors.building as B
-from zarr_vectors.constants import VERTICES
 from zarr_vectors.exceptions import CoarseningError
 from zarr_vectors.types.points import read_points
 

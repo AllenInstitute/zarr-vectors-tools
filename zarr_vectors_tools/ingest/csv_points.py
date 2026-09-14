@@ -23,11 +23,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
-
 
 # Lower-cased column name → canonical role.
 _POSITION_PATTERNS = {

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.polylines import write_polylines
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -96,7 +95,11 @@ def ingest_trk(
     # Optional enrichments
     from zarr_vectors_tools.ingest._polyline_enrichments import (
         compute_endpoints as _compute_endpoints,
+    )
+    from zarr_vectors_tools.ingest._polyline_enrichments import (
         compute_lengths as _compute_lengths,
+    )
+    from zarr_vectors_tools.ingest._polyline_enrichments import (
         filter_by_length as _filter_by_length,
     )
 
@@ -155,26 +158,39 @@ def ingest_trk(
     # Preserve TRK header
     if preserve_header:
         try:
-            from zarr_vectors_tools.headers.registry import HeaderRegistry
             from zarr_vectors_tools.headers.formats import TRKHeader
+            from zarr_vectors_tools.headers.registry import HeaderRegistry
 
             hdr = trk.header
             vox_size = tuple(float(v) for v in hdr["voxel_size"])
             dims = tuple(int(d) for d in hdr["dim"])
-            affine = hdr["vox_to_ras"].flatten().tolist() if "vox_to_ras" in hdr.dtype.names else None
-            vox_order = hdr["voxel_order"].item().decode() if isinstance(hdr["voxel_order"].item(), bytes) else str(hdr["voxel_order"].item())
+            affine = (
+                hdr["vox_to_ras"].flatten().tolist()
+                if "vox_to_ras" in hdr.dtype.names else None
+            )
+            raw_order = hdr["voxel_order"].item()
+            vox_order = (
+                raw_order.decode() if isinstance(raw_order, bytes)
+                else str(raw_order)
+            )
 
             scalar_names = []
             if "scalar_name" in hdr.dtype.names:
                 for sn in hdr["scalar_name"]:
-                    name = sn.item().decode().strip("\x00") if isinstance(sn.item(), bytes) else str(sn.item()).strip("\x00")
+                    raw = sn.item()
+                    name = (
+                        raw.decode() if isinstance(raw, bytes) else str(raw)
+                    ).strip("\x00")
                     if name:
                         scalar_names.append(name)
 
             property_names = []
             if "property_name" in hdr.dtype.names:
                 for pn in hdr["property_name"]:
-                    name = pn.item().decode().strip("\x00") if isinstance(pn.item(), bytes) else str(pn.item()).strip("\x00")
+                    raw = pn.item()
+                    name = (
+                        raw.decode() if isinstance(raw, bytes) else str(raw)
+                    ).strip("\x00")
                     if name:
                         property_names.append(name)
 

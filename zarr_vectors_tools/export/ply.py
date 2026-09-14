@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.points import read_points
 from zarr_vectors.typing import BoundingBox, ChunkCoords

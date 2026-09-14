@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.meshes import read_mesh
 from zarr_vectors.typing import BoundingBox, ChunkCoords

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.building import (
     chunk_local_to_global_offsets,
     get_resolution_level,

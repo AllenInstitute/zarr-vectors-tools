@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytest.importorskip("pandas")
 pytest.importorskip("networkx")
 
@@ -44,8 +43,8 @@ class TestEdgelistIngest:
         assert result["edge_count"] == 4
 
     def test_with_enrichments(self, tmp_path: Path) -> None:
-        from zarr_vectors_tools.ingest.edgelist import ingest_edgelist
         from zarr_vectors_tools.headers.registry import HeaderRegistry
+        from zarr_vectors_tools.ingest.edgelist import ingest_edgelist
 
         edges, nodes = _write_csvs(tmp_path)
         store = tmp_path / "g.zv"

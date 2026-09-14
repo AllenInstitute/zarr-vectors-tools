@@ -71,8 +71,7 @@ def expand_grid(
     guessing the names misses the link families, which nest two levels
     deeper.
     """
-    from zarr_vectors.building import per_chunk_array_paths
-    from zarr_vectors.building import update_root_metadata
+    from zarr_vectors.building import per_chunk_array_paths, update_root_metadata
 
     group = level.store
     want = tuple(int(v) for v in needed)

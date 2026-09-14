@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.types.graphs import read_graph
+
 from zarr_vectors_tools.ingest._tree_enrichments import (
     BRANCH,
     CONTINUATION,
@@ -15,7 +15,6 @@ from zarr_vectors_tools.ingest._tree_enrichments import (
     compute_tree_metrics,
 )
 from zarr_vectors_tools.ingest.swc import ingest_swc
-
 
 # ---------------------------------------------------------------------
 # Direct helper tests against a hand-built tree.

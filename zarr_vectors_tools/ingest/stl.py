@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -75,7 +74,9 @@ def ingest_stl(
         faces = np.arange(n_raw, dtype=np.int64).reshape(n_faces, 3)
 
     positions = positions.astype(np_dtype)
-    face_normals = raw_normals  # (F, 3) per-face normals from STL
+    # Per-face normals are parsed but not stored: the mesh writer derives
+    # them from the geometry, so keeping them would be a second source of
+    # truth that nothing reads.
 
     return write_mesh(
         str(output_path),

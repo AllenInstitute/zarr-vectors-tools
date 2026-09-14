@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections import defaultdict
 
 import numpy as np
-
 from zarr_vectors.building import (
     create_fragment_attribute_array,
     create_object_attributes_array,

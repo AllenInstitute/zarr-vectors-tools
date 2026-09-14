@@ -16,27 +16,23 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
-from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
-from zarr_vectors.types.points import read_points, write_points
 from zarr_vectors.building import (
     LevelMetadata,
     assign_chunks,
     create_attribute_array,
-    create_object_index_array,
     create_resolution_level,
     create_vertices_array,
     get_resolution_level,
-    list_chunk_keys,
     open_store,
-    read_chunk_vertices,
     read_root_metadata,
     write_chunk_attributes,
     write_chunk_vertices,
-    write_object_index,
 )
 from zarr_vectors.constants import VERTICES
 from zarr_vectors.exceptions import CoarseningError
+from zarr_vectors.types.points import read_points
+
+from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
 
 
 def coarsen_points(
@@ -70,7 +66,6 @@ def coarsen_points(
         - ``reduction_ratio``: N / M
     """
     n_input = len(positions)
-    ndim = positions.shape[1]
 
     result = generate_metanodes(
         positions, bin_size,

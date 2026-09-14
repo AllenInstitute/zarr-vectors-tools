@@ -22,8 +22,7 @@ and *before* the expensive write phase.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Sequence
+from collections.abc import Mapping, Sequence
 
 # Exclusive: a cell payload must be strictly smaller than this to round-trip.
 VLEN_CELL_LIMIT_BYTES = 2**32

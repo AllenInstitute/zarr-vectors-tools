@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from zarr_vectors.types.points import read_points
+
 from zarr_vectors_tools.ingest._point_enrichments import (
     compute_per_object_vertex_count,
 )

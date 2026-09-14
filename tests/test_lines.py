@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.types.lines import read_lines
+
 from zarr_vectors_tools.ingest.lines import ingest_lines_csv
 
 

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytest.importorskip("networkx")
 
 
@@ -37,8 +36,9 @@ def _write_graphml(path: Path) -> None:
 class TestGraphEnrichments:
 
     def test_degree(self, tmp_path: Path) -> None:
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
         from zarr_vectors.types.graphs import read_graph
+
+        from zarr_vectors_tools.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)
@@ -52,8 +52,9 @@ class TestGraphEnrichments:
             assert uniq <= {0, 2}
 
     def test_component_labels(self, tmp_path: Path) -> None:
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
         from zarr_vectors.types.graphs import read_graph
+
+        from zarr_vectors_tools.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)
@@ -88,8 +89,9 @@ class TestGraphEnrichments:
 
     def test_default_off(self, tmp_path: Path) -> None:
         """Existing behaviour: nothing computed unless requested."""
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
         from zarr_vectors.types.graphs import read_graph
+
+        from zarr_vectors_tools.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)

@@ -20,7 +20,6 @@ import numpy.typing as npt
 
 from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
 
-
 # ===================================================================
 # Grid contraction (general graphs)
 # ===================================================================
@@ -62,7 +61,6 @@ def coarsen_graph(
     n_nodes = len(positions)
     n_edges = len(edges)
     ndim = positions.shape[1]
-
     if n_nodes == 0:
         return _empty_graph_coarsen(ndim)
 
@@ -156,7 +154,6 @@ def prune_skeleton(
     """
     n_nodes = len(positions)
     n_edges = len(edges)
-    ndim = positions.shape[1]
 
     if n_nodes == 0 or n_edges == 0:
         return {
@@ -196,7 +193,10 @@ def prune_skeleton(
             current = leaf
 
             while True:
-                neighbors = [nb for nb in adj[current] if nb not in remove_set and nb not in branch_nodes]
+                neighbors = [
+                    nb for nb in adj[current]
+                    if nb not in remove_set and nb not in branch_nodes
+                ]
                 if not neighbors:
                     break
                 next_node = neighbors[0]

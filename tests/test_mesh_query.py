@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from zarr_vectors.types.meshes import write_mesh
+
 from zarr_vectors_tools.algorithms import cast_ray, closest_point
 
 
@@ -183,6 +183,7 @@ class TestLevelGrid:
         so nothing is found however close the surface is.
         """
         from zarr_vectors.building import open_store, read_level_metadata
+
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         store = _plane_store(tmp_path, (10.0, 10.0, 10.0))

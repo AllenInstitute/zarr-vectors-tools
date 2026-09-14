@@ -9,10 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.polylines import read_polylines
-from zarr_vectors.typing import BoundingBox, ChunkCoords
+from zarr_vectors.typing import ChunkCoords
 
 
 def export_trx(
@@ -45,7 +44,8 @@ def export_trx(
         ExportError: If trx-python is not installed or export fails.
     """
     try:
-        from trx.trx_file_memmap import TrxFile, save as trx_save
+        from trx.trx_file_memmap import TrxFile
+        from trx.trx_file_memmap import save as trx_save
     except ImportError as e:
         raise ExportError(
             "trx-python is required for TRX export. "

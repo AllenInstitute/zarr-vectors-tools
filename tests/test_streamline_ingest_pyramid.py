@@ -29,19 +29,19 @@ def _write_tck(path: Path, streamlines: list[np.ndarray]) -> Path:
     header = (
         "mrtrix tracks\n"
         "datatype: Float32LE\n"
-        "count: %d\n" % len(streamlines)
+        f"count: {len(streamlines)}\n"
     )
-    offset_line = "file: . %d\n"
+    offset_line = "file: . {}\n"
     # The offset has to point past the whole header, including itself.
-    body_start = len(header) + len(offset_line % 0) + len("END\n")
+    body_start = len(header) + len(offset_line.format(0)) + len("END\n")
     for _ in range(3):
-        candidate = len(header) + len(offset_line % body_start) + len("END\n")
+        candidate = len(header) + len(offset_line.format(body_start)) + len("END\n")
         if candidate == body_start:
             break
         body_start = candidate
     with open(path, "wb") as handle:
         handle.write(header.encode("ascii"))
-        handle.write((offset_line % body_start).encode("ascii"))
+        handle.write((offset_line.format(body_start)).encode("ascii"))
         handle.write(b"END\n")
         for line in streamlines:
             handle.write(np.asarray(line, dtype="<f4").tobytes())

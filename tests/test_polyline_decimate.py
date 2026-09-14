@@ -9,8 +9,6 @@ Covers:
 from __future__ import annotations
 
 import numpy as np
-
-from zarr_vectors.constants import CAP_MULTISCALE_LINKS, XLEVEL_EXPLICIT
 from zarr_vectors.building import (
     get_resolution_level,
     links_group_path,
@@ -22,10 +20,11 @@ from zarr_vectors.building import (
     read_level_metadata,
     read_root_metadata,
 )
+from zarr_vectors.constants import CAP_MULTISCALE_LINKS, XLEVEL_EXPLICIT
+
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.multiresolution.strategies.polylines import decimate_polyline
-
 
 # ===================================================================
 # decimate_polyline

@@ -186,8 +186,8 @@ def test_root_capabilities_advertise_the_sharing(shared_fragment_store):
     # A consumer branches on CAP_SHARED_FRAGMENTS to decide whether it may
     # dedupe by fragment identity. Leaving it unstamped would say "no" when the
     # answer is yes — the exact inverse of the per-object path's situation.
-    from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS, CAP_SHARED_FRAGMENTS
     from zarr_vectors.building import read_root_metadata
+    from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS, CAP_SHARED_FRAGMENTS
 
     store = shared_fragment_store
     coarsen_level(str(store), 0, 1, coarsen_factor=2.0, method="per_fragment")

@@ -13,11 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-from zarr_vectors.constants import (
-    VERTEX_FRAGMENTS,
-    VERTICES,
-)
 from zarr_vectors.building import (
     chunks_intersecting_bbox,
     get_resolution_level,
@@ -27,6 +22,10 @@ from zarr_vectors.building import (
     read_chunk_vertices,
     read_root_metadata,
 )
+from zarr_vectors.constants import (
+    VERTEX_FRAGMENTS,
+    VERTICES,
+)
 from zarr_vectors.typing import ChunkCoords
 
 from zarr_vectors_tools.algorithms._links import (
@@ -34,7 +33,6 @@ from zarr_vectors_tools.algorithms._links import (
     link_prefetch_plan,
     require_link_width,
 )
-
 
 # =====================================================================
 # Helpers

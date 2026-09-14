@@ -62,11 +62,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from zarr_vectors.constants import (
-    CAP_PRESERVED_OBJECT_IDS,
-    CAP_SHARED_FRAGMENTS,
-    VERTICES,
-)
 from zarr_vectors.building import (
     LevelMetadata,
     create_object_index_array,
@@ -84,6 +79,11 @@ from zarr_vectors.building import (
     write_chunk_fragments,
     write_chunk_vertices,
     write_object_index,
+)
+from zarr_vectors.constants import (
+    CAP_PRESERVED_OBJECT_IDS,
+    CAP_SHARED_FRAGMENTS,
+    VERTICES,
 )
 from zarr_vectors.exceptions import ArrayError
 

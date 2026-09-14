@@ -912,8 +912,7 @@ def _refresh_level_metadata(dataset: Any, level: Any, fallback: int) -> int:
     that was already wrong before this merge is corrected rather than
     added to.
     """
-    from zarr_vectors.building import refresh_arrays_present
-    from zarr_vectors.building import update_level_metadata
+    from zarr_vectors.building import refresh_arrays_present, update_level_metadata
 
     total = fallback
     try:

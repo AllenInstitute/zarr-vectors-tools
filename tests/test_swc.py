@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zarr_vectors_tools.ingest.swc import ingest_swc
 from zarr_vectors_tools.export.swc import export_swc
+from zarr_vectors_tools.ingest.swc import ingest_swc
 
 
 class TestSWC:

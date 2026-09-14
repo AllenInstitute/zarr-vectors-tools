@@ -6,7 +6,6 @@ Internal to zarr_vectors_tools; not part of the public API.
 from __future__ import annotations
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 
 

@@ -20,9 +20,9 @@ class TestPointCloudSubChunkBins:
     """1. Point cloud with sub-chunk bins."""
 
     def test_50k_points_with_bins(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points, read_points
-        from zarr_vectors.validate import validate
         from zarr_vectors.building import open_store, read_root_metadata
+        from zarr_vectors.types.points import read_points, write_points
+        from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "pts.zv")
@@ -59,8 +59,9 @@ class TestStreamlinesWithSparsity:
     """2. Streamlines with sparsity pyramid."""
 
     def test_streamline_sparsity(self, tmp_path: Path) -> None:
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors.validate import validate
+
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         rng = np.random.default_rng(42)
@@ -94,9 +95,10 @@ class TestMeshBinning:
     """3. Mesh with binning only."""
 
     def test_mesh_coarsening(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.meshes import write_mesh, read_mesh
-        from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
+        from zarr_vectors.types.meshes import read_mesh, write_mesh
         from zarr_vectors.validate import validate
+
+        from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "mesh.zv")
@@ -124,10 +126,11 @@ class TestSkeletonManualLevels:
     """5. Manual level creation."""
 
     def test_multiple_manual_ratios(self, tmp_path: Path) -> None:
+        from zarr_vectors.building import list_available_ratios, list_resolution_levels, open_store
         from zarr_vectors.types.points import write_points
-        from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
-        from zarr_vectors.building import open_store, list_resolution_levels, list_available_ratios
         from zarr_vectors.validate import validate
+
+        from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "man.zv")
@@ -160,7 +163,7 @@ class TestBackwardCompat:
     """6. Backward compatibility — step 15 tests pass unchanged."""
 
     def test_simple_point_cloud(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points, read_points
+        from zarr_vectors.types.points import read_points, write_points
         from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
@@ -173,8 +176,9 @@ class TestBackwardCompat:
 
     def test_pyramid_backward_compat(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points
-        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
         from zarr_vectors.validate import validate
+
+        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "pyr.zv")
@@ -186,8 +190,10 @@ class TestBackwardCompat:
         assert validate(store, level=5).ok
 
     def test_streamlines(self, tmp_path: Path) -> None:
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines, read_polylines
         from zarr_vectors.validate import validate
+
+        from tests._source_helpers import read_polylines
+        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "pl.zv")
@@ -205,8 +211,6 @@ class TestOMEZarrMetadata:
     """7. OME-Zarr multiscale metadata round-trip."""
 
     def test_multiscale_roundtrip(self, tmp_path: Path) -> None:
-        from zarr_vectors.types.points import write_points
-        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
         from zarr_vectors.building import (
             get_level_scale,
             get_level_translation,
@@ -214,6 +218,9 @@ class TestOMEZarrMetadata:
             read_multiscale_metadata,
             write_multiscale_metadata,
         )
+        from zarr_vectors.types.points import write_points
+
+        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "ms.zv")

@@ -21,15 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
-from zarr_vectors.constants import (
-    CAP_MULTISCALE_LINKS,
-    FORMAT_VERSION,
-    LINKS,
-    XLEVEL_EXPLICIT,
-    XLEVEL_IMPLICIT,
-    XLEVEL_NONE,
-)
 from zarr_vectors.building import (
     RootMetadata,
     create_link_attributes_array,
@@ -52,6 +43,14 @@ from zarr_vectors.building import (
     write_link_attributes,
     write_link_cells,
     write_links,
+)
+from zarr_vectors.constants import (
+    CAP_MULTISCALE_LINKS,
+    FORMAT_VERSION,
+    LINKS,
+    XLEVEL_EXPLICIT,
+    XLEVEL_IMPLICIT,
+    XLEVEL_NONE,
 )
 from zarr_vectors.exceptions import ArrayError, MetadataError
 
@@ -436,13 +435,13 @@ def test_invalid_cross_level_depth_rejected():
 zarr = pytest.importorskip("zarr")
 
 from zarr_vectors.building import (
-    get_resolution_level,
     list_resolution_levels,
     open_store,
     read_root_metadata,
 )
-from zarr_vectors_tools.multiresolution.coarsen import build_pyramid  # noqa: E402
 from zarr_vectors.types.graphs import write_graph  # noqa: E402
+
+from zarr_vectors_tools.multiresolution.coarsen import build_pyramid  # noqa: E402
 
 
 def _seed_simple_graph(tmp_path: Path) -> Path:

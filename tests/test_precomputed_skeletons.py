@@ -14,10 +14,10 @@ import tempfile
 
 import numpy as np
 import pytest
-
-from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors.building import get_resolution_level, open_store
 from zarr_vectors.types import skeletons as sk
+
+from zarr_vectors_tools.algorithms._links import read_cross_links
 
 
 @pytest.fixture
@@ -59,7 +59,9 @@ def _ppool_executor(func, items, shared=None):
 def _flywire_cutout_reader():
     """A small flywire-shaped in-memory cutout spanning multiple chunks."""
     from zarr_vectors_tools.ingest.precomputed_skeletons import (
-        InMemoryFragsReader, SkeletonInfo, enumerate_frag_keys,
+        InMemoryFragsReader,
+        SkeletonInfo,
+        enumerate_frag_keys,
     )
     info = SkeletonInfo(
         base_url="mem://x", resolution_nm=(32.0, 32.0, 40.0),
@@ -116,7 +118,10 @@ def test_ingest_driver_offline(tmp_store):
     .frags reader, with a flywire-shaped spatial index and a phase-offset
     chunk grid (so one zarr chunk collects pieces from several .frags)."""
     from zarr_vectors_tools.ingest.precomputed_skeletons import (
-        InMemoryFragsReader, SkeletonInfo, enumerate_frag_keys, run_ingest,
+        InMemoryFragsReader,
+        SkeletonInfo,
+        enumerate_frag_keys,
+        run_ingest,
     )
 
     info = SkeletonInfo(
@@ -183,7 +188,9 @@ def test_cross_chunk_edges_merge_fragments_one_level_up(tmp_store):
     pieces fall in the same chunk and the link re-merges them into a single
     connected fragment — no proximity heuristic involved."""
     from zarr_vectors_tools.ingest.precomputed_skeletons import (
-        InMemoryFragsReader, SkeletonInfo, run_ingest,
+        InMemoryFragsReader,
+        SkeletonInfo,
+        run_ingest,
     )
 
     info = SkeletonInfo(
@@ -226,7 +233,9 @@ def test_alignment_no_split_and_world_roundtrip(tmp_store):
     piece within one .frag stays a single fragment (no phase-split, no
     cross-chunk edges), and reads return absolute world coordinates."""
     from zarr_vectors_tools.ingest.precomputed_skeletons import (
-        InMemoryFragsReader, SkeletonInfo, run_ingest,
+        InMemoryFragsReader,
+        SkeletonInfo,
+        run_ingest,
     )
     info = SkeletonInfo(
         base_url="mem://x", resolution_nm=(32.0, 32.0, 40.0),
@@ -259,7 +268,10 @@ def test_coincident_boundary_vertices_become_cross_chunk_edges(tmp_store):
     cross-chunk link, and the two fragments merge into one connected
     fragment one level up."""
     from zarr_vectors_tools.ingest.precomputed_skeletons import (
-        InMemoryFragsReader, SkeletonInfo, enumerate_frag_keys, run_ingest,
+        InMemoryFragsReader,
+        SkeletonInfo,
+        enumerate_frag_keys,
+        run_ingest,
     )
     info = SkeletonInfo(
         base_url="mem://x", resolution_nm=(32.0, 32.0, 40.0),

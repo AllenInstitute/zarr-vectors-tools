@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.polylines import write_polylines
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -144,7 +143,11 @@ def ingest_trx(
     # Optional enrichments
     from zarr_vectors_tools.ingest._polyline_enrichments import (
         compute_endpoints as _compute_endpoints,
+    )
+    from zarr_vectors_tools.ingest._polyline_enrichments import (
         compute_lengths as _compute_lengths,
+    )
+    from zarr_vectors_tools.ingest._polyline_enrichments import (
         filter_by_length as _filter_by_length,
     )
 

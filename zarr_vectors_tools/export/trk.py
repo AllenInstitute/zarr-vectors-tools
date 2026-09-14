@@ -9,10 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.polylines import read_polylines
-from zarr_vectors.typing import BoundingBox, ChunkCoords
+from zarr_vectors.typing import ChunkCoords
 
 
 def export_trk(

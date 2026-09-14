@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.lines import write_lines
 from zarr_vectors.typing import BinShape, ChunkShape

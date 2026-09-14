@@ -7,8 +7,8 @@ helper lands in ``zarr_vectors.spatial.chunking``.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from itertools import product
-from typing import Iterable
 
 from zarr_vectors.typing import ChunkCoords
 

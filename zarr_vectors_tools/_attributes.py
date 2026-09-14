@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
-
 from zarr_vectors.building import (
     VERTEX_ATTRIBUTES,
     chunk_local_to_global_offsets,

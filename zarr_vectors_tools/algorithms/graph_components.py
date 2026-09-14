@@ -16,11 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.building import (
     chunk_local_to_global_offsets,
     get_resolution_level,
-    list_chunk_keys,
     open_store,
     read_links,
 )
@@ -113,7 +111,7 @@ def compute_connected_components(
 
     sizes = np.zeros(len(unique_roots), dtype=np.int64)
     if n_vertices:
-        counts = Counter(int(l) for l in labels)
+        counts = Counter(int(label) for label in labels)
         for k, v in counts.items():
             sizes[k] = v
 

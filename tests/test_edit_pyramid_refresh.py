@@ -17,13 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
-
+import zarr_vectors as zv
 from zarr_vectors.building import list_resolution_levels, open_store, read_chunk_vertices
+from zarr_vectors.types.points import write_points
+
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
-import zarr_vectors as zv
-from zarr_vectors.types.points import write_points
 
 
 def _build_pyramid_store(tmp_path: Path) -> tuple[str, np.ndarray]:

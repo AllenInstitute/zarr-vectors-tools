@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.typing import BinShape, ChunkShape

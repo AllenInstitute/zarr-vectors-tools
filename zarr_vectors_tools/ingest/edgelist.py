@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -224,6 +223,7 @@ def ingest_edgelist(
     if compute_summary:
         try:
             import networkx as nx  # noqa: F401  (already imported above for enrichments)
+
             from zarr_vectors_tools.headers.formats import GraphHeader
             from zarr_vectors_tools.headers.registry import HeaderRegistry
 

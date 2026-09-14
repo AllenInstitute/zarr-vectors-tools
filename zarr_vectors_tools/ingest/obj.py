@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -115,14 +114,11 @@ def ingest_obj(
     if not faces:
         raise IngestError(f"OBJ file has no faces: {input_path}")
 
-    # Determine link width (3 for tris, 4 for quads)
+    # A uniform file is stored as it stands -- all triangles give link width
+    # 3, all quads give 4, and the writer takes the width from the face array
+    # itself.  A MIXED file has no single width, so its quads are split.
     face_sizes = set(len(f) for f in faces)
-    if face_sizes == {3}:
-        link_width = 3
-    elif face_sizes == {4}:
-        link_width = 4
-    else:
-        # Mixed — triangulate quads
+    if face_sizes not in ({3}, {4}):
         tri_faces: list[list[int]] = []
         for f in faces:
             if len(f) == 3:
@@ -131,7 +127,6 @@ def ingest_obj(
                 tri_faces.append([f[0], f[1], f[2]])
                 tri_faces.append([f[0], f[2], f[3]])
         faces = tri_faces
-        link_width = 3
 
     faces_arr = np.array(faces, dtype=np.int64)
 

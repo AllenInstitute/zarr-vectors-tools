@@ -14,24 +14,23 @@ Two layers:
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
-from zarr_vectors.building import list_chunk_keys, read_all_object_manifests, read_chunk_vertices
-from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors.building import (
     get_resolution_level,
+    list_chunk_keys,
     open_store,
+    read_all_object_manifests,
+    read_chunk_vertices,
     read_level_metadata,
-    read_root_metadata,
 )
+
+from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+from zarr_vectors_tools.algorithms._links import read_cross_links
 from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
 from zarr_vectors_tools.multiresolution.coarsen_implicit import (
     coarse_chunks_of,
     positions_in_run,
     segment_object_by_coarse_chunk,
 )
-from tests._source_helpers import write_polylines_with_segment_id as write_polylines
-
 
 # ===================================================================
 # Unit tests: segment_object_by_coarse_chunk + positions_in_run

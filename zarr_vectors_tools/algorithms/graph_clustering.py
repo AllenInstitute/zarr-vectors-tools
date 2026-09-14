@@ -30,11 +30,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.building import get_resolution_level, open_store
 
 from zarr_vectors_tools.algorithms.graph_search import build_adjacency
-
 
 # =====================================================================
 # k-core decomposition

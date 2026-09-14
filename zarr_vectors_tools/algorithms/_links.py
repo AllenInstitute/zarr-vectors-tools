@@ -24,9 +24,9 @@ arrays and prefetch actually happens.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
-from zarr_vectors.constants import LINK_FRAGMENTS
 from zarr_vectors.building import (
     is_intra,
     link_attributes_path,
@@ -37,6 +37,7 @@ from zarr_vectors.building import (
     parse_offsets,
     read_links,
 )
+from zarr_vectors.constants import LINK_FRAGMENTS
 
 if TYPE_CHECKING:
     from zarr_vectors.building import Group

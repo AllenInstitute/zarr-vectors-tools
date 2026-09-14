@@ -24,11 +24,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-from zarr_vectors.constants import (
-    VERTEX_FRAGMENTS,
-    VERTICES,
-)
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -38,6 +33,10 @@ from zarr_vectors.building import (
     read_chunk_vertices,
     read_root_metadata,
     read_vertex_fragment_index,
+)
+from zarr_vectors.constants import (
+    VERTEX_FRAGMENTS,
+    VERTICES,
 )
 from zarr_vectors.typing import ChunkCoords
 

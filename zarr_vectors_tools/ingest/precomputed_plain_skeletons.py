@@ -47,28 +47,26 @@ Example::
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
 from zarr_vectors.building import write_object_attributes
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
+
+# Re-use the coordinate-distribution helper from the .frags ingest module.
+from zarr_vectors_tools.ingest.precomputed_skeletons import pieces_from_chunk
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
     coarsen_skeleton_level,
 )
-
-# Re-use the coordinate-distribution helper from the .frags ingest module.
-from zarr_vectors_tools.ingest.precomputed_skeletons import pieces_from_chunk
-
 
 # ===================================================================
 # Source description
@@ -404,7 +402,7 @@ def _build_object_attribute_array(
 # ===================================================================
 
 def run_ingest_plain(
-    reader: "PlainPrecomputedReader",
+    reader: PlainPrecomputedReader,
     out_store: str | Path,
     *,
     chunk_shape_nm: tuple[float, ...] = (1_000_000.0, 1_000_000.0, 1_000_000.0),
@@ -693,13 +691,16 @@ def run_ingest_plain(
         spf_list = list(sparsity_factors) if sparsity_factors is not None else [1.0] * n_levels
 
         if pyramid_workers:
-            from zarr_vectors_tools.ingest._parallel import dask_executor
-            from zarr_vectors.constants import VERTICES
             from zarr_vectors.building import (
                 get_resolution_level,
                 list_chunk_keys,
+            )
+            from zarr_vectors.building import (
                 open_store as _open,
             )
+            from zarr_vectors.constants import VERTICES
+
+            from zarr_vectors_tools.ingest._parallel import dask_executor
 
             # Use adaptive per-level worker count — same logic as run_ingest.
             root_for_counts = _open(str(out_store), mode="r")

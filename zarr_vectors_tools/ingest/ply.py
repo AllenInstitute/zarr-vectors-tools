@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -76,7 +75,6 @@ def ingest_ply(
         raise IngestError(f"PLY file has no 'vertex' element: {input_path}")
 
     vertex = ply["vertex"]
-    n_verts = len(vertex.data)
 
     # Extract positions — look for x,y,z or X,Y,Z
     prop_names = [p.name for p in vertex.properties]
@@ -95,7 +93,6 @@ def ingest_ply(
                 f"Cannot identify position columns in PLY vertex properties: {prop_names}"
             )
 
-    ndim = len(coord_names)
     positions = np.column_stack(
         [np.asarray(vertex[c], dtype=np.float64) for c in coord_names]
     ).astype(np.dtype(dtype))

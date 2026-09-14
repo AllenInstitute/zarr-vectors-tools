@@ -117,6 +117,7 @@ def rebuild_pyramid_from_level(
         remove_resolution_level,
         session_for,
     )
+
     from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
 
     levels = list_resolution_levels(root)
