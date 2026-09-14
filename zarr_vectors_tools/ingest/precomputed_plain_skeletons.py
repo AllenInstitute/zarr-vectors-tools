@@ -47,6 +47,7 @@ Example::
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -141,6 +142,7 @@ class PlainPrecomputedReader:
         self.info = self._build_info()
         self._seg_ids: list[int] | None = None
         self._seg_props_raw: dict[str, Any] | None = None
+        self._local = threading.local()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -227,13 +229,37 @@ class PlainPrecomputedReader:
             return {}
         return props_info.get("inline", {})
 
+    def _skeleton_source(self) -> Any:
+        """This thread's CloudVolume skeleton source for the layer.
+
+        ``PrecomputedSkeletonSource.from_cloudpath`` opens a skeleton layer by
+        its own URL.  ``CloudVolume(url)`` does not: it wants the segmentation
+        volume above it, and fails on a layer whose ``info`` has no
+        ``scales``.  One source per reading thread, so ``read_workers``
+        threads never share one.
+        """
+        source = getattr(self._local, "source", None)
+        if source is None:
+            try:
+                from cloudvolume.datasource.precomputed.skeleton import (
+                    PrecomputedSkeletonSource,
+                )
+            except ImportError as e:
+                raise ImportError(
+                    "PlainPrecomputedReader.read_skeleton requires cloud-volume: "
+                    "pip install cloud-volume"
+                ) from e
+            source = PrecomputedSkeletonSource.from_cloudpath(self.base_url)
+            self._local.source = source
+        return source
+
     def read_skeleton(
         self, seg_id: int
     ) -> dict[str, npt.NDArray] | None:
         """Read one segment's skeleton, returning coordinates in nanometres.
 
-        Uses the cloud-volume ``CloudVolume`` client which handles both
-        sharded and unsharded formats transparently.
+        Uses cloud-volume's skeleton source, which handles both sharded and
+        unsharded layers transparently.
 
         Returns a dict with keys:
 
@@ -243,35 +269,19 @@ class PlainPrecomputedReader:
 
         Returns ``None`` if the segment has no skeleton in the store.
         """
+        # Opening the layer is outside the try: a layer that cannot be opened
+        # is an error, not a store where every segment happens to be missing.
+        source = self._skeleton_source()
         try:
-            import cloudvolume as cv
-        except ImportError as e:
-            raise ImportError(
-                "PlainPrecomputedReader.read_skeleton requires cloud-volume: "
-                "pip install cloud-volume"
-            ) from e
-
-        try:
-            vol = cv.CloudVolume(
-                self.base_url,
-                mip=0,
-                use_https=True,
-                parallel=False,
-                progress=False,
-                fill_missing=True,
-            )
-            skel = vol.skeleton.get(seg_id)
+            skel = source.get(seg_id)
         except Exception:
             return None
 
         if skel is None or len(skel.vertices) == 0:
             return None
 
-        # CloudVolume already returns vertices in nm when reading precomputed
-        # skeletons (it applies the layer transform internally).  We re-apply
-        # our parsed transform only if CloudVolume did NOT apply it
-        # (i.e. returned raw stored coords).  In practice cv.skeleton.get
-        # returns nm coords, so we use them directly.
+        # The skeleton source returns physical (nm) coordinates: it applies
+        # the layer's ``transform`` itself, so the vertices are used as is.
         verts = np.asarray(skel.vertices, dtype=np.float32)
         edges = np.asarray(skel.edges, dtype=np.int64).reshape(-1, 2)
 
@@ -419,6 +429,7 @@ def run_ingest_plain(
     progress: bool = True,
     read_workers: int = 8,
     pyramid_workers: int | None = None,
+    executor: Any = None,
 ) -> dict[str, Any]:
     """Ingest a plain precomputed skeleton layer to a multiscale zarr-vectors store.
 
@@ -461,7 +472,9 @@ def run_ingest_plain(
         progress: If ``True``, print progress messages.
         read_workers: Number of threads for parallel skeleton reads (IO-bound).
         pyramid_workers: Number of Dask *process* workers for pyramid building
-            (CPU-bound).  ``None`` → serial.
+            (CPU-bound).  ``None`` → serial, or ``executor`` when given.
+        executor: A ``map``-like ``(func, items, shared)`` callable for the
+            pyramid build, used when ``pyramid_workers`` is not set.
 
     Returns:
         Summary dict with keys ``objects``, ``level0_fragments``,
@@ -761,7 +774,7 @@ def run_ingest_plain(
                 sparsity_factors=spf_list,
                 sparsity_strategy=sparsity_strategy,
                 drop_interior_below=int(drop_interior_below or 0),
-                executor=None,
+                executor=executor,
             )
 
     return summary

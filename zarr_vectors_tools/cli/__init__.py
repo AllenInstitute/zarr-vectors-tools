@@ -104,7 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument(
         "input",
-        help="file to ingest, or store to export (decides the direction)",
+        help="file to ingest (or a precomputed layer's directory or URL), or "
+             "store to export (decides the direction)",
     )
     c.add_argument(
         "output",
@@ -269,6 +270,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--annot", action="append", dest="annots", default=None, metavar="NAME",
         help="freesurfer: parcellations from label/ (repeatable; default "
              "aparc when present), e.g. aparc.a2009s",
+    )
+
+    pc = c.add_argument_group(
+        "precomputed (Neuroglancer skeleton layer)",
+        "A layer with a spatial index keeps its own chunk grid, so "
+        "--chunk-shape is left out; one without needs --chunk-shape, in nm. "
+        "--coarsen gives each level's decimation stride.",
+    )
+    pc.add_argument(
+        "--anchor", type=parse_int_list, default=None, metavar="X,Y,Z",
+        help="spatial index: voxel corner of one .frags chunk; ingest the "
+             "block from there instead of every chunk in the layer",
+    )
+    pc.add_argument(
+        "--counts", type=parse_int_list, default=None, metavar="NX,NY,NZ",
+        help="spatial index: .frags chunks per axis from --anchor "
+             "(default: 1,1,1)",
+    )
+    pc.add_argument(
+        "--frags-dir", dest="frags_dir", default="", metavar="DIR",
+        help="spatial index: subdirectory holding the .frags files "
+             "(default: the layer root)",
+    )
+    pc.add_argument(
+        "--segment-id", action="append", type=int, dest="segment_ids",
+        default=None, metavar="ID",
+        help="no spatial index: ingest only this segment (repeatable; "
+             "default: every ID in segment_properties)",
+    )
+    pc.add_argument(
+        "--drop-interior-below", type=int, dest="drop_interior_below",
+        default=0, metavar="N",
+        help="at each coarser level, drop objects of at most N vertices that "
+             "touch no chunk boundary (default: 0, keep all)",
     )
 
     e = c.add_argument_group("export (store -> file)")

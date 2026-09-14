@@ -153,6 +153,11 @@ FORMAT_REGISTRY: dict[str, Fmt] = {
     "gifti":    Fmt("gifti", (".gii",), "gifti", "ingest_gifti", "surfaces", "surface"),
     "freesurfer": Fmt("freesurfer", (), "freesurfer", "ingest_freesurfer",
                       "surfaces", "surface"),
+    # A Neuroglancer precomputed skeleton layer is a directory or a bucket
+    # prefix, never a file: resolve_format recognises a URL, or a directory
+    # holding an ``info`` file, without --format.
+    "precomputed": Fmt("precomputed", (), "precomputed", "ingest_precomputed",
+                       "precomputed", "skeleton", inline_pyramid=True),
 }
 
 # extension -> format name (only unambiguous extensions; .csv defaults to points)
@@ -263,17 +268,19 @@ def load_export_func(fmt: ExportFmt):
 
 
 def _directory_format(path: Path) -> str:
-    """The format of a directory input: the surface formats come as sets."""
+    """The format of a directory input: the formats that come as sets of files."""
     from zarr_vectors_tools.ingest.freesurfer import find_freesurfer_surf_dir
 
+    if (path / "info").is_file():
+        return "precomputed"
     if find_freesurfer_surf_dir(path) is not None:
         return "freesurfer"
     if any(p.suffix.lower() == ".gii" for p in path.iterdir()):
         return "gifti"
     raise SystemExit(
         f"error: {path} is a directory, but neither a FreeSurfer subject "
-        f"(surf/lh.white) nor a directory of .gii files; pass a file, or "
-        f"--format"
+        f"(surf/lh.white), a directory of .gii files, nor a precomputed layer "
+        f"(info); pass a file, or --format"
     )
 
 
@@ -281,10 +288,16 @@ def resolve_format(input_path: str | Path, explicit: str | None) -> Fmt:
     """Return the :class:`Fmt` for ``--format`` (if given) or the input extension.
 
     A directory input is resolved by what is in it, since the cortical surface
-    formats describe one subject as many files.
+    formats describe one subject as many files and a precomputed layer is a
+    directory.  A URL can only be a precomputed layer: every other ingester
+    reads a local file.
     """
+    from zarr_vectors_tools.ingest.precomputed import is_url
+
     if explicit and explicit != "auto":
         return FORMAT_REGISTRY[explicit]
+    if is_url(input_path):
+        return FORMAT_REGISTRY["precomputed"]
     if Path(input_path).is_dir():
         return FORMAT_REGISTRY[_directory_format(Path(input_path))]
     ext = Path(input_path).suffix.lower()

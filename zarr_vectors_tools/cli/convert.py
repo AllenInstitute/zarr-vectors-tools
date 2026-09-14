@@ -2,7 +2,8 @@
 
 Both directions, chosen by what ``INPUT`` is:
 
-* a FILE in, a store out — ingest, optionally building a pyramid;
+* a FILE in, a store out — ingest, optionally building a pyramid (a
+  precomputed layer, a directory or URL rather than a file, counts as one);
 * a STORE in, a file out — export.
 
 One command rather than two because it is one operation with a direction,
@@ -63,6 +64,9 @@ def _print_summary(action: str, summary: dict) -> None:
         # cortical surfaces
         "hemispheres", "geometry", "space", "c_ras", "scalars", "labels",
         "alternates", "filled",
+        # precomputed skeleton layers
+        "layer", "bounds_nm", "frag_chunks_read", "source_segment_pieces",
+        "objects", "level0_fragments", "level0_cross_chunk_edges",
     ):
         if k in summary:
             print(f"  {k}: {summary[k]}")
@@ -118,6 +122,71 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     if factors is not None:
         print(f"  pyramid: {len(factors)} coarser level(s) built")
     return 0
+
+
+def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
+    """A precomputed skeleton layer, with the pyramid built inside the ingest.
+
+    Which of the two precomputed ingesters runs is only known once the
+    layer's ``info`` is read, so the options that belong to one of them are
+    checked there, not here.
+    """
+    refused = {
+        "--bin-shape": args.bin_shape is not None,
+        "--dtype": args.dtype != "float32",
+        "--compressor": args.compressor != "none",
+    }
+    rejected = sorted(flag for flag, given in refused.items() if given)
+    if rejected:
+        raise SystemExit(
+            f"error: {', '.join(rejected)} "
+            f"{'do' if len(rejected) > 1 else 'does'} not apply to precomputed "
+            f"input: the skeleton ingesters store float32 positions, raw, "
+            f"with no sub-binning"
+        )
+    for flag, value in (("--anchor", args.anchor), ("--counts", args.counts)):
+        if value is not None and len(value) != 3:
+            raise SystemExit(f"error: {flag} takes three integers, X,Y,Z")
+
+    strides: list[int] = []
+    sparsity: list[float] | None = None
+    strategy = args.sparsity_strategy
+    if factors is not None:
+        # Skeletons decimate by stride; round a fractional --coarsen the way
+        # ``zvtools pyramid`` does on a skeleton store.
+        strides = [max(1, int(round(c))) for c, _ in factors]
+        sparsity = [s for _, s in factors]
+        if strategy == "random":
+            strategy = "length"
+            if any(s > 1 for s in sparsity):
+                print("note: skeleton pyramids have no random sparsity; "
+                      "using --sparsity-strategy length")
+
+    ingest = load_ingest_func(fmt)
+    with executor_ctx(args.workers, args.workers_backend) as ex:
+        try:
+            summary = ingest(
+                args.input, str(args.output), args.chunk_shape,
+                frags_dir=args.frags_dir,
+                anchor=args.anchor,
+                counts=args.counts,
+                segment_ids=args.segment_ids,
+                strides=strides,
+                chunk_scale_factors=chunk_scale,
+                sparsity_factors=sparsity,
+                sparsity_strategy=strategy,
+                drop_interior_below=args.drop_interior_below,
+                executor=ex,
+            )
+        except ImportError as exc:  # cloud-files / cloud-volume / mapbuffer
+            raise SystemExit(
+                f"error: precomputed ingest failed ({exc}) — install it with: "
+                f"pip install 'zarr-vectors-tools[{fmt.extra}]'"
+            )
+
+    _print_summary("ingested precomputed (skeleton)", summary)
+    if strides:
+        print(f"  pyramid: {len(strides)} coarser level(s) built")
 
 
 #: CLI option -> the exporter keyword it fills, for the options an exporter
@@ -261,6 +330,12 @@ def run(args) -> int:
         "--surface": ({"freesurfer"}, bool(getattr(args, "surfaces", None))),
         "--morph": ({"freesurfer"}, bool(getattr(args, "morph", None))),
         "--annot": ({"freesurfer"}, bool(getattr(args, "annots", None))),
+        "--anchor": ({"precomputed"}, getattr(args, "anchor", None) is not None),
+        "--counts": ({"precomputed"}, getattr(args, "counts", None) is not None),
+        "--frags-dir": ({"precomputed"}, bool(getattr(args, "frags_dir", ""))),
+        "--segment-id": ({"precomputed"}, bool(getattr(args, "segment_ids", None))),
+        "--drop-interior-below": ({"precomputed"},
+                                  bool(getattr(args, "drop_interior_below", 0))),
     }
     rejected = [
         (flag, owners) for flag, (owners, given) in flag_owners.items()
@@ -292,6 +367,8 @@ def run(args) -> int:
         rc = _convert_trk(args, factors, chunk_scale)
         if rc != 0:
             return rc
+    elif fmt.name == "precomputed":
+        _convert_precomputed(args, fmt, factors, chunk_scale)
     else:
         if args.chunk_shape is None:
             raise SystemExit(f"error: --chunk-shape X,Y,Z is required for format {fmt.name!r}")

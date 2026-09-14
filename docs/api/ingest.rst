@@ -92,6 +92,14 @@ SWC
    :undoc-members:
    :show-inheritance:
 
+Precomputed skeletons (either kind of layer)
+--------------------------------------------
+
+.. automodule:: zarr_vectors_tools.ingest.precomputed
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Precomputed skeletons (spatial index)
 -------------------------------------
 

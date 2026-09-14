@@ -20,6 +20,34 @@ Both produce the same thing — a multiscale skeleton store whose object
 index preserves the original uint64 segment IDs, so a segment picked in
 Neuroglancer resolves to the same object in the Zarr Vectors store.
 
+## From the command line
+
+`zvtools convert` takes a layer URL or directory and reads its `info` to
+choose between the two paths, so the command is the same for both. A
+spatially indexed layer keeps its own chunk grid; a plain one needs
+`--chunk-shape` in nanometres:
+
+```bash
+# Spatial index: a block of .frags chunks, with a pyramid.
+zvtools convert gs://flywire_v141_m783/skeletons_mip_1 flywire_cutout.zv \
+    --anchor 17398,10448,3088 --counts 8,8,4 \
+    --coarsen 8,8,8 --chunk-scale 2,2,2 --sparsity 1,1,4 \
+    --drop-interior-below 3 --workers 8
+
+# No spatial index: a few segments first, to check the chunk shape.
+zvtools convert precomputed://gs://allen_neuroglancer_ccf/Mouselight mouselight.zv \
+    --chunk-shape 1000000,1000000,1000000 --segment-id 1 --segment-id 2
+```
+
+`--coarsen` supplies the per-level `strides` and `--sparsity` the
+`sparsity_factors`, a divisor (`4` keeps a quarter of the objects).
+`--workers` runs the `.frags` extract and the pyramid in worker processes
+(`--workers-backend dask` for a Dask cluster). The plain path always reads
+with 8 threads, and `--workers` goes to its pyramid build. Without
+`--anchor`, the spatially indexed path lists every `.frags` file in the
+layer (or in `--frags-dir`) and ingests them all; see the next section for
+why a script usually names a block instead.
+
 ## Spatially indexed sources — `run_ingest`
 
 Each `<x0>-<x1>_<y0>-<y1>_<z0>-<z1>.frags` file is a seung-lab
@@ -79,7 +107,9 @@ steps of `chunk_size_voxels`, reconstructing filenames from the igneous
 bucket-wide listing on a production EM layer is expensive and slow, so
 the anchor is not a convenience — it is the mechanism. It is a required
 argument on the module's own CLI, and passing a corner that is not on the
-`.frags` grid yields keys for files that do not exist.
+`.frags` grid yields keys for files that do not exist. `zvtools convert`
+makes it optional, listing the layer when it is left out, because
+converting a whole layer is what that command is for.
 
 ### Chunk-grid alignment
 
@@ -94,8 +124,9 @@ are merged upward by the coarsener.
 
 ### Module CLI
 
-`precomputed_skeletons.py` carries its own argparse entry point, separate
-from `zvtools`:
+`precomputed_skeletons.py` also carries its own argparse entry point,
+separate from `zvtools`. It covers the spatially indexed path only, and adds
+`--no-align`:
 
 ```bash
 python -m zarr_vectors_tools.ingest.precomputed_skeletons \

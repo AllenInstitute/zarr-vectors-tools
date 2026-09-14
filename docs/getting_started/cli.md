@@ -76,6 +76,7 @@ zvtools convert tracts.zarrvectors cst.trk --level 2 --group-id 4
 | `graphml` | `.graphml` | `graphml.ingest_graphml` | graph | `graph` |
 | `gifti` | `.gii`, or a directory of them | `gifti.ingest_gifti` | mesh | `surfaces` |
 | `freesurfer` | a subject directory | `freesurfer.ingest_freesurfer` | mesh | `surfaces` |
+| `precomputed` | a URL, or a directory with an `info` file | `precomputed.ingest_precomputed` | skeleton | `precomputed` |
 
 :::{note}
 `lines` and `edgelist` register **no extensions**, because a `.csv` file
@@ -98,7 +99,7 @@ value. If the format's extra is missing, the error carries the exact
 | Flag | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `--format` | choice | `auto` | see the table above |
-| `--chunk-shape X,Y,Z` | shape | — | **required for every format except `trk`** |
+| `--chunk-shape X,Y,Z` | shape | — | **required for every format except `trk`** and a spatially indexed `precomputed` layer |
 | `--num-chunks N｜X,Y,Z` | int or triple | — | **`trk` only**; target total chunk count, or per-axis counts |
 | `--bin-shape X,Y,Z` | shape | — | optional intra-chunk sub-binning |
 | `--dtype` | str | `float32` | stored position dtype |
@@ -115,8 +116,34 @@ value. If the format's extra is missing, the error carries the exact
 | `--hemisphere` | `left｜right｜lh｜rh` | both | `freesurfer`: hemispheres to read (repeatable); `gifti`: hemisphere of files that name none |
 | `--space` | `auto｜scanner｜surface` | `auto` | `freesurfer`: add `c_ras` to reach scanner RAS |
 | `--surface`, `--morph`, `--annot` | str, repeatable | present defaults | `freesurfer`: alternate surfaces, morphometry maps, parcellations |
+| `--anchor X,Y,Z` | ints | — | `precomputed` with a spatial index: voxel corner of one `.frags` chunk; ingest the block from there instead of listing the layer |
+| `--counts NX,NY,NZ` | ints | `1,1,1` | `precomputed`: `.frags` chunks per axis from `--anchor` |
+| `--frags-dir DIR` | str | layer root | `precomputed`: subdirectory holding the `.frags` files |
+| `--segment-id ID` | int, repeatable | every ID | `precomputed` without a spatial index: ingest only these segments |
+| `--drop-interior-below N` | int | `0` | `precomputed`: at each coarser level, drop objects of at most *N* vertices that touch no chunk boundary |
 
 Plus every [pyramid option](#pyramid-options) below.
+
+### Precomputed skeleton layers
+
+A Neuroglancer precomputed layer is a directory or a bucket prefix, not a
+file. `auto` recognises a URL (`gs://`, `s3://`, `https://`, `file://`,
+with or without `precomputed://`) and a local directory holding an `info`
+file. The layer's `info` then picks the ingester:
+
+| Layer has | Level-0 chunks | `--chunk-shape` |
+| --- | --- | --- |
+| a `spatial_index` | the index's own, one per `.frags` file | leave out |
+| no spatial index | a grid you choose | **required**, in nm |
+
+Without `--anchor`, every `.frags` file in the layer is listed and
+ingested. On a production EM layer that is a large job; pass `--anchor`
+and `--counts` to take a block. The pyramid is built inside the ingest:
+`--coarsen` gives each level's decimation stride, `--chunk-scale`
+defaults to `2` per level, and `--sparsity-strategy random` becomes
+`length`, as it does for `zvtools pyramid` on a skeleton store.
+`--compressor`, `--dtype` and `--bin-shape` are refused. See
+[Skeletons in EM](../ingest/em_skeletons.md).
 
 ### Export options
 
@@ -172,9 +199,19 @@ zvtools convert neuron.swc neuron.zarrvectors --chunk-shape 50,50,50
 # A FreeSurfer subject, then CIFTI myelin maps onto it.
 zvtools convert subjects/bert bert.zarrvectors --chunk-shape 20,20,20
 zvtools attach bert.zarrvectors bert.MyelinMap_BC.164k_fs_LR.dscalar.nii
+
+# A FlyWire cutout from the spatial index, with a three-level pyramid.
+zvtools convert gs://flywire_v141_m783/skeletons_mip_1 flywire_cutout.zv \
+    --anchor 17398,10448,3088 --counts 8,8,4 \
+    --coarsen 8,8,8 --sparsity 1,1,4 --drop-interior-below 3 --workers 8
+
+# Mouselight has no spatial index, so choose a grid: 1 mm chunks.
+zvtools convert precomputed://gs://allen_neuroglancer_ccf/Mouselight mouselight.zv \
+    --chunk-shape 1000000,1000000,1000000 --coarsen 8,8 --sparsity 1,4
 ```
 
-See [Cortical surfaces](../ingest/surfaces.md).
+See [Cortical surfaces](../ingest/surfaces.md) and
+[Skeletons in EM](../ingest/em_skeletons.md).
 
 ---
 
@@ -270,8 +307,8 @@ the inputs to that decision.
 
 ## The other CLI
 
-`precomputed_skeletons` carries its own separate argparse entry point for
-EM skeleton ingest, which is not exposed through `zvtools`:
+`precomputed_skeletons` also keeps its own argparse entry point, which
+predates `zvtools convert` and exposes `--no-align`:
 
 ```bash
 python -m zarr_vectors_tools.ingest.precomputed_skeletons \

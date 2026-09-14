@@ -51,6 +51,7 @@ Generated from `FORMAT_REGISTRY` in
 | STL | `stl` *(`.stl`)* | `zarr_vectors_tools.ingest.stl.ingest_stl` | mesh | none |
 | GIFTI surfaces | `gifti` *(`.gii`, or a directory of them)* | `zarr_vectors_tools.ingest.gifti.ingest_gifti` | mesh (one object per hemisphere) | `surfaces` |
 | FreeSurfer subject | `freesurfer` *(a subject directory)* | `zarr_vectors_tools.ingest.freesurfer.ingest_freesurfer` | mesh (one object per hemisphere) | `surfaces` |
+| Neuroglancer precomputed skeletons | `precomputed` *(a URL, or a directory with an `info` file)* | `zarr_vectors_tools.ingest.precomputed.ingest_precomputed` | skeleton (one object per segment ID) | `precomputed` |
 
 Install an extra with `pip install "zarr-vectors-tools[las]"`, or
 `[all]` for the lot. Python 3.11 or newer is required.
@@ -76,19 +77,24 @@ files resolves to `gifti`. CIFTI files carry no geometry, so they are staged
 onto a surface store with `zvtools attach` instead. See
 [Cortical surfaces](surfaces.md).
 
-`trk` is the only registry entry with `inline_pyramid=True`: the ingest
-builds the multiscale pyramid itself rather than leaving it to a
-follow-up `build_pyramid` call. See
+`precomputed` reads a layer, which is a directory or a bucket prefix: any
+URL resolves to it, since no other ingester reads one, as does a local
+directory holding an `info` file. `ingest_precomputed` reads that `info`
+and hands the layer to `precomputed_skeletons.run_ingest` when it has a
+`spatial_index`, or to `precomputed_plain_skeletons.run_ingest_plain` when
+it does not. See [Skeletons in EM](em_skeletons.md).
+
+`trk` and `precomputed` are the registry entries with
+`inline_pyramid=True`: the ingest builds the multiscale pyramid itself
+rather than leaving it to a follow-up `build_pyramid` call. See
 [Tractography at scale](tractography_at_scale.md).
 
 ## Ingests not in the CLI registry
 
-Three entry points are reachable from Python only:
+One entry point is reachable from Python only:
 
 | Function | Source | Extra |
 | --- | --- | --- |
-| `zarr_vectors_tools.ingest.precomputed_skeletons.run_ingest` | Precomputed skeleton layer with a `spatial_index` (`.frags`) | `precomputed` |
-| `zarr_vectors_tools.ingest.precomputed_plain_skeletons.run_ingest_plain` | Precomputed skeleton layer with no spatial index | `precomputed` |
 | `zarr_vectors_tools.ingest.trk.ingest_trk` | TRK, serial whole-file read via `nibabel` | `streamlines` |
 
 `ingest_trk` is the serial sibling of `ingest_trk_parallel`. `--format trk`
