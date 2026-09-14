@@ -426,6 +426,42 @@ class StoreSource(Source):
                 continue
         return out
 
+    def _batch_sizes(
+        self, order: list[int], manifests: dict[int, Any],
+    ) -> list[int]:
+        """Per-object VERTEX counts, for the ``max_vertices`` batch budget.
+
+        A manifest entry is a *fragment*, not a vertex, and feeding those
+        counts to the batcher meant ``max_vertices`` bounded nothing: a
+        streamline store averaging ~40 vertices per fragment built batches
+        forty times larger than asked for, which is how a bounded merge
+        still ran the machine out of memory.
+
+        Exact when the level carries ``object_attributes/vertex_count``
+        (which the ingesters write on request); otherwise each object's
+        fragment count is scaled by the level's mean vertices-per-fragment,
+        which costs nothing to compute and bounds the batch to the right
+        order of magnitude.
+        """
+        from zarr_vectors.building import read_object_attributes
+
+        fragments = [len(manifests[oid]) for oid in order]
+        try:
+            counts = np.asarray(
+                read_object_attributes(self._level_group(), "vertex_count"),
+            ).ravel()
+            if len(counts) > max(order, default=-1):
+                return [max(1, int(counts[oid])) for oid in order]
+        except Exception:  # noqa: BLE001 - the column is optional
+            pass
+
+        total_fragments = sum(fragments)
+        level_vertices = int(self.info.vertex_count or 0)
+        if total_fragments <= 0 or level_vertices <= 0:
+            return fragments
+        per_fragment = level_vertices / float(total_fragments)
+        return [max(1, int(round(f * per_fragment))) for f in fragments]
+
     def iter_batches(
         self,
         *,
@@ -441,13 +477,11 @@ class StoreSource(Source):
         attr_names = tuple(self.info.vertex_attributes)
         group = self._level_group()
 
-        # Manifest sizes are what the batcher needs, and reading manifests
-        # for the whole id set up front is O(objects) small integers --
-        # cheaper than a second pass and it makes the vertex ceiling exact
-        # rather than a guess.
+        # Reading the manifests for the whole id set up front is O(objects)
+        # small integers -- cheaper than a second pass.
         manifests = read_object_manifests(group, ids=[int(i) for i in ids])
         order = [int(i) for i in ids if manifests.get(int(i))]
-        sizes = [len(manifests[oid]) for oid in order]
+        sizes = self._batch_sizes(order, manifests)
 
         for start, stop in _batched(sizes, max_objects, max_vertices):
             window = order[start:stop]

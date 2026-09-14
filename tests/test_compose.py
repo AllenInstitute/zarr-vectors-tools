@@ -782,3 +782,258 @@ class TestRoundTrip:
 
         assert recovered["original"] == sorted(p.tolist() for p in first)
         assert recovered["second"] == sorted(p.tolist() for p in second)
+
+
+class TestMergeEdgeCases:
+    """Cases that committed geometry and then failed, or wrote a sentinel
+    that reads back as data."""
+
+    def test_zero_vertex_object_does_not_desynchronise_columns(
+        self, tmp_path: Path,
+    ) -> None:
+        """An empty part writes no geometry, so it must claim no row.
+
+        It was counted by the attribute slice but not by ``added``, so
+        ``append_object_attributes`` raised "N values for N-1 new objects"
+        — after every geometry batch had already been committed, leaving
+        the store with objects and no columns.
+        """
+        make_store(tmp_path / "t.zarrvectors", [line([1, 1, 1], [2, 2, 2])])
+        incoming = Geometry(
+            kind="streamline",
+            parts=[
+                line([6, 6, 6], [7, 7, 7]),
+                np.zeros((0, 3), dtype=np.float32),
+                line([8, 8, 8], [9, 9, 9]),
+            ],
+            object_attributes={"tag": np.array([1.0, 2.0, 3.0], dtype=np.float32)},
+        )
+        summary = merge_stores(
+            str(tmp_path / "t.zarrvectors"),
+            [GeometrySource(incoming, label="b")], pyramid="drop",
+        )
+        assert summary["objects_added"] == 2
+
+        level = zv.open(str(tmp_path / "t.zarrvectors"), mode="r").level(0)
+        tag = np.asarray(read_object_attributes(level.store, "tag"))
+        assert len(tag) == len(level.objects)
+        # The empty part's value must not have shifted onto a real object.
+        np.testing.assert_allclose(tag[1:], [1.0, 3.0])
+
+    def test_integer_column_is_backfilled_with_a_real_sentinel(
+        self, tmp_path: Path,
+    ) -> None:
+        """NaN is not a value an integer column can hold.
+
+        ``np.full(n, nan, dtype=uint32)`` yields 0 — indistinguishable
+        from a genuine zero — and INT64_MIN for int64.  Core's own
+        sentinel for an absent row is dtype-min / dtype-max, so that is
+        what the backfill must write.
+        """
+        make_store(
+            tmp_path / "t.zarrvectors",
+            [line([1, 1, 1], [2, 2, 2]), line([3, 3, 3], [4, 4, 4])],
+        )
+        incoming = Geometry(
+            kind="streamline",
+            parts=[line([6, 6, 6], [7, 7, 7])],
+            object_attributes={"label": np.array([7], dtype=np.uint32)},
+        )
+        merge_stores(
+            str(tmp_path / "t.zarrvectors"),
+            [GeometrySource(incoming, label="b")], pyramid="drop",
+        )
+
+        level = zv.open(str(tmp_path / "t.zarrvectors"), mode="r").level(0)
+        label = np.asarray(read_object_attributes(level.store, "label"))
+        assert label.dtype.kind == "u"
+        assert int(label[2]) == 7
+        sentinel = np.iinfo(label.dtype).max
+        assert int(label[0]) == int(label[1]) == sentinel, (
+            "pre-existing objects must be marked absent, not given a 0 that "
+            "reads back as a real label"
+        )
+
+    def test_expand_refuses_negative_cells_instead_of_dropping_them(
+        self, tmp_path: Path,
+    ) -> None:
+        """``expand`` grows the grid upward; it cannot move the origin.
+
+        Objects at negative coordinates were silently skipped under a flag
+        that promised to make room for them.
+        """
+        make_store(tmp_path / "t.zarrvectors", [line([1, 1, 1], [2, 2, 2])])
+        negative = Geometry(
+            kind="streamline", parts=[line([-5, 1, 1], [-4, 1, 1])],
+        )
+        with pytest.raises(Exception, match="negative cell"):
+            merge_stores(
+                str(tmp_path / "t.zarrvectors"),
+                [GeometrySource(negative, label="neg")],
+                on_out_of_bounds="expand", pyramid="drop",
+            )
+
+    def test_skip_still_drops_what_does_not_fit(self, tmp_path: Path) -> None:
+        """The escape hatch keeps working — expand is the strict one."""
+        make_store(tmp_path / "t.zarrvectors", [line([1, 1, 1], [2, 2, 2])])
+        negative = Geometry(
+            kind="streamline", parts=[line([-5, 1, 1], [-4, 1, 1])],
+        )
+        summary = merge_stores(
+            str(tmp_path / "t.zarrvectors"),
+            [GeometrySource(negative, label="neg")],
+            on_out_of_bounds="skip", pyramid="drop",
+        )
+        assert summary["objects_added"] == 0
+
+    def test_missing_target_is_distinguished_from_a_broken_one(
+        self, tmp_path: Path,
+    ) -> None:
+        """"Does not exist" sent the caller to create=True for nothing."""
+        broken = tmp_path / "broken.zarrvectors"
+        broken.mkdir()
+        (broken / "zarr.json").write_text("{not json")
+        with pytest.raises(Exception, match="could not be opened"):
+            merge_stores(
+                str(broken),
+                [GeometrySource(
+                    Geometry(kind="streamline", parts=[line([1, 1, 1], [2, 2, 2])]),
+                    label="b",
+                )],
+                pyramid="drop",
+            )
+
+
+class TestBatchBudget:
+
+    def test_max_vertices_counts_vertices_not_fragments(
+        self, tmp_path: Path,
+    ) -> None:
+        """The budget bounded fragments, so batches ran many times larger.
+
+        Each polyline here is one fragment of 8 vertices; a ceiling of 10
+        vertices must therefore put one object in a batch, not ten.
+        """
+        store = tmp_path / "src.zarrvectors"
+        make_store(
+            store,
+            [
+                line(*[[1.0 + i * 0.1, 1.0, 1.0]] * 8)
+                for i in range(6)
+            ],
+        )
+        source = StoreSource(str(store))
+        batches = list(source.iter_batches(max_objects=1000, max_vertices=10))
+        assert len(batches) == 6
+        assert all(len(batch.parts) == 1 for batch in batches)
+
+
+class TestTrkHeaderRoundTrip:
+
+    def test_every_field_the_reader_writes_survives(self) -> None:
+        """``space`` is the load-bearing one.
+
+        It says whether the stored coordinates still need the affine
+        applied; dropped, a later merge or export cannot tell, and the
+        difference is a tractogram in the wrong place.
+        """
+        from zarr_vectors_tools.headers.formats import TRKHeader
+
+        stored = {
+            "format_name": "trk",
+            "dimensions": [10, 10, 10],
+            "voxel_size": [1.0, 1.0, 1.0],
+            "origin": [0.5, 0.0, 0.0],
+            "n_scalars": 0,
+            "scalar_names": [],
+            "n_properties": 0,
+            "property_names": [],
+            "vox_to_ras": [1.0] * 16,
+            "voxel_order": "RAS",
+            "n_count": 7,
+            "version": 2,
+            "space": "rasmm",
+            "n_count_mismatch": [7, 5],
+        }
+        header = TRKHeader.from_dict(stored)
+        assert header.space == "rasmm"
+        assert header.origin == [0.5, 0.0, 0.0]
+        assert header.version == 2
+        assert header.n_count_mismatch == [7, 5]
+        assert header.to_dict() == stored
+
+    def test_an_unknown_key_is_carried_rather_than_dropped(self) -> None:
+        from zarr_vectors_tools.headers.formats import TRKHeader
+
+        header = TRKHeader.from_dict({"format_name": "trk", "future": 1})
+        assert header.extra == {"future": 1}
+        assert header.to_dict()["future"] == 1
+
+
+class TestTargetOnlyColumns:
+    """Columns the target has and the source does not.
+
+    Both failures here are in the filler, and both survive a smoke test
+    because a float column filled with NaN is exactly right.
+    """
+
+    def test_multi_channel_column_does_not_break_the_merge(
+        self, tmp_path: Path,
+    ) -> None:
+        """``--compute-endpoints`` writes ``start``/``end`` as (O, 3).
+
+        A 1-D filler appended to those raised "append shape mismatch", so
+        merging into any store built with endpoints failed outright.
+        """
+        make_store(
+            tmp_path / "t.zarrvectors",
+            [line([1, 1, 1], [2, 2, 2])],
+            object_attributes={
+                "start": np.array([[1.0, 1.0, 1.0]], dtype=np.float32),
+            },
+        )
+        merge_stores(
+            str(tmp_path / "t.zarrvectors"),
+            [GeometrySource(
+                Geometry(kind="streamline", parts=[line([6, 6, 6], [7, 7, 7])]),
+                label="b",
+            )],
+            pyramid="drop",
+        )
+        level = zv.open(str(tmp_path / "t.zarrvectors"), mode="r").level(0)
+        start = np.asarray(read_object_attributes(level.store, "start"))
+        assert start.shape == (2, 3)
+        np.testing.assert_allclose(start[0], [1.0, 1.0, 1.0])
+        assert np.isnan(start[1]).all()
+
+    def test_integer_column_is_filled_with_a_real_sentinel(
+        self, tmp_path: Path,
+    ) -> None:
+        """NaN cast into a uint32 column lands as 0, which reads as data."""
+        from zarr_vectors.building import (
+            create_object_attributes_array,
+            write_object_attributes,
+        )
+
+        dataset = make_store(
+            tmp_path / "t.zarrvectors", [line([1, 1, 1], [2, 2, 2])],
+        )
+        create_object_attributes_array(
+            dataset.level(0).store, "label", dtype="uint32",
+        )
+        write_object_attributes(
+            dataset.level(0).store, "label", np.array([7], dtype=np.uint32),
+        )
+
+        merge_stores(
+            str(tmp_path / "t.zarrvectors"),
+            [GeometrySource(
+                Geometry(kind="streamline", parts=[line([6, 6, 6], [7, 7, 7])]),
+                label="b",
+            )],
+            pyramid="drop",
+        )
+        level = zv.open(str(tmp_path / "t.zarrvectors"), mode="r").level(0)
+        label = np.asarray(read_object_attributes(level.store, "label"))
+        assert int(label[0]) == 7
+        assert int(label[1]) == np.iinfo(label.dtype).max

@@ -132,6 +132,43 @@ def expand_grid(
 # =====================================================================
 
 
+def _existing_column_spec(
+    level_group: Any, name: str,
+) -> tuple[np.dtype, tuple[int, ...]]:
+    """The dtype and per-row shape of an object-attribute column on disk.
+
+    Read from the array's metadata rather than by loading the column, so
+    this stays O(1) on a store with millions of objects.
+    """
+    try:
+        meta = level_group.read_array_meta(f"object_attributes/{name}") or {}
+    except Exception:  # noqa: BLE001 - an unreadable column gets the default
+        return np.dtype(np.float32), ()
+    dtype = np.dtype(meta.get("dtype", "float32"))
+    shape = tuple(int(s) for s in (meta.get("shape") or ()))
+    return dtype, shape[1:]
+
+
+def _fill_for_dtype(dtype: np.dtype, fill: float) -> Any:
+    """A sentinel ``dtype`` can actually hold.
+
+    Mirrors core's own rule for absent object-attribute rows: NaN for
+    floating point, dtype-min for signed integers, dtype-max for unsigned.
+    ``fill`` is honoured when it survives the cast, so a caller asking for a
+    specific value still gets it.
+    """
+    dtype = np.dtype(dtype)
+    if dtype.kind == "f":
+        return fill
+    if dtype.kind == "i":
+        return np.iinfo(dtype).min
+    if dtype.kind == "u":
+        return np.iinfo(dtype).max
+    if dtype.kind == "b":
+        return False
+    return fill
+
+
 def append_object_attributes(
     level_group: Any,
     columns: Mapping[str, npt.NDArray[Any]],
@@ -167,7 +204,19 @@ def append_object_attributes(
     for name in names:
         incoming = columns.get(name)
         if incoming is None:
-            values = np.full(added, fill, dtype=np.float32)
+            # A column only the TARGET has.  The filler must match the
+            # column already on disk in BOTH dtype and width:
+            #
+            # * a float32 NaN appended to a uint32 column is cast to 0 --
+            #   a value indistinguishable from a real label, and
+            # * a 1-D filler appended to a multi-channel column (what
+            #   ``--compute-endpoints`` writes: start and end are (O, 3))
+            #   raises "append shape mismatch" outright, so merging into
+            #   any store with endpoints failed.
+            dtype, row_shape = _existing_column_spec(level_group, name)
+            values = np.full(
+                (added, *row_shape), _fill_for_dtype(dtype, fill), dtype=dtype,
+            )
         else:
             values = np.asarray(incoming)
             if len(values) != added:
@@ -177,13 +226,25 @@ def append_object_attributes(
                 )
 
         if name in existing_names:
-            write_object_attributes(level_group, name, values, mode="append")
+            # ``at`` pins the appended rows to the object ids they describe.
+            # Without it an already-short column (the very failure this
+            # function exists to prevent) is extended from wherever it
+            # happened to end, silently rebinding every value after it.
+            write_object_attributes(
+                level_group, name, values, mode="append", at=base_count,
+            )
         else:
             channels = int(values.shape[1]) if values.ndim > 1 else 1
+            # NaN is only a sentinel for floats.  ``np.full(n, nan,
+            # dtype=int64)`` yields INT64_MIN, and for uint32 it yields 0 --
+            # a value that reads back as real data.  Use the same per-dtype
+            # sentinel core writes for absent rows (see
+            # ``write_object_attributes(fill_value=...)``).
+            hole = _fill_for_dtype(values.dtype, fill)
             backfill = (
-                np.full(base_count, fill, dtype=values.dtype)
+                np.full(base_count, hole, dtype=values.dtype)
                 if channels == 1
-                else np.full((base_count, channels), fill, dtype=values.dtype)
+                else np.full((base_count, channels), hole, dtype=values.dtype)
             )
             try:
                 create_object_attributes_array(
@@ -480,7 +541,12 @@ def handle_pyramid(
             continue
 
     if policy == "drop" or not factors:
-        return {"pyramid": "drop", "removed_levels": levels}
+        # Reporting "drop" for a rebuild that had nothing to rebuild
+        # (a single-level store) said a policy the caller never chose.
+        return {
+            "pyramid": "drop" if policy == "drop" else "none",
+            "removed_levels": levels,
+        }
 
     from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 

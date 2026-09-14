@@ -350,6 +350,15 @@ def read_trx(path: str | Path, *, dtype: str = "float32") -> Geometry:
         geometry.vertex_attributes[str(name)] = np.asarray(values._data).squeeze()
     for name, values in (trx.data_per_streamline or {}).items():
         geometry.object_attributes[str(name)] = np.asarray(values).squeeze()
+    # Every array above is copied out, so the file can be released here.
+    # A ``.trx`` is a zip that ``load`` extracts to a scratch directory and
+    # memory-maps; leaving it open keeps that directory alive for the life
+    # of the process (and on Windows keeps it undeletable), which a loop
+    # over a directory of tractograms turns into a real leak.
+    try:
+        trx.close()
+    except Exception:  # noqa: BLE001 - nothing to release
+        pass
     return geometry
 
 
@@ -498,12 +507,38 @@ def derive_groups(
         )
 
     lookup = {_key(k): str(v) for k, v in (names or {}).items()}
-    for code in np.unique(labels):
-        members = np.flatnonzero(labels == code).astype(np.int64)
+    # One grouping pass.  ``flatnonzero(labels == code)`` inside a loop
+    # over the distinct labels is O(labels x objects) -- on a whole-brain
+    # tractogram with a few thousand bundles that is tens of billions of
+    # comparisons for work that is one sort.
+    for code, members in _group_members(labels).items():
         geometry.groups[lookup.get(_key(code), f"{attribute}_{_key(code)}")] = members
     if drop_attribute:
         geometry.object_attributes.pop(attribute, None)
     return geometry
+
+
+def _group_members(
+    labels: npt.NDArray[Any],
+) -> dict[Any, npt.NDArray[np.int64]]:
+    """``{label: member indices}`` in one pass over ``labels``.
+
+    ``np.unique(..., return_inverse=True)`` plus one stable argsort gives
+    every group's members as contiguous slices, so the cost is a sort
+    rather than a scan per distinct label.
+    """
+    values = np.asarray(labels).ravel()
+    if values.size == 0:
+        return {}
+    uniques, inverse = np.unique(values, return_inverse=True)
+    inverse = np.asarray(inverse).ravel()
+    order = np.argsort(inverse, kind="stable")
+    boundaries = np.flatnonzero(np.diff(inverse[order])) + 1
+    out: dict[Any, npt.NDArray[np.int64]] = {}
+    for chunk in np.split(order, boundaries):
+        if chunk.size:
+            out[uniques[inverse[chunk[0]]]] = chunk.astype(np.int64)
+    return out
 
 
 def _key(value: Any) -> Any:

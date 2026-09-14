@@ -54,9 +54,33 @@ class TRKHeader(Header):
     n_properties: int = 0
     property_names: list[str] = field(default_factory=list)
     n_count: int = 0
+    origin: list[float] | None = None
+    """TrackVis ``origin`` field, as written by the file."""
+    version: int | None = None
+    """TrackVis format version."""
+    space: str | None = None
+    """Which space the STORED coordinates are in -- ``"voxmm"`` (as the file
+    had them) or ``"rasmm"`` (registered at read time).  Without it a later
+    merge or export cannot tell whether the affine still has to be applied,
+    which is the difference between two tractograms overlaying and one of
+    them sitting in the wrong place entirely."""
+    n_count_mismatch: list[int] | None = None
+    """``[declared, actual]`` when the header's streamline count disagreed
+    with what the file holds."""
+    extra: dict[str, Any] = field(default_factory=dict)
+    """Any key a producer wrote that this class does not name.  Carried so a
+    newer writer's field survives a round-trip through an older reader
+    instead of being dropped on the floor."""
+
+    #: Keys ``to_dict`` writes itself; everything else lands in ``extra``.
+    _KNOWN = (
+        "format_name", "voxel_size", "dimensions", "vox_to_ras", "voxel_order",
+        "n_scalars", "scalar_names", "n_properties", "property_names",
+        "n_count", "origin", "version", "space", "n_count_mismatch",
+    )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "format_name": self.format_name,
             "voxel_size": list(self.voxel_size),
             "dimensions": list(self.dimensions),
@@ -68,6 +92,12 @@ class TRKHeader(Header):
             "property_names": self.property_names,
             "n_count": self.n_count,
         }
+        for name in ("origin", "version", "space", "n_count_mismatch"):
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        out.update(self.extra)
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TRKHeader:
@@ -81,6 +111,11 @@ class TRKHeader(Header):
             n_properties=d.get("n_properties", 0),
             property_names=d.get("property_names", []),
             n_count=d.get("n_count", 0),
+            origin=d.get("origin"),
+            version=d.get("version"),
+            space=d.get("space"),
+            n_count_mismatch=d.get("n_count_mismatch"),
+            extra={k: v for k, v in d.items() if k not in cls._KNOWN},
         )
 
     @property

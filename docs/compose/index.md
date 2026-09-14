@@ -95,7 +95,7 @@ checks against.
 | --- | --- |
 | `"raise"` (default) | Refuse, naming the axis and the overhang |
 | `"skip"` | Drop the offending objects whole, and count them |
-| `"expand"` | Grow the grid upwards to cover them |
+| `"expand"` | Grow the grid upwards to cover them, and refuse whatever growing upwards cannot reach |
 
 Expansion is free and safe: a chunk key is `floor(p / cell)`, an absolute
 cell index, so adding cells at the top leaves every existing key meaning

@@ -108,12 +108,16 @@ def split_parts(
         if column.ndim > 1:
             column = column.reshape(len(column), -1)[:, 0]
         lookup = {_key(k): str(v) for k, v in (names or {}).items()}
-        present = lvl.objects.present_mask()
+        present = np.asarray(lvl.objects.present_mask())[: len(column)]
         out = {}
-        for value in np.unique(column):
+        # One grouping pass rather than a full-column comparison per
+        # distinct value -- see readers._group_members.
+        from zarr_vectors_tools.compose.readers import _group_members
+
+        for value, members in _group_members(column).items():
             if isinstance(value, float) and np.isnan(value):
                 continue
-            members = np.flatnonzero((column == value) & present[: len(column)])
+            members = members[present[members]]
             if not len(members):
                 continue
             label = lookup.get(_key(value), f"{attribute}_{_key(value)}")
