@@ -1,14 +1,28 @@
-"""``zvtools convert`` — ingest a file into a new zarr-vectors store."""
+"""``zvtools convert`` — move data between a file and a zarr-vectors store.
+
+Both directions, chosen by what ``INPUT`` is:
+
+* a FILE in, a store out — ingest, optionally building a pyramid;
+* a STORE in, a file out — export.
+
+One command rather than two because it is one operation with a direction,
+and because a pipeline that ends in an export otherwise has to drop out of
+the CLI to a Python script for its last step.
+"""
 
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any
 
 from ._args import (
     build_factors,
     executor_ctx,
+    load_export_func,
     load_ingest_func,
+    looks_like_store,
+    resolve_export_format,
     resolve_format,
 )
 
@@ -44,6 +58,8 @@ def _print_summary(action: str, summary: dict) -> None:
         "chunk_count", "cross_chunk_link_count", "chunk_shape", "bounds",
         "spatial_key", "n_obs", "n_vars", "obs_columns_stored", "genes_stored",
         "columns_stored", "dropped_na", "key_column",
+        # export-side counters
+        "node_count", "root_count", "face_count", "attributes_carried",
     ):
         if k in summary:
             print(f"  {k}: {summary[k]}")
@@ -101,7 +117,93 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     return 0
 
 
+#: CLI option -> the exporter keyword it fills, for the options an exporter
+#: may or may not take.  ``ExportFmt.accepts`` decides which of these a given
+#: format gets; anything the user set that is not accepted is refused by name.
+_EXPORT_OPTIONS: dict[str, tuple[str, str]] = {
+    # cli attribute: (exporter keyword, the flag that sets it)
+    "export_object_ids": ("object_ids", "--object-id"),
+    "export_group_ids": ("group_ids", "--group-id"),
+    "export_bbox": ("bbox", "--bbox"),
+    "export_attributes": ("attribute_names", "--attribute"),
+}
+
+
+def run_export(args) -> int:
+    """``zvtools convert STORE OUT.ext`` — write a store back out to a file."""
+    fmt = resolve_export_format(args.output, args.format)
+
+    if args.chunk_shape is not None or args.num_chunks is not None:
+        raise SystemExit(
+            "error: --chunk-shape / --num-chunks describe how to BUILD a "
+            "store; they do not apply when exporting one"
+        )
+    if args.coarsen or args.sparsity:
+        raise SystemExit(
+            "error: --coarsen / --sparsity build pyramid levels; to export an "
+            "existing one pass --level N"
+        )
+
+    kwargs: dict[str, Any] = {"level": args.level}
+    rejected: list[str] = []
+    if args.export_bbox is not None and len(args.export_bbox) % 2 != 0:
+        raise SystemExit(
+            f"error: --bbox needs a min corner and a max corner, so an even "
+            f"number of values; got {len(args.export_bbox)}"
+        )
+    for attribute, (keyword, flag) in _EXPORT_OPTIONS.items():
+        value = getattr(args, attribute, None)
+        if value is None:
+            continue
+        if keyword not in fmt.accepts:
+            rejected.append(flag)
+            continue
+        if keyword == "bbox":
+            # The exporters take a (min corner, max corner) pair; the flag is
+            # flat so it reads the way a bounding box is usually written.
+            half = len(value) // 2
+            value = (tuple(value[:half]), tuple(value[half:]))
+        kwargs[keyword] = value
+    # Format-specific options that have a default, so "was it set?" is a
+    # comparison rather than a None check.
+    if args.delimiter != ",":
+        if "delimiter" in fmt.accepts:
+            kwargs["delimiter"] = args.delimiter
+        else:
+            rejected.append("--delimiter")
+    if rejected:
+        raise SystemExit(
+            f"error: {', '.join(sorted(rejected))} "
+            f"{'do' if len(rejected) > 1 else 'does'} not apply to "
+            f"{fmt.name!r} export (it takes: "
+            f"{', '.join(sorted(fmt.accepts - {'level', 'chunks'})) or 'no options'})"
+        )
+
+    export = load_export_func(fmt)
+    try:
+        summary = export(str(args.input), str(args.output), **kwargs)
+    except ImportError as exc:
+        hint = (
+            f" — install it with: pip install 'zarr-vectors-tools[{fmt.extra}]'"
+            if fmt.extra else ""
+        )
+        raise SystemExit(f"error: {fmt.name} export failed ({exc}){hint}")
+
+    _print_summary(
+        f"exported {fmt.name} ({fmt.geometry}) from level {args.level}",
+        dict(summary or {}),
+    )
+    print(f"  wrote: {args.output}")
+    return 0
+
+
 def run(args) -> int:
+    # A store on the input side means the user is exporting out of it.  The
+    # ingest options below are all about building a store and none of them
+    # mean anything in that direction, so the branch comes first.
+    if looks_like_store(args.input):
+        return run_export(args)
+
     fmt = resolve_format(args.input, args.format)
     factors = build_factors(args.coarsen, args.sparsity)
     chunk_scale = args.chunk_scale
@@ -221,7 +323,10 @@ def run(args) -> int:
                     tuple(args.chunk_shape), bin_shape=args.bin_shape, dtype=args.dtype,
                 )
             else:
-                summary = ingest(str(args.input), str(args.output), tuple(args.chunk_shape), **kwargs)
+                summary = ingest(
+                    str(args.input), str(args.output),
+                    tuple(args.chunk_shape), **kwargs,
+                )
         except ImportError as exc:  # a heavy reader dep was missing at call time
             hint = (
                 f" — install it with: pip install 'zarr-vectors-tools[{fmt.extra}]'"

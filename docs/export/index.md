@@ -4,6 +4,18 @@ Every function in `zarr_vectors_tools.export` reads a Zarr Vectors store
 and writes one file format. They all share the same call shape and all
 return a summary dict.
 
+From the shell they are reached through `zvtools convert` with a store as
+the input:
+
+```bash
+zvtools convert cloud.zv cloud.ply --attribute intensity
+zvtools convert tracts.zv cst.trk --level 2 --group-id 4
+```
+
+See [the CLI reference](../getting_started/cli.md#export-options) for the
+flags. The Python API below is what the command calls, and takes filters
+the command does not expose (`chunks=`, and the format-specific options).
+
 ```python
 # The subpackage does NOT re-export; always import the module directly.
 from zarr_vectors_tools.export.ply import export_ply

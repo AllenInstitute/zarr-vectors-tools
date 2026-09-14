@@ -25,6 +25,7 @@ from . import compose as _compose
 from . import convert as _convert
 from . import pyramid as _pyramid
 from ._args import (
+    EXPORT_REGISTRY,
     FORMAT_REGISTRY,
     parse_float_list,
     parse_int_list,
@@ -32,6 +33,12 @@ from ._args import (
     parse_shape,
     parse_str_list,
 )
+
+#: What ``convert --format`` accepts.  The union of both directions, because
+#: the same command does both and the name means the same thing either way --
+#: ``trk`` is TRK whether it is being read or written.  Sorted so the help
+#: text does not depend on dict order.
+_CONVERT_FORMATS = tuple(sorted(set(FORMAT_REGISTRY) | set(EXPORT_REGISTRY)))
 
 _SPARSITY_STRATEGIES = (
     "random", "length", "spatial_coverage", "attribute", "point_thinning",
@@ -86,14 +93,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ---- convert -----------------------------------------------------------
     c = sub.add_parser(
-        "convert", help="ingest a file into a new store (+ optional pyramid)",
-        description="Ingest INPUT into a new zarr-vectors store at OUTPUT.",
+        "convert",
+        help="file -> store (ingest), or store -> file (export)",
+        description=(
+            "Move data between a file and a zarr-vectors store. The direction "
+            "comes from INPUT: a file is ingested into the store at OUTPUT, a "
+            "store is exported to the file at OUTPUT (format from its "
+            "extension)."
+        ),
     )
-    c.add_argument("input", help="input file (format auto-detected from extension)")
-    c.add_argument("output", help="output .zarrvectors store path")
     c.add_argument(
-        "--format", choices=("auto", *FORMAT_REGISTRY), default="auto",
-        help="input format (default: auto from extension)",
+        "input",
+        help="file to ingest, or store to export (decides the direction)",
+    )
+    c.add_argument(
+        "output",
+        help="store to write (ingest), or file to write (export)",
+    )
+    c.add_argument(
+        "--format", choices=("auto", *_CONVERT_FORMATS), default="auto",
+        help=(
+            "format to use, instead of guessing from the extension: on ingest "
+            "the INPUT's, on export the OUTPUT's (default: auto)"
+        ),
     )
     c.add_argument(
         "--chunk-shape", type=parse_shape, dest="chunk_shape", default=None,
@@ -120,7 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
                    metavar="N|X,Y,Z",
                    help="after conversion, pack per-chunk cells into shards of N "
                         "chunks per axis (one file per shard instead of one per "
-                        "chunk) — far fewer files for cloud upload. 8 = 8x8x8 "
+                        "chunk) -- far fewer files for cloud upload. 8 = 8x8x8 "
                         "~512 chunks/shard. Omit to leave unsharded")
     c.add_argument("--workers", type=int, default=None,
                    help="parallel worker processes (default backend needs no extra)")
@@ -147,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
                             "tortuosity", "vertex_count"),
                    help="trk: generate a per-object (per-streamline) attribute "
                         "for color-by-object testing (repeatable). Choices: "
-                        "length, endpoints, orientation (start→end unit vector, "
+                        "length, endpoints, orientation (start->end unit vector, "
                         "3ch DEC), tortuosity, vertex_count")
     c.add_argument("--vertex-attr", action="append", dest="vertex_attrs",
                    default=None, metavar="NAME",
@@ -155,8 +177,8 @@ def build_parser() -> argparse.ArgumentParser:
                             "index", "tangent"),
                    help="trk: generate a per-vertex (per-point) attribute for "
                         "color-by-vertex testing (repeatable). Choices: "
-                        "arc_length (0→1 along each streamline), x/y/z "
-                        "(coordinate), random, index (0→1 within streamline), "
+                        "arc_length (0->1 along each streamline), x/y/z "
+                        "(coordinate), random, index (0->1 within streamline), "
                         "tangent (per-vertex unit direction, 3ch DEC)")
     c.add_argument("--attr-seed", type=int, dest="attr_seed", default=0,
                    help="seed for the 'random' attribute generators (default: 0)")
@@ -168,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--spatial-key", dest="spatial_key", default="auto",
                    metavar="KEY",
                    help="h5ad: obsm key holding the coordinates (default: "
-                        "auto — tries spatial, X_spatial, spatial_fov, "
+                        "auto -- tries spatial, X_spatial, spatial_fov, "
                         "X_umap, X_tsne, X_pca)")
     h.add_argument("--spatial-columns", type=parse_int_list,
                    dest="spatial_columns", default=None, metavar="I,J[,K]",
@@ -211,7 +233,33 @@ def build_parser() -> argparse.ArgumentParser:
                    help="table: metadata column to store as a vertex attribute "
                         "(repeatable; default: every non-position, non-key column)")
     t.add_argument("--delimiter", default=",",
-                   help="table: column delimiter (default: ,)")
+                   help="table: column delimiter (default: ,), and CSV export")
+
+    e = c.add_argument_group("export (store -> file)")
+    e.add_argument(
+        "--level", type=int, default=0,
+        help="resolution level to export (default: 0, the finest)",
+    )
+    e.add_argument(
+        "--object-id", action="append", type=int, dest="export_object_ids",
+        default=None, metavar="ID",
+        help="export only these objects (repeatable)",
+    )
+    e.add_argument(
+        "--group-id", action="append", type=int, dest="export_group_ids",
+        default=None, metavar="ID",
+        help="streamlines: export only these groups/bundles (repeatable)",
+    )
+    e.add_argument(
+        "--bbox", type=parse_float_list, dest="export_bbox", default=None,
+        metavar="X0,Y0,Z0,X1,Y1,Z1",
+        help="export only what falls in this box",
+    )
+    e.add_argument(
+        "--attribute", action="append", dest="export_attributes",
+        default=None, metavar="NAME",
+        help="per-vertex attributes to include (repeatable; csv/ply/h5ad)",
+    )
     c.set_defaults(func=_convert.run)
 
     # ---- pyramid -----------------------------------------------------------
@@ -372,7 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "--chunk-scale grows the cells too; 'decimate' strides "
                         "do compound")
     m.add_argument("--dry-run", action="store_true", dest="dry_run",
-                   help="print the plan — ids, offsets, whether it fits — and stop")
+                   help="print the plan -- ids, offsets, whether it fits -- and stop")
     m.set_defaults(func=_compose.run_merge)
 
     # ---- split -------------------------------------------------------------
@@ -419,7 +467,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("aborted", file=sys.stderr)
         return 130
-    except Exception as exc:  # ingest/coarsen/validate errors → clean message
+    except Exception as exc:  # ingest/coarsen/validate errors -> clean message
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 

@@ -100,6 +100,21 @@ def executor_ctx(workers: int | None, backend: str = "process"):
 # Format registry
 # ===================================================================
 
+def looks_like_store(path: str | Path) -> bool:
+    """Is this a zarr-vectors store rather than a file to ingest?
+
+    What decides the DIRECTION of ``zvtools convert``: a store on the input
+    side means the user is exporting out of it.  The test is the same one
+    ``--overwrite`` uses to decide whether a directory is safe to replace --
+    a directory carrying Zarr's own metadata file -- so the two cannot
+    disagree about what a store is.
+    """
+    p = Path(path)
+    if not p.is_dir():
+        return False
+    return (p / "zarr.json").exists() or (p / ".zattrs").exists()
+
+
 @dataclass(frozen=True)
 class Fmt:
     """One convertible file format."""
@@ -138,6 +153,107 @@ FORMAT_REGISTRY: dict[str, Fmt] = {
 _EXT_TO_FORMAT: dict[str, str] = {
     ext: fmt.name for fmt in FORMAT_REGISTRY.values() for ext in fmt.exts
 }
+
+
+@dataclass(frozen=True)
+class ExportFmt:
+    """One format a store can be written back out to.
+
+    ``accepts`` names the exporter's own optional parameters, so the CLI can
+    pass only what a given exporter takes and refuse the rest by name rather
+    than dropping it silently.
+    """
+
+    name: str
+    exts: tuple[str, ...]
+    module: str                    # zarr_vectors_tools.export.<module>
+    func: str
+    extra: str | None              # optional-dependency extra, for hints
+    geometry: str                  # what it expects to find in the store
+    accepts: frozenset[str]
+
+
+#: Every exporter the package has.  The names match the ingest registry's
+#: wherever both directions exist, so ``--format trk`` means TRK either way.
+_COMMON = frozenset({"level", "chunks"})
+
+EXPORT_REGISTRY: dict[str, ExportFmt] = {
+    "trk": ExportFmt(
+        "trk", (".trk",), "trk", "export_trk", "trk", "streamlines",
+        _COMMON | {"object_ids", "group_ids", "affine"},
+    ),
+    "trx": ExportFmt(
+        "trx", (".trx",), "trx", "export_trx", "trx", "streamlines",
+        _COMMON | {"object_ids", "group_ids"},
+    ),
+    "swc": ExportFmt(
+        "swc", (".swc",), "swc", "export_swc", None, "skeleton",
+        _COMMON,
+    ),
+    "obj": ExportFmt(
+        "obj", (".obj",), "obj", "export_obj", None, "mesh",
+        _COMMON | {"bbox", "object_ids"},
+    ),
+    "ply": ExportFmt(
+        "ply", (".ply",), "ply", "export_ply", "ply", "points",
+        _COMMON | {"bbox", "object_ids", "attribute_names", "binary"},
+    ),
+    "csv": ExportFmt(
+        "csv", (".csv", ".xyz"), "csv_points", "export_csv", None, "points",
+        _COMMON | {"bbox", "object_ids", "attribute_names", "delimiter"},
+    ),
+    "h5ad": ExportFmt(
+        "h5ad", (".h5ad",), "h5ad", "export_h5ad", "h5ad", "points",
+        _COMMON | {"bbox", "object_ids", "attribute_names"},
+    ),
+}
+
+_EXPORT_EXT_TO_FORMAT: dict[str, str] = {
+    ext: fmt.name for fmt in EXPORT_REGISTRY.values() for ext in fmt.exts
+}
+
+
+def resolve_export_format(
+    output_path: str | Path, explicit: str | None,
+) -> ExportFmt:
+    """Return the :class:`ExportFmt` for ``--format``, or the OUTPUT extension.
+
+    The output names the format when exporting, which is the mirror of the
+    ingest rule where the input does.
+    """
+    if explicit and explicit != "auto":
+        try:
+            return EXPORT_REGISTRY[explicit]
+        except KeyError:
+            raise SystemExit(
+                f"error: cannot export to {explicit!r}; zvtools exports "
+                f"{{{','.join(EXPORT_REGISTRY)}}}"
+            ) from None
+    ext = Path(output_path).suffix.lower()
+    name = _EXPORT_EXT_TO_FORMAT.get(ext)
+    if name is None:
+        raise SystemExit(
+            f"error: cannot tell what to export from the output extension "
+            f"{ext or '(none)'!r}; pass --format "
+            f"{{{','.join(EXPORT_REGISTRY)}}}"
+        )
+    return EXPORT_REGISTRY[name]
+
+
+def load_export_func(fmt: ExportFmt):
+    """Import the export entry function for ``fmt`` (lazy, with an install hint)."""
+    import importlib
+
+    try:
+        mod = importlib.import_module(f"zarr_vectors_tools.export.{fmt.module}")
+        return getattr(mod, fmt.func)
+    except ImportError as exc:
+        hint = (
+            f" — install it with: pip install 'zarr-vectors-tools[{fmt.extra}]'"
+            if fmt.extra
+            else ""
+        )
+        raise SystemExit(f"error: cannot load the {fmt.name} exporter ({exc}){hint}")
 
 
 def resolve_format(input_path: str | Path, explicit: str | None) -> Fmt:

@@ -59,6 +59,7 @@ From the terminal:
 ```bash
 zvtools convert cells.csv cells.zarrvectors --chunk-shape 100,100,100
 zvtools pyramid cells.zarrvectors --coarsen 8,8 --sparsity 2,2
+zvtools convert cells.zarrvectors cells.ply --level 1   # and back out again
 zvtools merge cells.zarrvectors more_cells.csv       # append, don't replace
 zvtools split cells.zarrvectors parts/ --by groups
 zvtools info cells.zarrvectors

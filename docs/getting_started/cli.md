@@ -35,12 +35,30 @@ clean one-line form rather than a traceback.
 zvtools convert INPUT OUTPUT [options]
 ```
 
-Ingest `INPUT` into a new store at `OUTPUT`, optionally building coarser
-levels in the same run.
+Moves data between a file and a store, in whichever direction `INPUT`
+implies:
+
+| `INPUT` | `OUTPUT` | What happens |
+| --- | --- | --- |
+| a file | a store path | **ingest**, optionally building coarser levels in the same run |
+| a store | a file | **export**, reading the level you name |
+
+A directory carrying a `zarr.json` is a store; anything else is a file to
+read. That is the same test `--overwrite` uses, so the two cannot disagree
+about what a store is.
+
+```bash
+# In.
+zvtools convert tracts.trk tracts.zarrvectors --num-chunks 5000
+
+# Out, from the coarsest level, one bundle only.
+zvtools convert tracts.zarrvectors cst.trk --level 2 --group-id 4
+```
 
 ### Format selection
 
-`--format` defaults to `auto`, which resolves from the file extension:
+`--format` defaults to `auto`, which resolves from the file extension — of
+`INPUT` when ingesting, of `OUTPUT` when exporting:
 
 | `--format` | Extensions | Ingest function | Geometry | Extra |
 | --- | --- | --- | --- | --- |
@@ -94,6 +112,34 @@ value. If the format's extra is missing, the error carries the exact
 
 Plus every [pyramid option](#pyramid-options) below.
 
+### Export options
+
+These apply when `INPUT` is a store. Every one of them is refused by name
+if it does not apply to the format being written, rather than ignored.
+
+| Flag | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `--level N` | int | `0` | resolution level to export; `0` is the finest |
+| `--object-id ID` | int, repeatable | all | export only these objects |
+| `--group-id ID` | int, repeatable | all | streamlines: export only these bundles |
+| `--bbox X0,Y0,Z0,X1,Y1,Z1` | floats | — | export only what falls in the box |
+| `--attribute NAME` | str, repeatable | none | per-vertex attributes to include (`csv`, `ply`, `h5ad`) |
+| `--delimiter` | str | `,` | `csv` export column delimiter |
+
+| `--format` | Extensions | Export function | Reads | Extra |
+| --- | --- | --- | --- | --- |
+| `trk` | `.trk` | `trk.export_trk` | streamlines | `trk` |
+| `trx` | `.trx` | `trx.export_trx` | streamlines | `trx` |
+| `swc` | `.swc` | `swc.export_swc` | skeleton | — |
+| `obj` | `.obj` | `obj.export_obj` | mesh | — |
+| `ply` | `.ply` | `ply.export_ply` | points | `ply` |
+| `csv` | `.csv`, `.xyz` | `csv_points.export_csv` | points | — |
+| `h5ad` | `.h5ad` | `h5ad.export_h5ad` | points | `h5ad` |
+
+More formats can be ingested than exported: `las`, `stl`, `lines`,
+`edgelist`, `graphml` and `table` have no writer, and asking for one names
+the formats that do.
+
 :::{warning}
 `--overwrite` deliberately refuses to remove a directory that does not
 contain a `zarr.json` or `.zattrs`. It will not let you point it at your
@@ -110,6 +156,9 @@ zvtools convert transcripts.csv cells.zarrvectors --chunk-shape 100,100,100
 zvtools convert tracts.trk tracts.zarrvectors \
     --num-chunks 5000 --workers 12 --workers-backend dask \
     --compressor zstd --coarsen 8,8 --sparsity 2,4
+
+# Back out again: the whole store as CSV, with one attribute.
+zvtools convert cells.zarrvectors cells.csv --attribute cell_type
 
 # Neuron morphology from SWC.
 zvtools convert neuron.swc neuron.zarrvectors --chunk-shape 50,50,50
