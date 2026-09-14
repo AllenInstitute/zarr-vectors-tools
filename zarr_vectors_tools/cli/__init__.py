@@ -7,7 +7,7 @@ Subcommands:
     pyramid   Build a sparsity pyramid on an existing store.
     validate  Run core conformance validation on a store.
     info      Print a store's geometry, resolution levels, and metadata.
-    attach    Stage a table's columns onto a store's existing vertices.
+    attach    Stage a table's columns (or CIFTI maps) onto a store's vertices.
     shard     Repack per-chunk cells into shards, or undo it.
 
 Also runnable as ``python -m zarr_vectors_tools``.
@@ -235,6 +235,42 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--delimiter", default=",",
                    help="table: column delimiter (default: ,), and CSV export")
 
+    sf = c.add_argument_group("cortical surfaces (gifti, freesurfer)")
+    sf.add_argument(
+        "--geometry", default=None, metavar="SURFACE",
+        help="surface to chunk: midthickness, pial, white, smoothwm, orig "
+             "(default: midthickness; gifti falls back to the first of those "
+             "it finds). Every other surface is kept as coords_<name>",
+    )
+    sf.add_argument(
+        "--hemisphere", action="append", dest="hemispheres", default=None,
+        choices=("left", "right", "lh", "rh"),
+        help="freesurfer: hemispheres to read (repeatable; default both). "
+             "gifti: the hemisphere of files that do not name one",
+    )
+    sf.add_argument(
+        "--space", choices=("auto", "scanner", "surface"), default="auto",
+        help="freesurfer: scanner RAS (add c_ras, lines up with volumes and "
+             "tracts) or FreeSurfer surface RAS. auto = scanner when the "
+             "files record c_ras (default: auto)",
+    )
+    sf.add_argument(
+        "--surface", action="append", dest="surfaces", default=None,
+        metavar="NAME",
+        help="freesurfer: other surfaces to keep (repeatable; default white, "
+             "pial, inflated, sphere when present)",
+    )
+    sf.add_argument(
+        "--morph", action="append", dest="morph", default=None, metavar="NAME",
+        help="freesurfer: morphometry maps from surf/ (repeatable; default "
+             "thickness, curv, sulc, area when present)",
+    )
+    sf.add_argument(
+        "--annot", action="append", dest="annots", default=None, metavar="NAME",
+        help="freesurfer: parcellations from label/ (repeatable; default "
+             "aparc when present), e.g. aparc.a2009s",
+    )
+
     e = c.add_argument_group("export (store -> file)")
     e.add_argument(
         "--level", type=int, default=0,
@@ -305,9 +341,14 @@ def build_parser() -> argparse.ArgumentParser:
                     "being merged into a single large file first.",
     )
     a.add_argument("store", help="existing zarr-vectors store path (modified in place)")
-    a.add_argument("input", help="file to stage in (.h5ad, or a delimited table)")
-    a.add_argument("--format", choices=("auto", "h5ad", "table"), default="auto",
+    a.add_argument("input", help="file to stage in (.h5ad, a delimited table, or "
+                                 "a .dscalar/.dlabel/.dtseries.nii onto a surface store)")
+    a.add_argument("--format", choices=("auto", "h5ad", "table", "cifti"), default="auto",
                    help="source format (default: auto from extension)")
+    a.add_argument("--name", default=None, metavar="NAME",
+                   help="cifti only: attribute name (default: from the filename). "
+                        "On a multi-map dscalar, keeps the maps together as one "
+                        "multi-column attribute")
     a.add_argument("--column", action="append", dest="columns", default=None,
                    metavar="NAME",
                    help="column to stage in (repeatable). h5ad: an obs column. "

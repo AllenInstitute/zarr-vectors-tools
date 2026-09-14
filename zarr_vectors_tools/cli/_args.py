@@ -147,6 +147,12 @@ FORMAT_REGISTRY: dict[str, Fmt] = {
     "lines":    Fmt("lines", (), "lines", "ingest_lines_csv", None, "lines"),
     "edgelist": Fmt("edgelist", (), "edgelist", "ingest_edgelist", "graph", "graph"),
     "graphml":  Fmt("graphml", (".graphml",), "graphml", "ingest_graphml", "graph", "graph"),
+    # Cortical surfaces.  A subject is a SET of files, so both also accept a
+    # directory: resolve_format recognises a FreeSurfer subject (surf/lh.white)
+    # and a directory of .gii files without --format.
+    "gifti":    Fmt("gifti", (".gii",), "gifti", "ingest_gifti", "surfaces", "surface"),
+    "freesurfer": Fmt("freesurfer", (), "freesurfer", "ingest_freesurfer",
+                      "surfaces", "surface"),
 }
 
 # extension -> format name (only unambiguous extensions; .csv defaults to points)
@@ -256,10 +262,31 @@ def load_export_func(fmt: ExportFmt):
         raise SystemExit(f"error: cannot load the {fmt.name} exporter ({exc}){hint}")
 
 
+def _directory_format(path: Path) -> str:
+    """The format of a directory input: the surface formats come as sets."""
+    from zarr_vectors_tools.ingest.freesurfer import find_freesurfer_surf_dir
+
+    if find_freesurfer_surf_dir(path) is not None:
+        return "freesurfer"
+    if any(p.suffix.lower() == ".gii" for p in path.iterdir()):
+        return "gifti"
+    raise SystemExit(
+        f"error: {path} is a directory, but neither a FreeSurfer subject "
+        f"(surf/lh.white) nor a directory of .gii files; pass a file, or "
+        f"--format"
+    )
+
+
 def resolve_format(input_path: str | Path, explicit: str | None) -> Fmt:
-    """Return the :class:`Fmt` for ``--format`` (if given) or the input extension."""
+    """Return the :class:`Fmt` for ``--format`` (if given) or the input extension.
+
+    A directory input is resolved by what is in it, since the cortical surface
+    formats describe one subject as many files.
+    """
     if explicit and explicit != "auto":
         return FORMAT_REGISTRY[explicit]
+    if Path(input_path).is_dir():
+        return FORMAT_REGISTRY[_directory_format(Path(input_path))]
     ext = Path(input_path).suffix.lower()
     name = _EXT_TO_FORMAT.get(ext)
     if name is None:

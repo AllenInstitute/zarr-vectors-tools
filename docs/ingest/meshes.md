@@ -83,4 +83,5 @@ store; recompute vertex normals from the merged geometry instead.
 - [Algorithms → mesh summary](../algorithms/mesh_summary.md)
 - [Export → meshes](../export/meshes.md)
 - [Enrichments → meshes](../enrichments.md#meshes)
+- [Cortical surfaces](surfaces.md) — GIFTI, FreeSurfer and CIFTI
 - [Ingest workflows](index.md)

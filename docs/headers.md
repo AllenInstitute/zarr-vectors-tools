@@ -136,6 +136,17 @@ what lets `export_h5ad` emit staged columns under their original labels,
 indistinguishable from columns written at ingest. See
 [Single-cell and spatial omics](ingest/single_cell.md).
 
+### `SurfaceHeader`
+
+Written by `ingest_gifti` and `ingest_freesurfer`, and extended in place by
+`attach_cifti`. Records which surface was chunked and in what `space`, one
+entry per hemisphere (`object_id`, CIFTI `structure`, `n_vertices`,
+`n_faces`), the `coords_<name>` alternates, each continuous map's source
+file, parcellation `label_tables`, the join-key attribute, and FreeSurfer's
+`c_ras`. `object_for("left")` returns a hemisphere's object id. The CIFTI
+attach reads `n_vertices` from it to refuse a map from a different mesh. See
+[Cortical surfaces](ingest/surfaces.md).
+
 ## See also
 
 - [Ingest workflows](ingest/index.md) — each format page notes whether

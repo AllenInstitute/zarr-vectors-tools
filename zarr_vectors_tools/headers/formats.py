@@ -474,6 +474,110 @@ class H5ADHeader(Header):
 
 
 # ===================================================================
+# Cortical surfaces (GIFTI, FreeSurfer, CIFTI)
+# ===================================================================
+
+@dataclass
+class SurfaceHeader(Header):
+    """What a cortical surface store needs that its arrays cannot say.
+
+    A surface store holds one mesh object per hemisphere.  Four things about
+    it live here rather than in the arrays:
+
+    - **Which hemisphere is which object**, and how many vertices the source
+      mesh had.  CIFTI data is indexed by surface vertex, and a 32k map is
+      meaningless on a 164k surface, so the count is what lets an attach
+      refuse a mismatch instead of writing garbage.
+    - **Which surface is the geometry** and which ride along as coordinate
+      attributes (``coords_white``, ``coords_inflated``...).  All share one
+      topology; only one can be chunked.
+    - **The coordinate space** the geometry is in.  FreeSurfer surfaces are
+      in surface RAS, offset from scanner RAS by ``c_ras``; whether that
+      shift was applied is the difference between a surface that overlays a
+      tractogram and one that sits beside it.
+    - **Label tables.** Parcellations are stored as integer codes; the names
+      and colours that make them a parcellation are kept per attribute.
+    """
+
+    format_name: str = "surface"
+    #: Where the geometry came from: ``"gifti"`` or ``"freesurfer"``.
+    source: str = ""
+    #: ``"scanner"`` (world RAS mm), ``"surface"`` (FreeSurfer tkr RAS), or
+    #: the GIFTI dataspace name when the file declares one.
+    space: str = "unknown"
+    #: The surface chunked as geometry, e.g. ``"midthickness"``.
+    geometry: str = ""
+    #: One entry per object: ``{object_id, hemisphere, structure, n_vertices,
+    #: n_faces}``.  ``object_id`` is the store's; ``hemisphere`` is
+    #: ``"left"``/``"right"``.
+    hemispheres: list[dict[str, Any]] = field(default_factory=list)
+    #: Other surfaces of the same topology, as ``{attribute: surface name}``.
+    alternates: dict[str, str] = field(default_factory=dict)
+    #: Continuous per-vertex maps, as ``{attribute: source description}``.
+    scalars: dict[str, str] = field(default_factory=dict)
+    #: ``{attribute: {code: {"name": str, "rgba": [r, g, b, a]}}}``.  Codes
+    #: are strings because JSON object keys must be.
+    label_tables: dict[str, dict[str, dict[str, Any]]] = field(
+        default_factory=dict,
+    )
+    #: Per-vertex attribute holding ``hemisphere << 32 | source vertex``.
+    key_attribute: str = "zv_join_key"
+    #: The FreeSurfer ``c_ras`` offset, when the geometry carried one.
+    c_ras: list[float] | None = None
+    #: Anything a producer wrote that this class does not name.
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    _KNOWN = (
+        "format_name", "source", "space", "geometry", "hemispheres",
+        "alternates", "scalars", "label_tables", "key_attribute", "c_ras",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "format_name": self.format_name,
+            "source": self.source,
+            "space": self.space,
+            "geometry": self.geometry,
+            "hemispheres": [dict(h) for h in self.hemispheres],
+            "alternates": dict(self.alternates),
+            "scalars": dict(self.scalars),
+            "label_tables": {
+                name: {str(code): dict(entry) for code, entry in table.items()}
+                for name, table in self.label_tables.items()
+            },
+            "key_attribute": self.key_attribute,
+            "c_ras": None if self.c_ras is None else [float(v) for v in self.c_ras],
+        }
+        out.update(self.extra)
+        return out
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SurfaceHeader:
+        return cls(
+            source=d.get("source", ""),
+            space=d.get("space", "unknown"),
+            geometry=d.get("geometry", ""),
+            hemispheres=[dict(h) for h in d.get("hemispheres", [])],
+            alternates=dict(d.get("alternates", {})),
+            scalars=dict(d.get("scalars", {})),
+            label_tables={
+                name: {str(code): dict(entry) for code, entry in table.items()}
+                for name, table in d.get("label_tables", {}).items()
+            },
+            key_attribute=d.get("key_attribute", "zv_join_key"),
+            c_ras=d.get("c_ras"),
+            extra={k: v for k, v in d.items() if k not in cls._KNOWN},
+        )
+
+    def object_for(self, hemisphere: str) -> int | None:
+        """The store's object id for ``"left"`` or ``"right"``, if present."""
+        for entry in self.hemispheres:
+            if entry.get("hemisphere") == hemisphere:
+                return int(entry["object_id"])
+        return None
+
+
+# ===================================================================
 # Dispatch helper
 # ===================================================================
 
@@ -486,6 +590,7 @@ HEADER_CLASSES: dict[str, type[Header]] = {
     "csv": CSVHeader,
     "graph": GraphHeader,
     "h5ad": H5ADHeader,
+    "surface": SurfaceHeader,
 }
 
 

@@ -127,6 +127,7 @@ Where to start
    ingest/em_skeletons
    ingest/graphs
    ingest/meshes
+   ingest/surfaces
 
 .. toctree::
    :maxdepth: 1

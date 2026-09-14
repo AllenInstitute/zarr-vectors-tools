@@ -49,6 +49,8 @@ Generated from `FORMAT_REGISTRY` in
 | GraphML | `graphml` *(`.graphml`)* | `zarr_vectors_tools.ingest.graphml.ingest_graphml` | graph | `graph` |
 | Wavefront OBJ | `obj` *(`.obj`)* | `zarr_vectors_tools.ingest.obj.ingest_obj` | mesh | none |
 | STL | `stl` *(`.stl`)* | `zarr_vectors_tools.ingest.stl.ingest_stl` | mesh | none |
+| GIFTI surfaces | `gifti` *(`.gii`, or a directory of them)* | `zarr_vectors_tools.ingest.gifti.ingest_gifti` | mesh (one object per hemisphere) | `surfaces` |
+| FreeSurfer subject | `freesurfer` *(a subject directory)* | `zarr_vectors_tools.ingest.freesurfer.ingest_freesurfer` | mesh (one object per hemisphere) | `surfaces` |
 
 Install an extra with `pip install "zarr-vectors-tools[las]"`, or
 `[all]` for the lot. Python 3.11 or newer is required.
@@ -66,6 +68,13 @@ through pandas (so string and categorical columns work, where `csv`'s
 `numpy.loadtxt` path needs everything numeric) and hashes the identifier
 into a join key, so further files can be staged into the store afterwards.
 See [Single-cell and spatial omics](single_cell.md).
+
+`gifti` and `freesurfer` also accept a **directory**, because one subject's
+cortex is many files. A FreeSurfer subject is recognised by
+`surf/lh.white` or `surf/rh.white`, and any other directory holding `.gii`
+files resolves to `gifti`. CIFTI files carry no geometry, so they are staged
+onto a surface store with `zvtools attach` instead. See
+[Cortical surfaces](surfaces.md).
 
 `trk` is the only registry entry with `inline_pyramid=True`: the ingest
 builds the multiscale pyramid itself rather than leaving it to a
@@ -99,6 +108,8 @@ in Python when the file is small enough to hold in RAM and you want the
 - [Skeletons in EM](em_skeletons.md) — precomputed / CloudVolume sources
 - [Graphs](graphs.md) — edge-list CSV, GraphML
 - [Meshes](meshes.md) — OBJ, STL
+- [Cortical surfaces](surfaces.md) — GIFTI, FreeSurfer, and CIFTI maps
+  attached onto them
 
 Attribute names produced by the enrichment options are listed in full at
 [Enrichments](../enrichments.md).

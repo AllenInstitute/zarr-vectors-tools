@@ -67,6 +67,9 @@ trk = ["nibabel>=5.0"]
 trx = ["trx-python>=0.3"]
 # Back-compat alias: both streamline formats, unchanged for existing users.
 streamlines = ["zarr-vectors-tools[trk,trx]"]
+# Cortical surfaces: GIFTI and FreeSurfer ingest, CIFTI attach. nibabel reads
+# all three; ``all`` already carries it.
+surfaces = ["nibabel>=5.0"]
 graph = ["networkx>=3.0"]
 # AnnData (.h5ad) ingest/export -- single-cell and spatial-omics tables.
 # anndata pulls h5py + scipy, so it stays an extra rather than a core dep.

@@ -14,16 +14,55 @@ _H5AD_EXTS = {".h5ad"}
 
 
 def _resolve_source(input_path: str, explicit: str | None) -> str:
-    """Decide whether the incoming file is an ``.h5ad`` or a table."""
+    """Decide whether the incoming file is an ``.h5ad``, CIFTI, or a table."""
     if explicit and explicit != "auto":
         return explicit
+    from zarr_vectors_tools.ingest.cifti import is_cifti_path
+
+    if is_cifti_path(input_path):
+        return "cifti"
     return "h5ad" if Path(input_path).suffix.lower() in _H5AD_EXTS else "table"
+
+
+def _refuse_for_cifti(args) -> None:
+    """CIFTI carries its own join (structure + vertex); table flags mean nothing."""
+    given = {
+        "--column": bool(args.columns),
+        "--gene": bool(args.genes),
+        "--gene-by": args.gene_by is not None,
+        "--layer": args.layer is not None,
+        "--key-column": args.key_column is not None,
+        "--delimiter": args.delimiter != ",",
+        "--level": args.level != 0,
+    }
+    rejected = sorted(flag for flag, set_ in given.items() if set_)
+    if rejected:
+        raise SystemExit(
+            f"error: {', '.join(rejected)} do not apply to cifti: each value's "
+            f"vertex comes from the file's brain-model axis, and maps are "
+            f"written to level 0 (rebuild the pyramid afterwards)"
+        )
 
 
 def run_attach(args) -> int:
     source = _resolve_source(args.input, args.format)
 
-    if source == "h5ad":
+    if args.name is not None and source != "cifti":
+        raise SystemExit("error: --name applies to cifti input only")
+
+    if source == "cifti":
+        from zarr_vectors_tools.ingest.cifti import attach_cifti
+
+        _refuse_for_cifti(args)
+        summary = attach_cifti(
+            str(args.store),
+            str(args.input),
+            name=args.name,
+            missing=args.missing,
+            overwrite=args.overwrite,
+            shard_shape=args.shard,
+        )
+    elif source == "h5ad":
         from zarr_vectors_tools.ingest.h5ad import attach_h5ad
 
         if not args.genes and not args.columns:
@@ -72,6 +111,8 @@ def run_attach(args) -> int:
         "attributes_written", "genes_attached", "obs_columns_attached",
         "columns_attached", "vertices_matched", "vertices_unmatched",
         "rows_available", "duplicate_keys", "chunk_count",
+        "attributes", "kind", "hemispheres", "skipped_structures",
+        "voxels_skipped",
     ):
         if key in summary:
             print(f"  {key}: {summary[key]}")

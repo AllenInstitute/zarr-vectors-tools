@@ -74,6 +74,8 @@ zvtools convert tracts.zarrvectors cst.trk --level 2 --group-id 4
 | `lines` | *(none)* | `lines.ingest_lines_csv` | lines | — |
 | `edgelist` | *(none)* | `edgelist.ingest_edgelist` | graph | `graph` |
 | `graphml` | `.graphml` | `graphml.ingest_graphml` | graph | `graph` |
+| `gifti` | `.gii`, or a directory of them | `gifti.ingest_gifti` | mesh | `surfaces` |
+| `freesurfer` | a subject directory | `freesurfer.ingest_freesurfer` | mesh | `surfaces` |
 
 :::{note}
 `lines` and `edgelist` register **no extensions**, because a `.csv` file
@@ -109,6 +111,10 @@ value. If the format's extra is missing, the error carries the exact
 | `--compute-endpoints` | flag | off | streamlines: store per-object endpoints |
 | `--nodes` | path | — | **required for `edgelist`**: the node CSV |
 | `--knn-distance-k` | int | — | points: *k* for the kNN-distance enrichment (needs `points-enrichment`) |
+| `--geometry NAME` | str | `midthickness` | `gifti`, `freesurfer`: the surface to chunk |
+| `--hemisphere` | `left｜right｜lh｜rh` | both | `freesurfer`: hemispheres to read (repeatable); `gifti`: hemisphere of files that name none |
+| `--space` | `auto｜scanner｜surface` | `auto` | `freesurfer`: add `c_ras` to reach scanner RAS |
+| `--surface`, `--morph`, `--annot` | str, repeatable | present defaults | `freesurfer`: alternate surfaces, morphometry maps, parcellations |
 
 Plus every [pyramid option](#pyramid-options) below.
 
@@ -162,7 +168,13 @@ zvtools convert cells.zarrvectors cells.csv --attribute cell_type
 
 # Neuron morphology from SWC.
 zvtools convert neuron.swc neuron.zarrvectors --chunk-shape 50,50,50
+
+# A FreeSurfer subject, then CIFTI myelin maps onto it.
+zvtools convert subjects/bert bert.zarrvectors --chunk-shape 20,20,20
+zvtools attach bert.zarrvectors bert.MyelinMap_BC.164k_fs_LR.dscalar.nii
 ```
+
+See [Cortical surfaces](../ingest/surfaces.md).
 
 ---
 

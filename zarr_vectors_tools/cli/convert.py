@@ -60,6 +60,9 @@ def _print_summary(action: str, summary: dict) -> None:
         "columns_stored", "dropped_na", "key_column",
         # export-side counters
         "node_count", "root_count", "face_count", "attributes_carried",
+        # cortical surfaces
+        "hemispheres", "geometry", "space", "c_ras", "scalars", "labels",
+        "alternates", "filled",
     ):
         if k in summary:
             print(f"  {k}: {summary[k]}")
@@ -252,6 +255,12 @@ def run(args) -> int:
         "--object-id-column": ({"h5ad", "table"},
                                getattr(args, "object_id_column", None) is not None),
         "--drop-na": ({"h5ad", "table"}, bool(getattr(args, "drop_na", False))),
+        "--geometry": ({"gifti", "freesurfer"}, getattr(args, "geometry", None) is not None),
+        "--hemisphere": ({"gifti", "freesurfer"}, bool(getattr(args, "hemispheres", None))),
+        "--space": ({"freesurfer"}, getattr(args, "space", "auto") != "auto"),
+        "--surface": ({"freesurfer"}, bool(getattr(args, "surfaces", None))),
+        "--morph": ({"freesurfer"}, bool(getattr(args, "morph", None))),
+        "--annot": ({"freesurfer"}, bool(getattr(args, "annots", None))),
     }
     rejected = [
         (flag, owners) for flag, (owners, given) in flag_owners.items()
@@ -313,6 +322,24 @@ def run(args) -> int:
             kwargs["object_id_column"] = args.object_id_column
             kwargs["backed"] = args.backed
             kwargs["drop_na"] = args.drop_na
+        if fmt.name == "gifti":
+            kwargs["geometry"] = args.geometry
+            hemis = args.hemispheres or []
+            if len(hemis) > 1:
+                raise SystemExit(
+                    "error: gifti takes one --hemisphere, for files that do "
+                    "not say which hemisphere they are; the rest is read from "
+                    "the files"
+                )
+            kwargs["hemisphere"] = _hemisphere_name(hemis[0]) if hemis else None
+        if fmt.name == "freesurfer":
+            if args.geometry is not None:
+                kwargs["geometry"] = args.geometry
+            kwargs["space"] = args.space
+            kwargs["hemispheres"] = args.hemispheres
+            kwargs["alternates"] = args.surfaces
+            kwargs["morphometry"] = args.morph
+            kwargs["annotations"] = args.annots
 
         try:
             if fmt.name == "edgelist":
@@ -343,6 +370,10 @@ def run(args) -> int:
     # co-write a shard file).  Applies to every level's per-chunk arrays.
     _maybe_shard(getattr(args, "shard", None), args.output)
     return 0
+
+
+def _hemisphere_name(value: str) -> str:
+    return {"lh": "left", "rh": "right"}.get(value.lower(), value.lower())
 
 
 def _maybe_shard(shard_shape, output) -> None:
