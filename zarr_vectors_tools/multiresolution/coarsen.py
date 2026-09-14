@@ -15,32 +15,14 @@ between objects, and per-object OIDs are preserved across levels.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
-from zarr_vectors.constants import (
-    CAP_MULTISCALE_LINKS,
-    CAP_PRESERVED_OBJECT_IDS,
-    CAP_SHARED_FRAGMENTS,
-    COARSEN_PER_OBJECT,
-    DEFAULT_CROSS_LEVEL_DEPTH,
-    DEFAULT_CROSS_LEVEL_STORAGE,
-    GEOM_MESH,
-    LINKS_IMPLICIT_BRANCHES,
-    LINKS_IMPLICIT_SEQUENTIAL,
-    OBJECT_ATTRIBUTES,
-    VERTEX_FRAGMENTS,
-    VERTICES,
-    XLEVEL_EXPLICIT,
-    XLEVEL_NONE,
-    VALID_XLEVEL_STORAGE,
-)
 from zarr_vectors.building import (
-    rebuild_presence,
     LevelMetadata,
     assign_chunks,
     build_vertex_chunk_mapping,
@@ -63,6 +45,7 @@ from zarr_vectors.building import (
     read_links,
     read_object_attributes,
     read_root_metadata,
+    rebuild_presence,
     update_root_metadata,
     write_chunk_links,
     write_chunk_vertices,
@@ -70,21 +53,38 @@ from zarr_vectors.building import (
     write_object_attributes,
     write_object_index,
 )
+from zarr_vectors.constants import (
+    CAP_MULTISCALE_LINKS,
+    CAP_PRESERVED_OBJECT_IDS,
+    CAP_SHARED_FRAGMENTS,
+    COARSEN_PER_OBJECT,
+    DEFAULT_CROSS_LEVEL_DEPTH,
+    DEFAULT_CROSS_LEVEL_STORAGE,
+    GEOM_MESH,
+    LINKS_IMPLICIT_BRANCHES,
+    LINKS_IMPLICIT_SEQUENTIAL,
+    OBJECT_ATTRIBUTES,
+    VALID_XLEVEL_STORAGE,
+    VERTEX_FRAGMENTS,
+    VERTICES,
+    XLEVEL_EXPLICIT,
+    XLEVEL_NONE,
+)
 from zarr_vectors.exceptions import ArrayError, CoarseningError
+from zarr_vectors.typing import ChunkCoords
+
+from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
 from zarr_vectors_tools.multiresolution.coarsen_implicit import (
     coarse_chunks_of,
     positions_in_run,
     segment_object_by_coarse_chunk,
 )
-from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
 from zarr_vectors_tools.multiresolution.groupings import (
     group_labels_for,
     propagate_groupings,
     surviving_oids_from,
 )
 from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-from zarr_vectors.typing import ChunkCoords
-
 
 # ===================================================================
 # Coarsener registry (pluggable per-geometry downsampling strategies)
@@ -1244,16 +1244,39 @@ def _finalize_cross_level_for_store(
     ``cross_level_depth=-1`` means "walk all available level pairs".
     """
     root = open_store(str(store_path), mode="r+")
+    if cross_level_storage == XLEVEL_NONE or cross_level_depth == 0:
+        _stamp_root_cross_level(
+            root, depth=cross_level_depth, storage=cross_level_storage,
+        )
+        return
+    # Stamped only once we know arrays can exist: a strategy that emits no
+    # inline ±1 links (polyline, skeleton, mesh, per-fragment) would
+    # otherwise leave the store advertising a cross-level depth it has no
+    # arrays for, which a reader then goes looking for.
     _stamp_root_cross_level(
         root, depth=cross_level_depth, storage=cross_level_storage,
     )
-    if cross_level_storage == XLEVEL_NONE or cross_level_depth == 0:
-        return
 
     meta = read_root_metadata(root)
     ndim = meta.sid_ndim
     levels = sorted(list_resolution_levels(root))
     if len(levels) < 2:
+        return
+
+    # Decide whether there is anything to compose BEFORE reading anything.
+    #
+    # ``±1`` is emitted inline during coarsening, so this pass exists only
+    # for ``±N`` with N >= 2.  At the default depth of 1 there is nothing to
+    # do -- but the work below ran first and cost a full re-read of every
+    # level plus one int64 per vertex per level, which on a whole-brain
+    # tractogram is the largest allocation in the whole build and the most
+    # likely thing to have been killed as "the pyramid OOM".
+    max_delta = (
+        max(levels) - min(levels)
+        if cross_level_depth == -1
+        else int(cross_level_depth)
+    )
+    if max_delta < 2:
         return
 
     # No capability stamp here.  The token marks the presence of delta != 0
@@ -1265,19 +1288,12 @@ def _finalize_cross_level_for_store(
     # once it knows.  Stamping optimistically here claimed cross-LEVEL links
     # on stores that had none.
 
-    # Build per-level chunk_assignments + total counts once.
+    # Build per-level chunk_assignments + total counts once.  This is the
+    # expensive part the early return above protects.
     per_level: dict[int, tuple[dict[ChunkCoords, npt.NDArray[np.int64]], int]] = {}
     for lvl in levels:
         lg = get_resolution_level(root, lvl)
         per_level[lvl] = _reconstruct_chunk_assignments(lg, ndim)
-
-    max_delta = (
-        max(levels) - min(levels)
-        if cross_level_depth == -1
-        else int(cross_level_depth)
-    )
-    if max_delta < 2:
-        return  # +1/-1 was already emitted inline
 
     # Cache each adjacent (fine_level, fine_level+1) parent array.
     adjacent_parent: dict[int, npt.NDArray[np.int64]] = {}
@@ -1603,14 +1619,20 @@ def _skeleton_coarsener(
     executor: Any = None,
 ) -> dict[str, Any]:
     """Skeleton stores: route to the skeleton-aware decimator.  ``coarsen_factor``
-    is the decimation stride, ``chunk_scale_factor`` defaults to 2, and the
+    is the decimation stride (1 being the identity, as elsewhere), and the
     random sparsity strategy degrades to deterministic ``"length"``.
     ``coarsen_mode`` is accepted for signature parity with other coarseners
     but has no effect here — this coarsener always decimates."""
     from zarr_vectors_tools.multiresolution.strategies.skeletons import (
         coarsen_skeleton_level,
     )
-    csf = chunk_scale_factor if chunk_scale_factor != 1 else 2
+    # ``chunk_scale_factor`` is honoured as given.  It used to be silently
+    # replaced by 2 whenever the caller asked for 1, so a pyramid built with
+    # an explicit "keep the chunk grid" got a doubled grid at every level and
+    # the store's own metadata was the only place that said so.  The default
+    # of 2 now lives in ``coarsen_skeleton_level``'s signature, where a
+    # caller can see it.
+    csf = chunk_scale_factor
     return coarsen_skeleton_level(
         store_path, source_level, target_level,
         stride=max(1, int(round(coarsen_factor))),

@@ -32,25 +32,24 @@ ingest convention is "ignore cross-chunk edges if missing").
 
 from __future__ import annotations
 
-from zarr_vectors.building import rebuild_presence
-
 import pickle
 import shutil
 import tempfile
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
+from zarr_vectors.building import rebuild_presence
 from zarr_vectors.constants import (
     VERTEX_ATTRIBUTES,
     VERTICES,
 )
-from zarr_vectors_tools.multiresolution.constants import COARSEN_SKELETON
 
+from zarr_vectors_tools.multiresolution.constants import COARSEN_SKELETON
 
 # ===================================================================
 # Pure tree simplification
@@ -265,7 +264,10 @@ def _collapse_to_kept(
             if attr_agg == "max":
                 np.fmax.at(agg, ow, vals)
             elif attr_agg == "min":
-                agg[:] = np.iinfo(data.dtype).max if np.issubdtype(data.dtype, np.integer) else np.inf
+                agg[:] = (
+                    np.iinfo(data.dtype).max
+                    if np.issubdtype(data.dtype, np.integer) else np.inf
+                )
                 np.fmin.at(agg, ow, vals)
             elif attr_agg == "first":
                 agg[new_of_old[kept]] = data[kept]
@@ -305,6 +307,13 @@ def decimate_skeleton(
     reducing at deeper pyramid levels (RDP bottoms out once a skeleton is
     near-minimal).
 
+    ``stride <= 1`` is the IDENTITY: every vertex is kept.  It used to mean
+    "keep anchors only", the most aggressive setting this function has,
+    which is the opposite of what a factor of 1 means everywhere else in the
+    package (``coarsen_level`` documents 1.0 as "no aggregation") and turned
+    a pyramid refresh that could not recover the stride into a level with
+    the interior of every chain deleted.
+
     Same return shape as :func:`simplify_skeleton`.
     """
     positions = np.asarray(positions)
@@ -331,7 +340,10 @@ def decimate_skeleton(
             if 0 <= iv < n:
                 keep[iv] = True
 
-    if stride > 1:
+    if stride <= 1:
+        # The identity, matching every other coarsener's factor of 1.
+        keep[:] = True
+    else:
         anchors = np.flatnonzero(keep).tolist()
         for a in anchors:
             for first_child in children.get(a, ()):
@@ -678,8 +690,9 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     arrays are created by the coordinator before dispatch.
     """
     from zarr_vectors.building import get_resolution_level, open_store
-    from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
     from zarr_vectors.types.skeletons import write_skeleton_chunk
+
+    from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 
     shared = shared or {}
     ndim = shared["ndim"]
@@ -1047,37 +1060,36 @@ def coarsen_skeleton_level(
     from zarr_vectors.building import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
+        LevelMetadata,
         create_attribute_array,
         create_fragment_attribute_array,
         create_links_array,
         create_links_family,
         create_object_attributes_array,
         create_object_index_array,
+        create_resolution_level,
         create_vertices_array,
         finalize_links,
+        get_level_chunk_shape,
+        get_resolution_level,
         list_chunk_keys,
+        open_store,
         read_all_object_manifests,
         read_chunk_fragment_attributes,
+        read_level_metadata,
         read_object_attributes,
+        read_root_metadata,
+        upsert_level_transform,
         write_object_attributes,
         write_object_manifests,
     )
+    from zarr_vectors.exceptions import ArrayError
+    from zarr_vectors.types.skeletons import get_coordinate_offset
+
     from zarr_vectors_tools.multiresolution.constants import (
         CROSS_LINK_TASK_SHARD_AXIS,
     )
-    from zarr_vectors.building import (
-        LevelMetadata,
-        create_resolution_level,
-        get_level_chunk_shape,
-        get_resolution_level,
-        open_store,
-        read_level_metadata,
-        read_root_metadata,
-    )
-    from zarr_vectors.exceptions import ArrayError
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-    from zarr_vectors.building import upsert_level_transform
-    from zarr_vectors.types.skeletons import get_coordinate_offset
 
     # Per-target-chunk work is dispatched through ``executor`` (a
     # ``map``-like callable); the default runs serially in-process, so serial
@@ -1534,7 +1546,7 @@ def coarsen_skeleton_level(
 
 
 # Re-export the ChunkCoords name used in annotations above.
-from zarr_vectors.typing import ChunkCoords  # noqa: E402
+from zarr_vectors.typing import ChunkCoords  # noqa: E402,F401
 
 
 def build_skeleton_pyramid(

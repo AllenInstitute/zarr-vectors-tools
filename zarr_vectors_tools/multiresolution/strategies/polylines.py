@@ -15,18 +15,17 @@ Both can be composed: simplify first, then subsample.
 
 from __future__ import annotations
 
-from zarr_vectors.building import rebuild_presence
-
 import pickle
 import shutil
 import tempfile
-from contextlib import nullcontext
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+from zarr_vectors.building import rebuild_presence
 
 
 def simplify_polyline(
@@ -331,7 +330,6 @@ def coarsen_polylines(
         - ``simplification_ratio``: vertex reduction from DP
         - ``subsampling_ratio``: polyline reduction from subsampling
     """
-    n_input = len(polylines)
     v_input = sum(len(p) for p in polylines)
     current = polylines
 
@@ -1031,41 +1029,40 @@ def coarsen_polyline_level(
     Args: see :func:`zarr_vectors_tools.multiresolution.coarsen.coarsen_level`
     for the shared parameter semantics.
     """
-    from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS
     from zarr_vectors.building import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
         VERTEX_ATTRIBUTES,
         VERTICES,
+        LevelMetadata,
         create_attribute_array,
         create_fragment_attribute_array,
-        create_object_attributes_array,
-        create_object_index_array,
-        create_vertices_array,
-        list_chunk_keys,
-        read_all_object_manifests,
-        read_chunk_fragment_attributes,
-        read_object_attributes,
-        write_object_attributes,
-        write_object_manifests,
-    )
-    from zarr_vectors.exceptions import ArrayError
-    from zarr_vectors.building import (
-        LevelMetadata,
         create_links_array,
         create_links_family,
+        create_object_attributes_array,
+        create_object_index_array,
         create_resolution_level,
+        create_vertices_array,
         finalize_links,
         get_level_chunk_shape,
         get_resolution_level,
+        list_chunk_keys,
         open_store,
+        read_all_object_manifests,
+        read_chunk_fragment_attributes,
         read_level_metadata,
+        read_object_attributes,
         read_root_metadata,
+        write_object_attributes,
+        write_object_manifests,
     )
+    from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS
+    from zarr_vectors.exceptions import ArrayError
+
+    from zarr_vectors_tools.multiresolution.coarsen import _stamp_root_capability
     from zarr_vectors_tools.multiresolution.constants import (
         CROSS_LINK_TASK_SHARD_AXIS,
     )
-    from zarr_vectors_tools.multiresolution.coarsen import _stamp_root_capability
     from zarr_vectors_tools.multiresolution.groupings import group_labels_for
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
 
@@ -1132,8 +1129,16 @@ def coarsen_polyline_level(
     # rather than simplify at a chunk-derived epsilon, so leave the epsilon
     # unset (the worker treats an unset/non-positive epsilon as a no-op) and
     # only derive one when the factor genuinely asks for reduction.
+    #
+    # The tolerance scales with the TARGET BIN, which is the source level's
+    # bin times the factor and therefore compounds down the pyramid, exactly
+    # as ``coarsen_factor`` is documented to.  It used to scale with the
+    # source level's CHUNK, which only grows when chunk_scale_factor does:
+    # with the default scaling every level got the same tolerance, so the
+    # second application removed nothing and ``--coarsen 8,8`` produced a
+    # level 2 that was a copy of level 1 (measured 360 -> 42 -> 42 vertices).
     if coarsen_mode == "rdp" and simplify_epsilon is None and coarsen_factor > 1.0:
-        simplify_epsilon = min(src_chunk_shape) * 0.5 * float(coarsen_factor)
+        simplify_epsilon = 0.5 * float(min(target_bin_shape))
     stride = max(1, int(round(coarsen_factor)))
 
     coarsening_method = "polyline_decimate" if coarsen_mode == "decimate" else "polyline_rdp"

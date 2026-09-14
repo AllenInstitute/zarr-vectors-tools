@@ -16,7 +16,7 @@ Five strategies:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -316,10 +316,18 @@ def select_stratified_by_group(
 
     rng = np.random.default_rng(seed)
     kept: list[npt.NDArray[np.int64]] = []
-    # Sorted ids, so the draw order — and therefore the result for a given
-    # seed — does not depend on dict or disk ordering.
-    for label in np.unique(labels):
-        members = np.flatnonzero(labels == label).astype(np.int64)
+    # One grouping pass.  ``flatnonzero(labels == label)`` per distinct label
+    # is O(labels x objects), and a bundle atlas has thousands of labels over
+    # millions of streamlines.  ``np.unique`` returns ascending labels and the
+    # stable sort keeps each group's members ascending, so the draw order --
+    # and the result for a given seed -- is unchanged.
+    uniques, inverse = np.unique(labels, return_inverse=True)
+    inverse = np.asarray(inverse).ravel()
+    order = np.argsort(inverse, kind="stable")
+    counts = np.bincount(inverse, minlength=len(uniques))
+    groups = np.split(order, np.cumsum(counts)[:-1])
+    for members in groups:
+        members = members.astype(np.int64)
         if len(members) == 0:
             continue
         n_keep = max(int(min_per_group), int(round(len(members) * sparsity)))
