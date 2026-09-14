@@ -78,6 +78,7 @@ from zarr_vectors_tools.multiresolution.coarsen_implicit import (
 )
 from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
 from zarr_vectors_tools.multiresolution.groupings import (
+    group_labels_for,
     propagate_groupings,
     surviving_oids_from,
 )
@@ -254,6 +255,45 @@ def coarsen_level(
     )
 
 
+def _per_object_signals(
+    src_manifests: list,
+    src_fragment_positions: dict,
+    n_objects: int,
+    ndim: int,
+    *,
+    needed: bool,
+) -> tuple[npt.NDArray[np.float64] | None, npt.NDArray[np.float64] | None]:
+    """Per-object ``(size, representative point)`` for the sparsity strategies.
+
+    ``size`` is the object's vertex count — the generalisation of "length" for
+    a geometry that has no path, and the same quantity the skeleton and
+    polyline coarseners fall back to.  The representative point is the
+    object's first stored vertex, which is what ``spatial_coverage`` and
+    ``point_thinning`` bin on.
+
+    Returns ``(None, None)`` when ``needed`` is False so the unconditional
+    path stays free of an O(fragments) walk.
+    """
+    if not needed:
+        return None, None
+    lengths = np.zeros(n_objects, dtype=np.float64)
+    points = np.zeros((n_objects, ndim), dtype=np.float64)
+    for oid in range(n_objects):
+        first: npt.NDArray | None = None
+        total = 0
+        for cc, fragment_idx in src_manifests[oid]:
+            fragment = src_fragment_positions.get((cc, fragment_idx))
+            if fragment is None or len(fragment) == 0:
+                continue
+            if first is None:
+                first = fragment[0]
+            total += len(fragment)
+        lengths[oid] = float(total)
+        if first is not None:
+            points[oid] = first
+    return lengths, points
+
+
 def _per_object_coarsen(
     *,
     store_path: str | Path,
@@ -396,10 +436,27 @@ def _per_object_coarsen(
             [len(src_manifests[oid]) > 0 for oid in range(n_src_objects)],
             dtype=bool,
         )
+        # Every strategy the CLI offers needs a per-object signal, and this
+        # coarsener used to pass none: ``--sparsity-strategy length`` — which
+        # the docs recommend for large pyramids — raised "'length' strategy
+        # requires 'lengths' array" on any store that routes here, i.e. every
+        # point cloud, mesh and graph.  All three signals come from fragments
+        # Step 0 already read, so supplying them costs one pass over the
+        # manifests and only when sparsity is actually active.
+        lengths, representative_points = _per_object_signals(
+            src_manifests, src_fragment_positions, n_src_objects, ndim,
+            needed=sparsity_strategy in ("length", "spatial_coverage", "point_thinning"),
+        )
+        group_labels = (
+            group_labels_for(src_group, n_src_objects)
+            if sparsity_strategy == "group" else None
+        )
         kept = apply_sparsity(
             n_src_objects, keep_frac, sparsity_strategy,
             seed=sparsity_seed,
-            representative_points=None,
+            lengths=lengths,
+            representative_points=representative_points,
+            group_labels=group_labels,
             bin_shape=base_bin,
             alive_mask=alive_mask,
             # Cumulative per level: fraction of the surviving pool, not of
@@ -409,7 +466,6 @@ def _per_object_coarsen(
         keep_oids = sorted(int(o) for o in kept)
     else:
         keep_oids = list(range(n_src_objects))
-    keep_set = set(keep_oids)
 
     # --- Step 2-3: build (source vertex → bin → metavertex) map ---------
     # Per-object ordered source-vertex positions (with their global index

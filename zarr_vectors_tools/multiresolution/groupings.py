@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from zarr_vectors.building import (
     create_groupings_array,
     create_groupings_attributes_array,
@@ -32,7 +33,50 @@ from zarr_vectors.building import (
 )
 from zarr_vectors.constants import GROUP_ATTRIBUTES
 
-__all__ = ["propagate_groupings"]
+__all__ = ["group_labels_for", "propagate_groupings"]
+
+
+def group_labels_for(src_group, n_objects: int) -> npt.NDArray[np.int64]:
+    """One group id per object, for the ``"group"`` sparsity strategy.
+
+    Objects in no group get ``-1`` and form their own stratum — thinned
+    at the same rate as everything else, which is what a store holding a
+    whole-brain tractogram *and* a labelled atlas wants: the unlabelled
+    bulk coarsens normally while every named bundle survives.
+
+    An object in more than one group is assigned to the highest-numbered
+    one.  Stratification needs a partition and groups are not one; picking
+    a rule and saying so beats sampling the same object twice.
+
+    Lives here rather than in one strategy module because every coarsener
+    that offers ``sparsity_strategy="group"`` needs it, and the CLI offers
+    that strategy for every geometry.
+    """
+    labels = np.full(int(n_objects), -1, dtype=np.int64)
+    try:
+        groupings = list(read_all_groupings(src_group))
+    except Exception:  # noqa: BLE001 - a level with no taxonomy at all
+        groupings = []
+    if not groupings:
+        raise ValueError(
+            "sparsity_strategy='group' needs the source level to have object "
+            "groups, and this one has none. Build the taxonomy first (see "
+            "zarr_vectors_tools.compose.derive_groups), or use a different "
+            "strategy."
+        )
+    for gid, members in enumerate(groupings):
+        # A contiguous group arrives as a range and can be a billion long;
+        # slice it rather than materialising it.
+        if isinstance(members, range):
+            lo = max(0, int(members.start))
+            hi = min(int(n_objects), int(members.stop))
+            if hi > lo:
+                labels[lo:hi] = gid
+            continue
+        ids = np.fromiter((int(o) for o in members), dtype=np.int64)
+        if len(ids):
+            labels[ids[(ids >= 0) & (ids < n_objects)]] = gid
+    return labels
 
 
 def _group_attribute_names(level_group) -> list[str]:

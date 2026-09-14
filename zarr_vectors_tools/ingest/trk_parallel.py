@@ -239,10 +239,19 @@ def _compute_chunk_shape(
         ny = max(1, round(extent[1] * s))
         nz = max(1, round(extent[2] * s))
 
-    cx = round(extent[0] / nx)
-    cy = round(extent[1] / ny)
-    cz = round(extent[2] / nz)
-    return (cx, cy, cz)
+    # Round for a readable chunk size, but never to zero: a sub-millimetre
+    # tractogram (or any extent smaller than the chunk count) rounded straight
+    # to ``(0, 0, 0)``, and every downstream ``floor(p / chunk_shape)`` then
+    # divides by zero.  Fall back to the exact quotient, and to 1 only when the
+    # extent itself is degenerate.
+    def _edge(extent_axis: float, n: int) -> float:
+        exact = float(extent_axis) / float(max(n, 1))
+        rounded = round(exact)
+        if rounded >= 1:
+            return float(rounded)
+        return exact if exact > 0 else 1.0
+
+    return (_edge(extent[0], nx), _edge(extent[1], ny), _edge(extent[2], nz))
 
 
 # ---------------------------------------------------------------------------

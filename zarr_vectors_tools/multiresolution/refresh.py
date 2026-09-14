@@ -17,6 +17,7 @@ issuing a pre-refresh commit on icechunk-backed stores.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from zarr_vectors.exceptions import EditError
@@ -25,18 +26,88 @@ if TYPE_CHECKING:
     from zarr_vectors.building import Group
 
 
+#: ``LevelMetadata.coarsening_method`` -> the coarsener key that wrote it.
+#:
+#: A level must be re-coarsened by the strategy that produced it.  Without
+#: this the refresh fell back to ``select_coarsener_key``'s geometry routing,
+#: so a per-fragment or quadric-decimated level came back rebuilt by a
+#: different strategy -- different fragment identity, different vertex count,
+#: silently.
+_COARSENER_FOR_METHOD: dict[str, str] = {
+    "per_object": "per_object",
+    "per_fragment": "per_fragment",
+    "mesh_cluster": "mesh",
+    "mesh_quadric_collapse": "mesh_decimate",
+    "skeleton_simplify": "skeleton",
+    "polyline_rdp": "polyline",
+    "polyline_decimate": "polyline",
+}
+
+#: Methods whose vertex-reduction parameter is NOT recoverable from the store.
+#:
+#: The skeleton coarsener's stride leaves no trace: it writes
+#: ``bin_shape = root bin`` and ``bin_ratio = 1`` whatever the stride was, so
+#: the bin-ratio arithmetic every other method is recovered by reads back 1.0
+#: -- which the coarsener then reads as "keep anchors only" and flattens the
+#: level (measured: a stride-4 level rebuilt from 10 vertices to 8).  Refusing
+#: is the only honest option; the caller knows the stride it built with and
+#: passes it through ``coarsen_factors``.
+_UNRECOVERABLE_FACTOR: dict[str, str] = {
+    "skeleton_simplify": (
+        "the decimation stride, which no field on the level records"
+    ),
+}
+
+
 def rebuild_pyramid_from_level(
     root: Group,
     source_level: int,
+    *,
+    coarsen_factors: Mapping[int, float] | None = None,
+    sparsity_strategy: str = "random",
+    sparsity_seed: int | None = None,
+    compressor: Any = None,
+    executor: Any = None,
 ) -> list[dict[str, Any]]:
     """Re-coarsen every level above ``source_level`` from scratch.
 
     Reads each existing target level's metadata (``bin_ratio``,
-    ``object_sparsity``, ``chunk_shape``) and re-runs
+    ``object_sparsity``, ``chunk_shape``, ``coarsening_method``) and re-runs
     :func:`zarr_vectors_tools.multiresolution.coarsen.coarsen_level` with the
     same parameters, replacing the old level data in place.
 
-    Returns the list of per-level coarsening summaries.
+    The method each level was built with is re-applied, including the
+    ``rdp``/``decimate`` mode for polylines: recovering only the numeric
+    factors rebuilt a decimated streamline pyramid with Douglas-Peucker
+    instead (measured: 114 vertices became 42), which is a different level,
+    not a refreshed one.
+
+    Args:
+        root: Open store handle.
+        source_level: Every level ABOVE this one is rebuilt from it.
+        coarsen_factors: Per-level override of the vertex-reduction factor,
+            ``{level: factor}``.  Required for levels whose factor the store
+            does not record -- today that is skeleton levels, where the factor
+            is the decimation stride.
+        sparsity_strategy: Object-selection strategy, as
+            :func:`~zarr_vectors_tools.multiresolution.coarsen.build_pyramid`
+            takes it.  The per-level *fraction* is recovered from the store;
+            the strategy is not recorded there, so pass the one the pyramid
+            was built with.
+        sparsity_seed: Seed for the random strategies.  Advanced per level to
+            match ``build_pyramid``.
+        compressor: Codec for the rebuilt levels' arrays.  Each level's codec
+            is fixed when its arrays are created, so a refresh without this
+            leaves raw levels under a compressed level 0.
+        executor: ``map``-like callable for the chunk-local coarseners.
+
+    Returns:
+        The list of per-level coarsening summaries.
+
+    Raises:
+        EditError: If a level cannot be faithfully reproduced -- an unknown
+            coarsening method, or one whose factor is unrecoverable and not
+            supplied via ``coarsen_factors``.
     """
     from zarr_vectors.building import (
         commit,
@@ -125,6 +196,26 @@ def rebuild_pyramid_from_level(
             )
         except Exception:
             scale = (1,) * len(base_chunk)
+        method_tag = str(lm.coarsening_method or "")
+        coarsener = _COARSENER_FOR_METHOD.get(method_tag)
+        if coarsener is None:
+            raise EditError(
+                f"Cannot refresh level {lv}: it was written by "
+                f"coarsening_method={method_tag!r}, which has no coarsener to "
+                f"re-run it with (known: {sorted(_COARSENER_FOR_METHOD)}). "
+                f"Rebuild the pyramid with build_pyramid and the parameters "
+                f"you want."
+            )
+        override = None if coarsen_factors is None else coarsen_factors.get(lv)
+        if override is not None:
+            coarsen_factor = float(override)
+        elif method_tag in _UNRECOVERABLE_FACTOR:
+            raise EditError(
+                f"Cannot refresh level {lv}: rebuilding a {method_tag!r} "
+                f"level needs {_UNRECOVERABLE_FACTOR[method_tag]}. Pass it as "
+                f"coarsen_factors={{{lv}: <stride>}}, or rebuild with "
+                f"build_skeleton_pyramid."
+            )
         plan.append({
             "level": lv,
             "coarsen_factor": coarsen_factor,
@@ -133,6 +224,12 @@ def rebuild_pyramid_from_level(
             ),
             "chunk_scale_factor": scale,
             "parent_level": parent,
+            "method": coarsener,
+            # The mode is not a stored field, but the method tag the polyline
+            # coarsener stamps distinguishes the two modes exactly.
+            "coarsen_mode": (
+                "decimate" if method_tag == "polyline_decimate" else "rdp"
+            ),
         })
 
     # Commit pending writes so coarsen_level (which re-opens the store)
@@ -155,6 +252,18 @@ def rebuild_pyramid_from_level(
             coarsen_factor=entry["coarsen_factor"],
             sparsity_factor=entry["sparsity_factor"],
             chunk_scale_factor=entry["chunk_scale_factor"],
+            method=entry["method"],
+            coarsen_mode=entry["coarsen_mode"],
+            sparsity_strategy=sparsity_strategy,
+            # Advanced per level exactly as build_pyramid does, so a seeded
+            # refresh reproduces the seeded build rather than applying one
+            # selection to every level.
+            sparsity_seed=(
+                None if sparsity_seed is None
+                else int(sparsity_seed) + (lv - 1)
+            ),
+            compressor=compressor,
+            executor=executor,
         )
         summaries.append(summary)
     return summaries

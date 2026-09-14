@@ -145,9 +145,12 @@ rebuild_pyramid_from_level(root, source_level=2)
 ```
 
 `rebuild_pyramid_from_level` reuses each level's stored `bin_ratio`,
-`object_sparsity` and `chunk_shape`, so the result is equivalent to a
-from-scratch build rather than an approximation. See
-[Refresh](../multiresolution/refresh.md).
+`object_sparsity`, `chunk_shape` and `coarsening_method`, so the result
+is equivalent to a from-scratch build rather than an approximation. Pass
+`sparsity_strategy=` (and `compressor=`) to match the original build —
+neither is recorded on disk. A skeleton pyramid also needs its stride,
+which nothing records: pass `coarsen_factors={level: stride}` or the
+refresh refuses. See [Refresh](../multiresolution/refresh.md).
 
 To avoid the OOM in the first place: more chunks (smaller `chunk_shape`)
 lowers peak memory per task, because the parallel coarseners are

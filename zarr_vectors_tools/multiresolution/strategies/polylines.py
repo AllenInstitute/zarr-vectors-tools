@@ -29,47 +29,6 @@ import numpy as np
 import numpy.typing as npt
 
 
-def _group_labels_for(src_group, n_objects: int) -> npt.NDArray[np.int64]:
-    """One group id per object, for the ``"group"`` sparsity strategy.
-
-    Objects in no group get ``-1`` and form their own stratum — thinned
-    at the same rate as everything else, which is what a store holding a
-    whole-brain tractogram *and* a labelled atlas wants: the unlabelled
-    bulk coarsens normally while every named bundle survives.
-
-    An object in more than one group is assigned to the highest-numbered
-    one.  Stratification needs a partition and groups are not one; picking
-    a rule and saying so beats sampling the same object twice.
-    """
-    from zarr_vectors.building import read_all_groupings
-
-    labels = np.full(int(n_objects), -1, dtype=np.int64)
-    try:
-        groupings = list(read_all_groupings(src_group))
-    except Exception:  # noqa: BLE001 - a level with no taxonomy at all
-        groupings = []
-    if not groupings:
-        raise ValueError(
-            "sparsity_strategy='group' needs the source level to have object "
-            "groups, and this one has none. Build the taxonomy first (see "
-            "zarr_vectors_tools.compose.derive_groups), or use a different "
-            "strategy."
-        )
-    for gid, members in enumerate(groupings):
-        # A contiguous group arrives as a range and can be a billion long;
-        # slice it rather than materialising it.
-        if isinstance(members, range):
-            lo = max(0, int(members.start))
-            hi = min(int(n_objects), int(members.stop))
-            if hi > lo:
-                labels[lo:hi] = gid
-            continue
-        ids = np.fromiter((int(o) for o in members), dtype=np.int64)
-        if len(ids):
-            labels[ids[(ids >= 0) & (ids < n_objects)]] = gid
-    return labels
-
-
 def simplify_polyline(
     vertices: npt.NDArray[np.floating],
     epsilon: float,
@@ -718,7 +677,12 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
     input_vertices = int(sum(len(v) for v in vcache.values()))
     input_objects = int(len({g["oid"] for g in groups}))
 
-    pieces: list[tuple[int, npt.NDArray]] = []
+    # (oid, positions, head source chunk, head source fragment index).  The
+    # head member is the run's earliest fragment in WALK order (the chain is
+    # built predecessor -> successor), so its position in the object's source
+    # manifest is what orders the runs along the streamline -- see
+    # ``_reduce_polyline_object_index_shard``.
+    pieces: list[tuple[int, npt.NDArray, tuple[int, ...], int]] = []
     # Per-vertex attribute pieces, aligned 1:1 with ``pieces`` (one array per
     # surviving run, reduced by the same keep-mask as the positions).
     attr_pieces: dict[str, list[npt.NDArray]] = {name: [] for name in attr_names}
@@ -759,7 +723,11 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
             sc_rows.append((*ccA, viA, *ccB, viB, 0, local_last))
             partners.add(g["tail_partner"])
 
-        pieces.append((g["oid"], rpos))
+        _head_cc, _head_fidx = g["members"][0]
+        pieces.append((
+            g["oid"], rpos,
+            tuple(int(x) for x in _head_cc), int(_head_fidx),
+        ))
         # Reduce each attribute with the identical keep-mask.  A member missing
         # a cell (unreadable attr chunk) falls back to zeros so attr_pieces stays
         # 1:1 with pieces — the write path requires that alignment.
@@ -777,7 +745,7 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         chunk_offset += len(rpos)
         total_out_vertices += len(rpos)
 
-    recs: list[tuple[int, int]] = []
+    recs: list[tuple[int, int, tuple[int, ...], int]] = []
     if pieces:
         # record_presence=False: these run in parallel worker PROCESSES, and
         # nonempty_chunks is an array-wide attribute, so stamping it here would
@@ -800,20 +768,22 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
                 level_group, name, tcc, attr_pieces[name],
                 dtype=attr_dtypes.get(name, np.float32), record_presence=False,
             )
-        recs = [(int(p[0]), fidx) for fidx, p in enumerate(pieces)]
+        recs = [
+            (int(p[0]), fidx, p[2], p[3]) for fidx, p in enumerate(pieces)
+        ]
 
     # Spill object-index refs partitioned by OID shard (Phase C reduces these
     # without ever gathering a whole-level {oid: manifest} structure).
     oid_shards = int(shared.get("oid_reduce_shards", 1) or 1)
     oid_tmp_dir = str(shared.get("oid_reduce_tmp_dir", ""))
-    shard_rows: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for oid, fidx in recs:
-        shard_rows[oid % oid_shards].append((oid, fidx))
+    shard_rows: dict[int, list[tuple[int, ...]]] = defaultdict(list)
+    for oid, fidx, head_cc, head_fidx in recs:
+        shard_rows[oid % oid_shards].append((oid, fidx, *head_cc, head_fidx))
     shard_files: list[tuple[int, str]] = []
     if oid_tmp_dir and shard_rows:
         tcc_tag = ".".join(str(int(x)) for x in tcc)
         for shard, rows in shard_rows.items():
-            arr = np.asarray(rows, dtype=np.int64).reshape(-1, 2)
+            arr = np.asarray(rows, dtype=np.int64).reshape(-1, 3 + ndim)
             path = Path(oid_tmp_dir) / f"{tcc_tag}.s{int(shard)}.npy"
             np.save(path, arr, allow_pickle=False)
             shard_files.append((int(shard), str(path)))
@@ -839,6 +809,88 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         "anchors": anchors,
         "partners": [list(p) for p in partners],
         "vertex_count": int(total_out_vertices),
+    }
+
+
+def _reduce_polyline_object_index_shard(
+    payload: dict, shared: dict | None = None,
+) -> dict:
+    """Reduce one OID shard's chunk spills into manifest blobs, in WALK ORDER.
+
+    The skeleton reducer this replaces
+    (:func:`...strategies.skeletons._reduce_object_index_shard`) sorts each
+    object's fragments by ``(chunk, fragment_index)``.  For a skeleton that is
+    only a deterministic tie-break -- its pieces are independently rooted trees
+    joined by explicit links, so their order carries nothing.  For a polyline
+    the manifest order **is** the path: every reader concatenates the fragments
+    in manifest order, so a chunk-sorted manifest hands back a streamline whose
+    segments are shuffled into chunk-coordinate order.  A tract running from
+    high x to low x came back reversed in pieces (measured: level 0 walked
+    25 -> 5 while level 1 walked 9 -> 5, 19 -> 10, 25 -> 20), which silently
+    corrupts every tangent, length and endpoint computed above level 0.
+
+    Each spilled row carries the run's head SOURCE fragment.  Its position in
+    the object's source manifest is the run's position along the path, so the
+    correct order is recovered by reading only this shard's objects' manifests
+    -- ``read_object_manifests(ids=...)`` is one coordinate selection, never
+    the whole level's O(objects) decode.
+    """
+    from zarr_vectors.building import (
+        encode_object_manifest_blocks,
+        get_resolution_level,
+        open_store,
+        read_object_manifests,
+    )
+
+    shared = shared or {}
+    sid_ndim = int(shared["sid_ndim"])
+    width = 3 + sid_ndim
+
+    rows_by_oid: dict[int, list[tuple[tuple[int, ...], int, tuple[int, ...], int]]]
+    rows_by_oid = defaultdict(list)
+    for e in payload.get("entries", []):
+        tcc = tuple(int(x) for x in e["tcc"])
+        arr = np.load(str(e["path"]), allow_pickle=False)
+        if arr.size == 0:
+            continue
+        for row in np.asarray(arr, dtype=np.int64).reshape(-1, width).tolist():
+            rows_by_oid[int(row[0])].append((
+                tcc,
+                int(row[1]),
+                tuple(int(c) for c in row[2:2 + sid_ndim]),
+                int(row[2 + sid_ndim]),
+            ))
+
+    oids = np.asarray(sorted(rows_by_oid), dtype=np.int64)
+    walk_pos: dict[int, dict[tuple[tuple[int, ...], int], int]] = {}
+    if len(oids):
+        src = get_resolution_level(
+            open_store(str(shared["store_path"]), mode="r"),
+            int(shared["source_level"]),
+        )
+        for oid, manifest in read_object_manifests(src, ids=oids.tolist()).items():
+            walk_pos[int(oid)] = {
+                (tuple(int(c) for c in cc), int(f)): i
+                for i, (cc, f) in enumerate(manifest)
+            }
+
+    blobs: list[bytes] = []
+    for oid in oids.tolist():
+        positions = walk_pos.get(int(oid), {})
+        entries = rows_by_oid[int(oid)]
+        # Runs whose head is missing from the source manifest (which cannot
+        # happen for a store this coarsener accepts) sort last rather than
+        # first, and stay deterministic via the chunk/fragment tie-break.
+        entries.sort(
+            key=lambda r: (positions.get((r[2], r[3]), len(positions)), r[0], r[1])
+        )
+        blobs.append(encode_object_manifest_blocks(
+            [(cc, fidx) for cc, fidx, _h, _hf in entries], sid_ndim=sid_ndim,
+        ))
+
+    return {
+        "oid": oids,
+        "blobs": pickle.dumps(blobs, protocol=pickle.HIGHEST_PROTOCOL),
     }
 
 
@@ -1014,10 +1066,8 @@ def coarsen_polyline_level(
         CROSS_LINK_TASK_SHARD_AXIS,
     )
     from zarr_vectors_tools.multiresolution.coarsen import _stamp_root_capability
+    from zarr_vectors_tools.multiresolution.groupings import group_labels_for
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-    from zarr_vectors_tools.multiresolution.strategies.skeletons import (
-        _reduce_object_index_shard,
-    )
 
     # Per-target-chunk work is dispatched through ``executor``; the default
     # runs serially in-process (mirrors coarsen_skeleton_level's contract).
@@ -1144,7 +1194,7 @@ def coarsen_polyline_level(
             lengths = manifest_lens if sparsity_strategy == "length" else None
 
         group_labels = (
-            _group_labels_for(src, n_src)
+            group_labels_for(src, n_src)
             if sparsity_strategy == "group" else None
         )
         kept = apply_sparsity(
@@ -1336,9 +1386,15 @@ def coarsen_polyline_level(
             {"shard": int(s), "entries": es}
             for s, es in sorted(shard_entries.items()) if es
         ]
-        sharedC = {"sid_ndim": int(ndim)}
+        sharedC = {
+            "sid_ndim": int(ndim),
+            "store_path": str(store_path),
+            "source_level": int(source_level),
+        }
         if payloadsC:
-            for rc in executor(_reduce_object_index_shard, payloadsC, sharedC):
+            for rc in executor(
+                _reduce_polyline_object_index_shard, payloadsC, sharedC,
+            ):
                 oids = np.asarray(rc.get("oid", np.zeros((0,), np.int64)), np.int64)
                 blobs = pickle.loads(rc.get("blobs", b"")) if len(oids) else []
                 for i, oid in enumerate(oids.tolist()):
