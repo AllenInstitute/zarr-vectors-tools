@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -161,3 +160,46 @@ def test_chunk_shape_tracks_the_tracts_not_the_declared_fov(tmp_path):
     # not the declared 1000 mm (which would give ~250 mm and one single chunk).
     assert np.all(cs < 100.0), f"chunk_shape {cs} still reflects the declared FOV"
     assert len(list_chunk_keys(get_resolution_level(open_store(str(out)), 0), "vertices")) > 1
+
+
+def test_each_streamline_reassembles_in_order(tmp_path):
+    """A polyline's fragments must concatenate back to the polyline.
+
+    Phase A now writes its segment table sorted by target chunk, and Phase B
+    reads one slice of it per part instead of decompressing and masking the
+    whole table once per chunk.  The sort has to keep
+    ``(chunk, poly_id, index within the polyline)`` order, because that IS
+    the order Phase B emits fragments in and therefore the order the object
+    manifest records.  Get it wrong and every streamline comes back with its
+    segments shuffled -- which reads as plausible geometry.
+    """
+    from zarr_vectors.types.polylines import read_polylines
+
+    # Long, wandering streamlines so each one crosses several chunks and
+    # re-enters some of them.
+    streamlines = []
+    for i in range(8):
+        t = np.linspace(0.0, 1.0, 60)
+        streamlines.append(np.column_stack([
+            20.0 + 60.0 * t,
+            40.0 + 25.0 * np.sin(t * 9.0 + i),
+            40.0 + 25.0 * np.cos(t * 7.0 + i),
+        ]).astype(np.float32))
+
+    source = tmp_path / "order.trk"
+    _write_radiological_trk(source, streamlines, dim=100, vs=1.0)
+    store = tmp_path / "order.zv"
+    ingest_trk_parallel(
+        str(source), str(store), num_chunks=27, n_parts=3, workers=1,
+        build_multiscale=False, progress=False,
+    )
+
+    result = read_polylines(str(store))
+    by_object = {}
+    for index, oid in enumerate(result["object_ids"]):
+        by_object.setdefault(int(oid), []).extend(result["polylines"][index])
+
+    assert len(by_object) == len(streamlines)
+    for oid, fragments in by_object.items():
+        got = np.concatenate(fragments, axis=0)
+        np.testing.assert_allclose(got, streamlines[oid], atol=1e-4)

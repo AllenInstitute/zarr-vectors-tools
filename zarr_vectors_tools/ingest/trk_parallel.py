@@ -38,7 +38,6 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
 from zarr_vectors.building import (
     LevelMetadata,
     create_attribute_array,
@@ -62,7 +61,6 @@ from zarr_vectors.building import (
     write_object_index,
 )
 from zarr_vectors.exceptions import IngestError
-from zarr_vectors.typing import ChunkShape
 
 from zarr_vectors_tools.ingest._cell_limits import check_vertex_cell_limit
 from zarr_vectors_tools.ingest._polyline_enrichments import (
@@ -88,6 +86,26 @@ _TANGENT_CHANNELS = ["dx", "dy", "dz"]
 def _carry_attr_path(npz_path: str, name: str) -> str:
     """Path of the Phase-A per-part memmap carrying vertex attribute ``name``."""
     return npz_path.replace(".npz", f".attr_{name}.npy")
+
+
+def _index_path(npz_path: str) -> str:
+    """Per-part segment table, sorted by target chunk (see _SEG_COLS)."""
+    return npz_path.replace(".npz", ".index.npy")
+
+
+def _chunk_dir_path(npz_path: str) -> str:
+    """Per-part directory of ``(chunk, slice)`` into the sorted segment table."""
+    return npz_path.replace(".npz", ".chunks.npy")
+
+
+#: Columns of the per-part sorted segment table.  One row per segment, in
+#: ascending ``(chunk, poly_id, index within the polyline)`` order, which is
+#: also the order Phase B must emit fragments in.
+_SEG_POLY_ID = 0
+_SEG_WITHIN = 1
+_SEG_VTX_START = 2
+_SEG_VTX_COUNT = 3
+_SEG_COLS = 4
 
 
 # ---------------------------------------------------------------------------
@@ -388,9 +406,7 @@ def _phase_a_worker(
     n_points_arr = part_spec["n_points"]
 
     n_scalars = header["n_scalars"]
-    n_properties = header["n_properties"]
     pt_stride = (3 + n_scalars) * 4
-    prop_bytes = n_properties * 4
     np_dtype = np.dtype(dtype)
 
     npz_path = str(Path(intermediate_dir) / f"part_{part_index:06d}.npz")
@@ -521,6 +537,61 @@ def _phase_a_worker(
         del carry_mm[name]
     carry_mm.clear()
 
+    # Sort this part's segments by target chunk and write the result as two
+    # plain .npy files a Phase B worker can memory-map.
+    #
+    # Phase B used to open every part's COMPRESSED npz once per spatial
+    # chunk and mask the whole segment table to find that chunk's rows:
+    # chunks x parts decompressions of the same data, each followed by an
+    # O(all segments) pass, plus a recomputation of every segment's position
+    # within its polyline.  On a 5000-chunk grid with 32 parts that is
+    # 160,000 full decodes of a table that never changes.  Sorting it once,
+    # here, in parallel, turns the lookup into a slice.
+    seg_counts_arr = np.asarray(seg_vertex_counts, dtype=np.int64)
+    seg_polys_arr = np.asarray(seg_poly_ids, dtype=np.int64)
+    n_segments = int(seg_polys_arr.shape[0])
+    if n_segments:
+        chunk_cols = np.stack([
+            np.asarray(seg_chunk_x, dtype=np.int64),
+            np.asarray(seg_chunk_y, dtype=np.int64),
+            np.asarray(seg_chunk_z, dtype=np.int64),
+        ], axis=1)
+        # Position within the polyline: segments are appended in polyline
+        # order, so a run of equal poly ids numbers 0, 1, 2...
+        starts_of_poly = np.concatenate(
+            [[0], np.flatnonzero(np.diff(seg_polys_arr)) + 1],
+        )
+        group_of = np.searchsorted(
+            starts_of_poly, np.arange(n_segments), side="right",
+        ) - 1
+        within_poly = np.arange(n_segments) - starts_of_poly[group_of]
+        vtx_starts_arr = np.concatenate(
+            [[0], np.cumsum(seg_counts_arr)[:-1]],
+        ).astype(np.int64)
+
+        order = np.lexsort((
+            within_poly, seg_polys_arr,
+            chunk_cols[:, 2], chunk_cols[:, 1], chunk_cols[:, 0],
+        ))
+        sorted_chunks = chunk_cols[order]
+        table = np.empty((n_segments, _SEG_COLS), dtype=np.int64)
+        table[:, _SEG_POLY_ID] = seg_polys_arr[order]
+        table[:, _SEG_WITHIN] = within_poly[order]
+        table[:, _SEG_VTX_START] = vtx_starts_arr[order]
+        table[:, _SEG_VTX_COUNT] = seg_counts_arr[order]
+
+        change = np.any(sorted_chunks[1:] != sorted_chunks[:-1], axis=1)
+        group_start = np.concatenate([[0], np.flatnonzero(change) + 1])
+        group_stop = np.concatenate([group_start[1:], [n_segments]])
+        directory = np.column_stack([
+            sorted_chunks[group_start], group_start, group_stop,
+        ]).astype(np.int64)
+    else:
+        table = np.zeros((0, _SEG_COLS), dtype=np.int64)
+        directory = np.zeros((0, 5), dtype=np.int64)
+    np.save(_index_path(npz_path), table, allow_pickle=False)
+    np.save(_chunk_dir_path(npz_path), directory, allow_pickle=False)
+
     save_dict: dict[str, Any] = {
         "poly_id_base": np.int64(poly_id_base),
         "n_streamlines": np.int64(len(byte_offsets)),
@@ -535,8 +606,14 @@ def _phase_a_worker(
     if compute_length:
         save_dict["lengths"] = np.array(lengths, dtype=np.float32)
     if compute_endpoints:
-        save_dict["starts"] = np.stack(starts, axis=0).astype(np.float32) if starts else np.zeros((0, 3), dtype=np.float32)
-        save_dict["ends"] = np.stack(ends, axis=0).astype(np.float32) if ends else np.zeros((0, 3), dtype=np.float32)
+        save_dict["starts"] = (
+            np.stack(starts, axis=0).astype(np.float32) if starts
+            else np.zeros((0, 3), dtype=np.float32)
+        )
+        save_dict["ends"] = (
+            np.stack(ends, axis=0).astype(np.float32) if ends
+            else np.zeros((0, 3), dtype=np.float32)
+        )
     if compute_vertex_count:
         save_dict["vertex_counts"] = np.array(vertex_counts, dtype=np.uint32)
 
@@ -566,10 +643,13 @@ def _phase_b_worker(
     chunk_coords: tuple[int, int, int],
     shared: dict[str, Any],
 ) -> dict[str, Any]:
-    """Write one spatial chunk's level-0 data from all part .npz files.
+    """Write one spatial chunk's level-0 data from the Phase-A part files.
 
-    Loads this chunk's segments from every part file in ascending
+    Loads this chunk's segments from every part in ascending
     (part_index, poly_id, seg_idx_within_poly) order — the determinism pin.
+    Each part's segment table was sorted by chunk in Phase A, so this reads
+    one contiguous slice per part rather than decompressing and masking the
+    whole table once per chunk.
 
     Returns a dict mapping (part_index, poly_id, seg_idx_within_poly) →
     (chunk_coords, fragment_idx, first_local_row, last_local_row).
@@ -588,46 +668,42 @@ def _phase_b_worker(
     # carry attributes were requested.
     records: list[tuple[int, int, int, npt.NDArray, dict[str, npt.NDArray]]] = []
 
+    target = np.asarray(chunk_coords, dtype=np.int64)
     for part_idx, npz_path in enumerate(part_npz_paths):
-        # ``with``: NpzFile holds an open zipfile handle until closed, and
-        # ``del`` only drops a reference — on Windows a surviving handle makes
-        # the intermediate dir undeletable and the whole ingest fails in
-        # cleanup, long after the data is safely written.
-        with np.load(npz_path) as data:
-            px = data["seg_chunk_x"]
-            py = data["seg_chunk_y"]
-            pz = data["seg_chunk_z"]
-            mask = (
-                (px == chunk_coords[0])
-                & (py == chunk_coords[1])
-                & (pz == chunk_coords[2])
-            )
-            if not np.any(mask):
-                continue
+        # The directory is one row per occupied chunk: find this chunk's
+        # slice by binary search, then read only those rows of the table.
+        directory = np.load(_chunk_dir_path(npz_path), mmap_mode="r")
+        if directory.shape[0] == 0:
+            continue
+        coords = np.asarray(directory[:, :3])
+        # Rows are sorted numerically by (x, y, z), so narrow one axis at a
+        # time.  A byte-wise search over a void view would be wrong here:
+        # chunk coords go negative once --apply-affine moves the origin.
+        lo = int(np.searchsorted(coords[:, 0], target[0], side="left"))
+        hi = int(np.searchsorted(coords[:, 0], target[0], side="right"))
+        if lo == hi:
+            continue
+        lo2 = lo + int(np.searchsorted(coords[lo:hi, 1], target[1], side="left"))
+        hi2 = lo + int(np.searchsorted(coords[lo:hi, 1], target[1], side="right"))
+        if lo2 == hi2:
+            continue
+        position = lo2 + int(
+            np.searchsorted(coords[lo2:hi2, 2], target[2], side="left")
+        )
+        if position >= hi2 or int(coords[position, 2]) != int(target[2]):
+            continue
+        start = int(directory[position, 3])
+        stop = int(directory[position, 4])
+        if stop <= start:
+            continue
 
-            seg_poly_ids = data["seg_poly_ids"]
-            seg_vtx_counts = data["seg_vertex_counts"]
-            vtx_starts = np.concatenate([[0], np.cumsum(seg_vtx_counts)])[:-1]
-
-            # Vectorised within_poly_idx: position of each segment within its
-            # polyline.  seg_poly_ids is monotonically non-decreasing within
-            # each part (Phase A writes segments in poly_id order), so group
-            # boundaries are diff > 0.
-            change_pts = np.concatenate(
-                [[0], np.where(np.diff(seg_poly_ids))[0] + 1]
-            )
-            group_id = np.searchsorted(
-                change_pts, np.arange(len(seg_poly_ids)), side="right"
-            ) - 1
-            within_poly_idx_arr = np.arange(len(seg_poly_ids)) - change_pts[group_id]
-
-            # Restrict all arrays to matching segments — avoids an
-            # O(all_segments) Python loop.
-            match_idx = np.where(mask)[0]
-            m_poly_ids    = seg_poly_ids[match_idx]
-            m_within      = within_poly_idx_arr[match_idx]
-            m_vtx_starts  = vtx_starts[match_idx]
-            m_vtx_counts  = seg_vtx_counts[match_idx]
+        table = np.load(_index_path(npz_path), mmap_mode="r")
+        rows = np.asarray(table[start:stop])
+        m_poly_ids   = rows[:, _SEG_POLY_ID]
+        m_within     = rows[:, _SEG_WITHIN]
+        m_vtx_starts = rows[:, _SEG_VTX_START]
+        m_vtx_counts = rows[:, _SEG_VTX_COUNT]
+        match_idx = np.arange(rows.shape[0])
 
         verts_npy_path = npz_path.replace(".npz", ".verts.npy")
         vertices = np.load(verts_npy_path, mmap_mode="r")
@@ -657,10 +733,13 @@ def _phase_b_worker(
         finally:
             # Close the mapping explicitly: `del` drops a reference but leaves
             # the file handle open until GC, which on Windows is long enough to
-            # block cleanup of the intermediate dir.
+            # block cleanup of the intermediate dir.  The index and directory
+            # are mapped too, and leaving them open blocks it just as surely.
             _close_memmap(vertices)
             for mm in carry_mm.values():
                 _close_memmap(mm)
+            _close_memmap(table)
+            _close_memmap(directory)
 
     if not records:
         return {}
@@ -769,21 +848,31 @@ def _build_manifests_and_cross_links(
 
     for part_idx, npz_path in enumerate(part_npz_paths):
         with np.load(npz_path) as data:
-            seg_poly_ids = data["seg_poly_ids"]
-            seg_chunk_x = data["seg_chunk_x"]
-            seg_chunk_y = data["seg_chunk_y"]
-            seg_chunk_z = data["seg_chunk_z"]
+            seg_poly_ids = np.asarray(data["seg_poly_ids"], dtype=np.int64)
+            seg_chunk_x = np.asarray(data["seg_chunk_x"], dtype=np.int64)
+            seg_chunk_y = np.asarray(data["seg_chunk_y"], dtype=np.int64)
+            seg_chunk_z = np.asarray(data["seg_chunk_z"], dtype=np.int64)
 
-        prev_poly = -1
-        within_poly_idx = 0
-        for i in range(len(seg_poly_ids)):
-            poly_id = int(seg_poly_ids[i])
-            if poly_id != prev_poly:
-                within_poly_idx = 0
-                prev_poly = poly_id
-            cc = (int(seg_chunk_x[i]), int(seg_chunk_y[i]), int(seg_chunk_z[i]))
-            poly_segments.setdefault(poly_id, []).append((part_idx, within_poly_idx, cc))
-            within_poly_idx += 1
+        n_segments = int(seg_poly_ids.shape[0])
+        if n_segments == 0:
+            continue
+        # Position within the polyline, computed once for the whole part
+        # rather than tracked in a Python loop over every segment in the file.
+        starts_of_poly = np.concatenate(
+            [[0], np.flatnonzero(np.diff(seg_poly_ids)) + 1],
+        )
+        group_of = np.searchsorted(
+            starts_of_poly, np.arange(n_segments), side="right",
+        ) - 1
+        within = np.arange(n_segments) - starts_of_poly[group_of]
+
+        for poly_id, w, cx, cy, cz in zip(
+            seg_poly_ids.tolist(), within.tolist(),
+            seg_chunk_x.tolist(), seg_chunk_y.tolist(), seg_chunk_z.tolist(),
+        ):
+            poly_segments.setdefault(poly_id, []).append(
+                (part_idx, w, (cx, cy, cz)),
+            )
 
     object_manifests: dict[int, list] = {}
     cross_chunk_links: list = []
@@ -1294,6 +1383,7 @@ def ingest_trk_parallel(
 
         if obj_attrs_to_write:
             from zarr_vectors.building import write_object_attributes
+
             from zarr_vectors_tools.multiresolution.coarsen import create_object_attributes_array
             for attr_name, data in obj_attrs_to_write.items():
                 create_object_attributes_array(level_group, attr_name)
@@ -1302,8 +1392,8 @@ def ingest_trk_parallel(
         # --- Phase 5: header + affine metadata ---------------------------
         if preserve_header:
             try:
-                from zarr_vectors_tools.headers.registry import HeaderRegistry
                 from zarr_vectors_tools.headers.formats import TRKHeader
+                from zarr_vectors_tools.headers.registry import HeaderRegistry
                 trk_header = TRKHeader(
                     voxel_size=header["voxel_size"],
                     dimensions=header["dim"],
