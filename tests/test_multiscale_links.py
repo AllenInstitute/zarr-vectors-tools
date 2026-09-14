@@ -30,12 +30,18 @@ from zarr_vectors.constants import (
     XLEVEL_IMPLICIT,
     XLEVEL_NONE,
 )
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    RootMetadata,
     create_link_attributes_array,
     create_links_array,
     create_links_family,
+    create_store,
     create_vertices_array,
+    get_resolution_level,
+    link_attributes_path,
     link_family_policy,
+    links_group_path,
+    links_path,
     list_link_deltas,
     list_link_offsets,
     read_chunk_links,
@@ -47,13 +53,6 @@ from zarr_vectors.core.arrays import (
     write_link_cells,
     write_links,
 )
-from zarr_vectors.core.metadata import RootMetadata
-from zarr_vectors.core.paths import (
-    link_attributes_path,
-    links_group_path,
-    links_path,
-)
-from zarr_vectors.core.store import create_store, get_resolution_level
 from zarr_vectors.exceptions import ArrayError, MetadataError
 
 from zarr_vectors_tools.algorithms._links import (
@@ -138,7 +137,7 @@ class TestDeltaZero:
 class TestFamilyVsCross:
 
     def _mixed_store(self, tmp_path: Path):
-        from zarr_vectors.core.store import get_resolution_level, open_store
+        from zarr_vectors.building import get_resolution_level, open_store
         from zarr_vectors.types.graphs import write_graph
 
         # 3 intra edges inside chunk (0,0,0); 2 edges spanning to (2,0,0).
@@ -436,7 +435,7 @@ def test_invalid_cross_level_depth_rejected():
 # wheel) so the rest of the suite keeps running.
 zarr = pytest.importorskip("zarr")
 
-from zarr_vectors.core.store import (  # noqa: E402
+from zarr_vectors.building import (
     get_resolution_level,
     list_resolution_levels,
     open_store,

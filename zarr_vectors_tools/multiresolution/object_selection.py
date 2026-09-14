@@ -4,12 +4,14 @@ Each strategy selects a subset of objects to retain at a coarser
 resolution level.  All functions return ``kept_indices`` — an array
 of integer indices into the original object list.
 
-Four strategies:
+Five strategies:
 
 - **Spatial coverage**: greedy selection maximising spatial spread
 - **Length**: keep the longest objects (streamlines, skeletons)
 - **Attribute**: keep objects with highest/lowest attribute values
 - **Random**: uniform random selection (reproducible with seed)
+- **Group**: stratified — a fraction of *each* group, floored at one, so no
+  group is ever emptied
 """
 
 from __future__ import annotations
@@ -266,6 +268,71 @@ def select_random(
     return np.sort(chosen).astype(np.int64)
 
 
+def select_stratified_by_group(
+    group_labels: npt.NDArray[np.integer],
+    sparsity: float,
+    *,
+    seed: int | None = None,
+    min_per_group: int = 1,
+) -> npt.NDArray[np.int64]:
+    """Keep a fraction of *each* group, never fewer than ``min_per_group``.
+
+    Every other strategy draws from one global pool, which is fine when
+    the population is homogeneous and destructive when it is not.  A
+    bundle atlas is the destructive case: sampling 1/4 of 85,989
+    streamlines four times over leaves ~336, and a bundle of four
+    streamlines is gone long before that — measured on the Maffei BG
+    pathways, sixteen of forty-three bundles disappeared by level 4.  The
+    taxonomy is the point of such a store, so a coarse level that has
+    silently lost a third of it is not a coarse view of the data, it is
+    different data.
+
+    Stratifying fixes that: each group is thinned by the same factor, so
+    the *proportions* coarsen while the *set of groups* does not.  The
+    floor is what guarantees the second half — without it, a group of one
+    rounds to zero at any factor above 1.
+
+    The survivor count therefore exceeds a global ``target_count``
+    whenever small groups are present, by roughly the number of groups
+    that hit the floor.  That is the cost of the guarantee, and it is
+    bounded: at most one extra object per group per level.
+
+    Args:
+        group_labels: ``(N,)`` group id per object.  Objects sharing an id
+            are thinned together; ``-1`` (or any id) for the ungrouped
+            forms its own stratum and is thinned like the rest.
+        sparsity: Fraction of each group to keep, in (0, 1].
+        seed: Random seed.  Groups are walked in sorted id order, so a
+            fixed seed gives the same survivors every run.
+        min_per_group: Floor per non-empty group.  ``1`` is what makes
+            "no group is ever lost" true; ``0`` disables the guarantee.
+
+    Returns:
+        Sorted array of kept object indices.
+    """
+    labels = np.asarray(group_labels)
+    if sparsity >= 1.0:
+        return np.arange(len(labels), dtype=np.int64)
+
+    rng = np.random.default_rng(seed)
+    kept: list[npt.NDArray[np.int64]] = []
+    # Sorted ids, so the draw order — and therefore the result for a given
+    # seed — does not depend on dict or disk ordering.
+    for label in np.unique(labels):
+        members = np.flatnonzero(labels == label).astype(np.int64)
+        if len(members) == 0:
+            continue
+        n_keep = max(int(min_per_group), int(round(len(members) * sparsity)))
+        n_keep = min(n_keep, len(members))
+        if n_keep >= len(members):
+            kept.append(members)
+        else:
+            kept.append(rng.choice(members, size=n_keep, replace=False))
+    if not kept:
+        return np.zeros((0,), dtype=np.int64)
+    return np.sort(np.concatenate(kept)).astype(np.int64)
+
+
 def apply_sparsity(
     n_objects: int,
     sparsity: float,
@@ -279,6 +346,8 @@ def apply_sparsity(
     bin_shape: tuple[float, ...] | float | None = None,
     alive_mask: npt.NDArray[np.bool_] | None = None,
     relative_to: Literal["original", "alive"] = "original",
+    group_labels: npt.NDArray[np.integer] | None = None,
+    min_per_group: int = 1,
 ) -> npt.NDArray[np.int64]:
     """Convenience wrapper: compute target count from sparsity and dispatch.
 
@@ -288,7 +357,7 @@ def apply_sparsity(
             ``"point_thinning"`` strategy, which derives the survivor
             count from the ``bin_shape`` instead.
         strategy: One of ``"random"``, ``"length"``, ``"attribute"``,
-            ``"spatial_coverage"``, ``"point_thinning"``.
+            ``"spatial_coverage"``, ``"point_thinning"``, ``"group"``.
         seed: Random seed (for ``"random"`` / ``"point_thinning"``).
         lengths: Per-object lengths (for ``"length"`` strategy).
         attribute_values: Per-object values (for ``"attribute"`` strategy).
@@ -372,6 +441,23 @@ def apply_sparsity(
         )
         return np.sort(candidates[local])
 
+    elif strategy == "group":
+        if group_labels is None:
+            raise ValueError(
+                "'group' strategy requires 'group_labels' — one group id per "
+                "object. The caller has to supply it because sparsity runs "
+                "before anything reads the level's taxonomy."
+            )
+        # Deliberately driven by ``sparsity`` rather than ``target_count``:
+        # the per-group floor means the total is an OUTCOME of stratifying,
+        # not a budget to divide up, and forcing it back to target_count
+        # would have to drop someone below the floor to balance.
+        local = select_stratified_by_group(
+            np.asarray(group_labels)[candidates], sparsity,
+            seed=seed, min_per_group=min_per_group,
+        )
+        return np.sort(candidates[local])
+
     elif strategy == "point_thinning":
         if representative_points is None:
             raise ValueError(
@@ -390,7 +476,7 @@ def apply_sparsity(
         raise ValueError(
             f"Unknown strategy '{strategy}'. Must be one of: "
             f"'random', 'length', 'attribute', 'spatial_coverage', "
-            f"'point_thinning'"
+            f"'point_thinning', 'group'"
         )
 
 

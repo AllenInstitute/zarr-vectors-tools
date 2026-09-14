@@ -179,7 +179,8 @@ mapping, ingest module, and required extra all live there.
 ## Root modules
 
 **`__init__.py`** — import side effects only. It registers this package's
-coarseners and selectors into `zarr_vectors.multiresolution.registry`, so
+coarseners and selectors into the parent package's strategy registry
+(via the supported `zarr_vectors.building.register_*` entry points), so
 core can dispatch into tools without depending on tools. Degrades
 silently on a core too old to have the registry. It does **not** define
 `__version__`; the CLI reads the version via `importlib.metadata`.
@@ -201,7 +202,7 @@ why:
 | Shim | Waiting on |
 | --- | --- |
 | `_manifests.rebuild_nonempty_manifests` | `Group.rebuild_nonempty_manifests` |
-| `algorithms._chunk_neighbours.neighbouring_chunk_keys` | `zarr_vectors.spatial.chunking.neighbouring_chunk_keys` |
+| `algorithms._chunk_neighbours.neighbouring_chunk_keys` | `zarr_vectors.building.neighbouring_chunk_keys` |
 | `algorithms._links.list_link_cells` | a public `list_link_cells`; currently only implemented for `delta == 0` |
 | `headers.registry.HeaderRegistry` | a public `HeaderRegistry` shim in `zarr-vectors-py` |
 

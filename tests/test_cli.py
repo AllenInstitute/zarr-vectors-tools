@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zarr_vectors.core.store import list_resolution_levels, open_store
+from zarr_vectors.building import list_resolution_levels, open_store
 
 from zarr_vectors_tools.cli import build_parser, main
 from zarr_vectors_tools.cli._args import (
@@ -247,6 +247,75 @@ class TestTrk:
         assert rc == 0
         assert _levels(out) == [0, 1, 2]
 
+    def test_trk_synthetic_attributes_all_levels(self, tmp_path):
+        """--object-attr / --vertex-attr generate colorable test attributes,
+        present and correct at level 0 AND every coarser pyramid level."""
+        pytest.importorskip("nibabel")
+        from zarr_vectors.building import (
+            VERTICES,
+            get_resolution_level,
+            list_chunk_keys,
+            read_chunk_attributes,
+            read_chunk_vertices,
+            read_object_attributes,
+        )
+
+        trk = _write_smooth_trk(tmp_path / "s.trk", n=200, npts=60)
+        out = tmp_path / "s.zv"
+        rc = main([
+            "convert", str(trk), str(out), "--num-chunks", "27", "--workers", "1",
+            "--coarsen", "2,2", "--sparsity", "1,2", "--sparsity-strategy", "random",
+            "--object-attr", "orientation", "--object-attr", "tortuosity",
+            "--object-attr", "vertex_count",
+            "--vertex-attr", "arc_length", "--vertex-attr", "z",
+            "--vertex-attr", "tangent", "--attr-seed", "5",
+        ])
+        assert rc == 0
+        levels = _levels(out)
+        assert levels == [0, 1, 2]
+
+        root = open_store(str(out), mode="r+")
+        for li in levels:
+            lvl = get_resolution_level(root, li)
+            # object attributes carried to every level
+            orient = np.asarray(read_object_attributes(lvl, "orientation"))
+            tort = np.asarray(read_object_attributes(lvl, "tortuosity"))
+            vcount = np.asarray(read_object_attributes(lvl, "vertex_count"))
+            assert orient.shape == (200, 3)
+            assert vcount.dtype == np.uint32
+            fin = np.isfinite(tort)
+            assert np.all(tort[fin] >= 1.0 - 1e-4)
+            norms = np.linalg.norm(orient, axis=1)
+            nz = norms > 1e-6
+            np.testing.assert_allclose(norms[nz], 1.0, atol=1e-4)
+
+            # vertex attributes present, aligned, and in range at every level
+            arc_vals, tan_ok = [], True
+            for c in list_chunk_keys(lvl, VERTICES):
+                cc = tuple(int(x) for x in c)
+                vg = read_chunk_vertices(lvl, cc, dtype=np.float32, ndim=3)
+                a_arc = read_chunk_attributes(lvl, "arc_length", cc, dtype=np.float32)
+                a_z = read_chunk_attributes(lvl, "z", cc, dtype=np.float32)
+                a_tan = read_chunk_attributes(lvl, "tangent", cc, dtype=np.float32, ncols=3)
+                for f in range(len(vg)):
+                    v = np.asarray(vg[f])
+                    assert len(a_arc[f]) == len(v)
+                    arc_vals.append(np.asarray(a_arc[f]).ravel())
+                    # z attribute equals the vertex z coordinate at every level
+                    np.testing.assert_allclose(
+                        np.asarray(a_z[f]).ravel(), v[:, 2], atol=1e-3)
+                    tn = np.linalg.norm(np.asarray(a_tan[f]).reshape(len(v), 3), axis=1)
+                    tan_ok = tan_ok and bool(np.all((np.abs(tn - 1.0) < 1e-3) | (tn < 1e-6)))
+            arc = np.concatenate(arc_vals)
+            assert 0.0 <= arc.min() and arc.max() <= 1.0 + 1e-5
+            assert tan_ok
+
+    def test_vertex_attr_rejected_for_non_trk(self, tmp_path):
+        src = _write_csv(tmp_path / "p.csv")
+        with pytest.raises(SystemExit, match="only apply to trk"):
+            main(["convert", str(src), str(tmp_path / "o.zv"),
+                  "--chunk-shape", "100,100,100", "--vertex-attr", "z"])
+
     def test_trk_length_strategy_auto_computes_length(self, tmp_path):
         # --sparsity-strategy length WITHOUT --compute-length must still work:
         # the CLI auto-enables length computation for streamlines.
@@ -383,3 +452,66 @@ class TestOverwrite:
         with pytest.raises(SystemExit):
             _maybe_overwrite(out, overwrite=True)
         assert (out / "important.txt").exists()  # guard prevented deletion
+
+
+# ===================================================================
+# --shard / shard subcommand
+# ===================================================================
+
+import json
+
+
+def _vertices_sharded(store: Path, level: int = 0) -> bool:
+    meta = json.loads((Path(store) / str(level) / "vertices" / "zarr.json").read_text())
+    return "sharding_indexed" in [c["name"] for c in meta["codecs"]]
+
+
+class TestSharding:
+    def _multi_chunk_csv(self, tmp_path) -> Path:
+        # ~200 occupied chunks so sharding actually packs multiple cells/shard.
+        return _write_csv(tmp_path / "pts.csv", n=600)
+
+    def test_convert_shard_produces_sharded_vertices(self, tmp_path):
+        src = self._multi_chunk_csv(tmp_path)
+        out = tmp_path / "pts.zv"
+        rc = main(["convert", str(src), str(out), "--chunk-shape", "40,40,40", "--shard", "2"])
+        assert rc == 0
+        assert _levels(out) == [0]
+        assert _vertices_sharded(out), "vertices must carry the sharding_indexed codec"
+
+    def test_shard_subcommand_roundtrips(self, tmp_path):
+        src = self._multi_chunk_csv(tmp_path)
+        out = tmp_path / "pts.zv"
+        main(["convert", str(src), str(out), "--chunk-shape", "40,40,40"])
+        assert not _vertices_sharded(out)                 # unsharded by default
+
+        assert main(["shard", str(out), "--shape", "2"]) == 0
+        assert _vertices_sharded(out)                     # now sharded
+
+        assert main(["shard", str(out), "--unshard"]) == 0
+        assert not _vertices_sharded(out)                 # back to one file per chunk
+
+    def test_sharded_store_reads_back_identically(self, tmp_path):
+        # Sharding must not change coordinates — only the on-disk layout.
+        from zarr_vectors.types.points import read_points
+
+        src = self._multi_chunk_csv(tmp_path)
+        a, b = tmp_path / "flat.zv", tmp_path / "shard.zv"
+        main(["convert", str(src), str(a), "--chunk-shape", "40,40,40"])
+        main(["convert", str(src), str(b), "--chunk-shape", "40,40,40", "--shard", "2"])
+
+        pa = np.asarray(read_points(str(a))["positions"])
+        pb = np.asarray(read_points(str(b))["positions"])
+        pa = pa[np.lexsort(pa.T)]
+        pb = pb[np.lexsort(pb.T)]
+        assert np.allclose(pa, pb, atol=1e-4)
+
+
+class TestApplyAffineScope:
+    def test_apply_affine_rejected_for_non_trk(self, tmp_path):
+        # --apply-affine only applies to trk; other inputs must reject it
+        # (no source affine / already in world space), not silently ignore it.
+        src = _write_csv(tmp_path / "pts.csv")
+        with pytest.raises(SystemExit):
+            main(["convert", str(src), str(tmp_path / "o.zv"),
+                  "--chunk-shape", "50,50,50", "--apply-affine"])

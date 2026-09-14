@@ -22,7 +22,7 @@ class TestPointCloudSubChunkBins:
     def test_50k_points_with_bins(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors.validate import validate
-        from zarr_vectors.core.store import open_store, read_root_metadata
+        from zarr_vectors.building import open_store, read_root_metadata
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "pts.zv")
@@ -126,9 +126,7 @@ class TestSkeletonManualLevels:
     def test_multiple_manual_ratios(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points
         from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
-        from zarr_vectors.core.store import (
-            open_store, list_resolution_levels, list_available_ratios,
-        )
+        from zarr_vectors.building import open_store, list_resolution_levels, list_available_ratios
         from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
@@ -209,11 +207,13 @@ class TestOMEZarrMetadata:
     def test_multiscale_roundtrip(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
-        from zarr_vectors.core.multiscale import (
-            write_multiscale_metadata, read_multiscale_metadata,
-            get_level_scale, get_level_translation,
+        from zarr_vectors.building import (
+            get_level_scale,
+            get_level_translation,
+            open_store,
+            read_multiscale_metadata,
+            write_multiscale_metadata,
         )
-        from zarr_vectors.core.store import open_store
 
         rng = np.random.default_rng(42)
         store = str(tmp_path / "ms.zv")
@@ -224,7 +224,10 @@ class TestOMEZarrMetadata:
             chunk_shape=(200., 200., 200.),
             bin_shape=(50., 50., 50.),
         )
-        build_pyramid(store, factors=[(2.0, 1.0), (4.0, 1.0)])
+        # Coarsen factors are per-level ratios against the level below, so
+        # these compound to bins of 100 then 200 (scales 2x and 4x) from the
+        # 50-unit root bin. Spelled [2, 4] they would now give 100 then 400.
+        build_pyramid(store, factors=[(2.0, 1.0), (2.0, 1.0)])
 
         root = open_store(store, mode="r+")
         ms = write_multiscale_metadata(root)
@@ -252,7 +255,7 @@ class TestValidationRejection:
 
     def test_rejects_non_divisible_bin(self, tmp_path: Path) -> None:
         """chunk_shape not divisible by bin_shape should be rejected."""
-        from zarr_vectors.core.metadata import RootMetadata
+        from zarr_vectors.building import RootMetadata
         from zarr_vectors.exceptions import MetadataError
 
         with pytest.raises(MetadataError):
@@ -270,7 +273,7 @@ class TestValidationRejection:
 
     def test_rejects_invalid_sparsity(self, tmp_path: Path) -> None:
         """object_sparsity must be in (0, 1]."""
-        from zarr_vectors.core.metadata import LevelMetadata
+        from zarr_vectors.building import LevelMetadata
         from zarr_vectors.exceptions import MetadataError
 
         with pytest.raises(MetadataError):

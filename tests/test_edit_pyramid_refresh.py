@@ -19,18 +19,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from zarr_vectors.core.arrays import read_chunk_vertices
-from zarr_vectors.core.store import (
-    list_resolution_levels,
-    open_store,
-)
+from zarr_vectors.building import list_resolution_levels, open_store, read_chunk_vertices
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
-from zarr_vectors.ops import (
-    EditSession,
-    VertexRef,
-    edit_vertex,
-)
+import zarr_vectors as zv
 from zarr_vectors.types.points import write_points
 
 
@@ -62,13 +54,12 @@ class TestRefreshDirty:
         self, tmp_path: Path,
     ) -> None:
         path, _ = _build_pyramid_store(tmp_path)
-        root = open_store(path, mode="r+")
-        ref = VertexRef.from_object(
-            root, level=0, object_id=0, vertex_index=0,
-        )
-        report = edit_vertex(root, ref, new_pos=[5.0, 5.0, 5.0], atomic=False)
+        # Through the data-oriented API: an edit names an object and an
+        # index within it, not a chunk and a fragment.
+        with zv.open(path, mode="r+").editing(in_place=True) as edit:
+            edit.move_vertex(object=0, index=0, to=[5.0, 5.0, 5.0])
         # Levels above 0 should be reported dirty.
-        assert 1 in report.dirty_pyramid_levels
+        assert 1 in edit.report.dirty_pyramid_levels
 
 
 class TestRefreshBatch:
@@ -77,17 +68,15 @@ class TestRefreshBatch:
         self, tmp_path: Path,
     ) -> None:
         path, _ = _build_pyramid_store(tmp_path)
-        root = open_store(path, mode="r+")
 
-        ref = VertexRef.from_object(
-            root, level=0, object_id=0, vertex_index=0,
-        )
         # Edit level 0 without core-driven refresh, then re-coarsen the
-        # pyramid explicitly with the tools' rich refresher.
-        with EditSession(
-            root, atomic=False, refresh_pyramid=False,
-        ) as ed:
-            ed.edit_vertex(ref, new_pos=[5.0, 5.0, 5.0])
+        # pyramid explicitly with the tools' rich refresher.  in_place=True
+        # is EditPlan's spelling of the session's atomic=False;
+        # refresh_pyramid is forwarded to the session unchanged.
+        with zv.open(path, mode="r+").editing(
+            in_place=True, refresh_pyramid=False,
+        ) as edit:
+            edit.move_vertex(object=0, index=0, to=[5.0, 5.0, 5.0])
 
         root = open_store(path, mode="r+")
         rebuild_pyramid_from_level(root, source_level=0)
@@ -97,7 +86,7 @@ class TestRefreshBatch:
         assert 1 in list_resolution_levels(root)
         level1 = root["1"]
         total = 0
-        from zarr_vectors.core.arrays import list_chunk_keys
+        from zarr_vectors.building import list_chunk_keys
         for cc in list_chunk_keys(level1):
             groups = read_chunk_vertices(
                 level1, cc, dtype=np.float32, ndim=3,
@@ -137,7 +126,7 @@ class TestRefreshFunction:
 
 def _level_vertices(root, level: int) -> np.ndarray:
     """Return all vertices at ``level`` concatenated into ``(N, D)``."""
-    from zarr_vectors.core.arrays import list_chunk_keys
+    from zarr_vectors.building import list_chunk_keys
     lg = root[str(level)]
     out: list[np.ndarray] = []
     for cc in list_chunk_keys(lg):

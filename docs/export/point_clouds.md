@@ -1,6 +1,6 @@
 # Point clouds
 
-Two targets for the ZVF `points` geometry: delimited text via `export_csv`
+Two targets for the Zarr Vectors `points` geometry: delimited text via `export_csv`
 and PLY via `export_ply`.
 
 ## CSV / XYZ — `export_csv`

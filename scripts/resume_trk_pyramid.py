@@ -47,7 +47,7 @@ LEVELS_ALREADY_DONE = 1
 def main() -> None:
     import shutil
 
-    from zarr_vectors.core.store import list_resolution_levels, open_store
+    from zarr_vectors.building import list_resolution_levels, open_store
     from zarr_vectors_tools.multiresolution.coarsen import (
         _finalize_cross_level_for_store,
         coarsen_level,

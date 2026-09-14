@@ -1,6 +1,6 @@
 # Point clouds
 
-Three source formats write the **points** ZVF geometry: delimited text
+Three source formats write the **points** Zarr Vectors geometry: delimited text
 (`ingest_csv`), LAS/LAZ (`ingest_las`), and PLY (`ingest_ply`,
 points-only — mesh PLY is not yet wired up). All three share the same
 `object_ids`, `knn_distance_k`, and `per_object_vertex_count` options.
@@ -93,7 +93,7 @@ Requires `laspy` — `pip install "zarr-vectors-tools[las]"`. LAZ goes
 through the same `laspy.read` call. With `include_attributes=True`, each
 standard field present in the file becomes a per-vertex attribute:
 
-| LAS field | ZVF attribute | dtype on disk |
+| LAS field | Zarr Vectors attribute | dtype on disk |
 | --- | --- | --- |
 | `intensity` | `intensity` | float32 |
 | `classification` | `classification` | float32 (cast from int32) |

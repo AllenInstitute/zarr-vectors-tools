@@ -1,4 +1,4 @@
-"""Ingest point clouds from CSV/XYZ text files into ZVF.
+"""Ingest point clouds from CSV/XYZ text files into Zarr Vectors.
 
 Supports:
 - XYZ files (3 columns: x, y, z)
@@ -88,11 +88,11 @@ def ingest_csv(
     knn_distance_k: int | None = None,
     per_object_vertex_count: bool = False,
 ) -> dict[str, Any]:
-    """Ingest a CSV or XYZ file into a ZVF point cloud store.
+    """Ingest a CSV or XYZ file into a Zarr Vectors point cloud store.
 
     Args:
         input_path: Path to input CSV/XYZ file.
-        output_path: Path for output ZVF store.
+        output_path: Path for output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension.
         ndim: Number of spatial dimensions (default 3).
         delimiter: Column delimiter (default ``,``).

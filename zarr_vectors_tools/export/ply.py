@@ -1,4 +1,4 @@
-"""Export ZVF point clouds to PLY files.
+"""Export Zarr Vectors point clouds to PLY files.
 
 Requires the ``plyfile`` package: ``pip install plyfile``.
 """
@@ -26,10 +26,10 @@ def export_ply(
     attribute_names: list[str] | None = None,
     binary: bool = True,
 ) -> dict[str, Any]:
-    """Export a ZVF point cloud to a PLY file.
+    """Export a Zarr Vectors point cloud to a PLY file.
 
     Args:
-        store_path: Path to the ZVF store.
+        store_path: Path to the Zarr Vectors store.
         output_path: Path for the output PLY file.
         level: Resolution level to export.
         bbox: Optional bounding box filter.

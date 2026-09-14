@@ -49,11 +49,7 @@ def run_validate(args) -> int:
 
 
 def run_info(args) -> int:
-    from zarr_vectors.core.store import (
-        list_resolution_levels,
-        open_store,
-        read_root_metadata,
-    )
+    from zarr_vectors.building import list_resolution_levels, open_store, read_root_metadata
 
     root = open_store(str(args.store))
     md = read_root_metadata(root)

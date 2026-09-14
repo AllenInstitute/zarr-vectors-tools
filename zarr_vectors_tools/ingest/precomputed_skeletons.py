@@ -27,6 +27,8 @@ testable offline with :class:`InMemoryFragsReader`.
 
 from __future__ import annotations
 
+from zarr_vectors.building import rebuild_presence
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +39,6 @@ import numpy.typing as npt
 
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
-from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
@@ -419,7 +420,7 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
     transported a single time, never re-pickled per task.
     """
     import numpy as np
-    from zarr_vectors.core.store import get_resolution_level, open_store
+    from zarr_vectors.building import get_resolution_level, open_store
     from zarr_vectors.types import skeletons as sk
 
     sh = shared or {}
@@ -726,7 +727,7 @@ def run_ingest(
         # ``nonempty_chunks`` manifest RMWs race and can under-report.  Re-derive
         # the manifests from the on-disk cells so the object-index build, store
         # finalize, and the coarsening source scan below enumerate every chunk.
-        rebuild_nonempty_manifests(lg)
+        rebuild_presence(lg)
 
         _t2 = _time.perf_counter()
         oid_of = build_object_index(lg, records, ndim=ndim)
@@ -747,8 +748,7 @@ def run_ingest(
             # chunk (and no Dask when a level has only one target chunk).
             if executor is None and workers:
                 from zarr_vectors.constants import VERTICES
-                from zarr_vectors.core.arrays import list_chunk_keys
-                from zarr_vectors.core.store import get_resolution_level, open_store
+                from zarr_vectors.building import get_resolution_level, list_chunk_keys, open_store
                 from zarr_vectors_tools.ingest._parallel import dask_executor
 
                 if _dask_cm is not None:

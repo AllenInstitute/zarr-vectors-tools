@@ -2,13 +2,13 @@
 
 Run once and commit the output:
 
-    python benchmarks/_build.py
+    python benchmarks/formats/_build.py
 
-Mirrors the layout of zarr-vectors-py's benchmark suite (4-section per
-notebook: setup -> build inputs -> sweep -> plot) but focuses on
-*loading* and *filtering* zarr-vectors stores versus the canonical
-file format for each geometry type.  All write paths happen outside
-the timing loops; we benchmark reads only.
+Mirrors the 4-section-per-notebook layout of the sibling suite in
+``benchmarks/internals/`` (setup -> build inputs -> sweep -> plot) but
+focuses on *loading* and *filtering* zarr-vectors stores versus the
+canonical file format for each geometry type.  All write paths happen
+outside the timing loops; we benchmark reads only.
 """
 
 from __future__ import annotations
@@ -427,7 +427,7 @@ TYPES_CELLS: list[tuple[str, str]] = [
 # Data-type comparison -- loading and filtering
 
 At a fixed dataset size (`N = 50_000` vertices / elements), how does
-loading and filtering compare across the six ZVF geometry types, each
+loading and filtering compare across the six Zarr Vectors geometry types, each
 against its canonical competitor format?
 
 | Geometry | Competitor | Reader | Subset op |

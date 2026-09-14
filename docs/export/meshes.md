@@ -1,6 +1,6 @@
 # Meshes
 
-The ZVF `meshes` geometry writes out to Wavefront OBJ via `export_obj`.
+The Zarr Vectors `meshes` geometry writes out to Wavefront OBJ via `export_obj`.
 No third-party dependency.
 
 ```python

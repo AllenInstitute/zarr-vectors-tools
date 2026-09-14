@@ -2,7 +2,7 @@
 
 Two spatial queries on a chunked triangle mesh: closest-point on the
 surface, and first-hit ray intersection. Both localise candidate
-chunks via `zarr_vectors.spatial.chunking.chunks_intersecting_bbox`
+chunks via `zarr_vectors.building.chunks_intersecting_bbox`
 and test only the chunks they need.
 
 ## `closest_point`

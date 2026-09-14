@@ -1,0 +1,41 @@
+=== run_large 2026-08-27 17:45:44 sizes=1000,10000,100000,1000000,10000000 out=/home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv ===
+
+--- block 1/7: storage (elapsed 0:00) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks storage --workdir /tmp/zv_large_work
+--- storage done in 23:02 ---
+
+--- block 2/7: timing (elapsed 23:02) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks timing --workdir /tmp/zv_large_work --replace
+--- timing done in 28:02 ---
+
+--- block 3/7: spatial (elapsed 51:04) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks spatial --workdir /tmp/zv_large_work --replace
+--- spatial done in 18:55 ---
+
+--- block 4/7: chunked (elapsed 1:09:59) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks chunked --workdir /tmp/zv_large_work --replace
+--- chunked done in 6:18 ---
+
+--- block 5/7: fidelity (elapsed 1:16:17) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks fidelity --workdir /tmp/zv_large_work --replace
+--- fidelity done in 0:18 ---
+
+--- block 6/7: chunks (elapsed 1:16:35) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks chunks --workdir /tmp/zv_large_work --replace
+--- chunks done in 6:25 ---
+
+--- block 7/7: fragments (elapsed 1:23:00) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks fragments --workdir /tmp/zv_large_work --replace
+--- fragments done in 6:34 ---
+
+=== summary ===
+  storage        23:02   25.7%
+  timing         28:02   31.3%
+  spatial        18:55   21.1%
+  chunked         6:18    7.0%
+  fidelity        0:18    0.3%
+  chunks          6:25    7.2%
+  fragments       6:34    7.3%
+  TOTAL        1:29:34
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/run_large.log

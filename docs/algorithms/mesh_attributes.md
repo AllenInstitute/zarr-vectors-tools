@@ -3,7 +3,7 @@
 Two per-vertex mesh attributes derived directly from the chunked
 store: vertex normals and mean curvature. Both accept `write_back=True`
 to persist the result back to the store via
-`ZVWriter.add_node_attribute_sync` so subsequent reads (or downstream
+`zarr_vectors_tools._attributes.write_vertex_attribute` so subsequent reads (or downstream
 viewers) can use the attribute without recomputing.
 
 ## `compute_vertex_normals`
@@ -29,7 +29,7 @@ result["incomplete_boundary_vertices"]  # int — vertices on cross-chunk edges
 `write_back`
 : When `True`, the result is persisted under
   `attributes/vertex_normal/` via
-  `ZVWriter.add_node_attribute_sync("vertex_normal", normals, dtype=np.float32)`.
+  `write_vertex_attribute(level_group, "vertex_normal", normals, dtype=np.float32)`.
 
 ## `compute_mean_curvature`
 
@@ -55,7 +55,7 @@ Both functions stream intra-chunk faces, accumulating per-vertex
 quantities using `np.add.at` against a globally-indexed buffer. Vertex
 indices are mapped to global indices via
 `chunk_local_to_global_offsets` (the public helper from
-`zarr_vectors.spatial.boundary`).
+`zarr_vectors.building`).
 
 Cross-chunk **faces** lose face identity in the v0 storage layout, so
 their contributions to normals / curvature are not added — vertices
@@ -74,4 +74,4 @@ isn't essential for v0 and isn't implemented.
 
 - [Algorithms index](index.md)
 - [Mesh summary](mesh_summary.md) — global area / volume / Euler χ.
-- Parent: [`ZVWriter` API](https://zarr-vectors.readthedocs.io/en/latest/api/lazy.html)
+- Parent: the `zarr_vectors.building` write helpers (`create_attribute_array` / `write_chunk_attributes`)

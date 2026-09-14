@@ -1,6 +1,6 @@
 # Skeletons
 
-A **skeleton** in ZVF is a tree-structured graph: every node has at most
+A **skeleton** in Zarr Vectors is a tree-structured graph: every node has at most
 one parent. `ingest_swc` covers the light-microscopy morphology case —
 one reconstructed neuron per file, in the standard SWC text format. For
 segment skeletons pulled out of an EM volume, see

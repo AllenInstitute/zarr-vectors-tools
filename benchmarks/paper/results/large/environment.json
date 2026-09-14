@@ -1,0 +1,69 @@
+{
+  "python": "3.11.15",
+  "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.35",
+  "processor": "x86_64",
+  "cpu_count": 32,
+  "numpy": "2.4.3",
+  "zarr": "3.1.6",
+  "numcodecs": "0.15.1",
+  "nibabel": "5.4.2",
+  "networkx": "3.6.1",
+  "zarr_vectors": "0.2.1.dev71+g9261255bb.d20260806",
+  "zarr_vectors_git": "169586a",
+  "zarr_vectors_tree_sha": "01754702d5d3",
+  "zarr_vectors_tools_git": "0f336cd-dirty",
+  "domain": 1000.0,
+  "chunk_shape": [
+    200.0,
+    200.0,
+    200.0
+  ],
+  "bin_shape": [
+    50.0,
+    50.0,
+    50.0
+  ],
+  "seed": 0,
+  "sizes": [
+    1000,
+    10000,
+    100000,
+    1000000,
+    10000000
+  ],
+  "timing_runs": {
+    "1000": 5,
+    "10000": 5,
+    "100000": 5,
+    "1000000": 5,
+    "10000000": 3
+  },
+  "verts_per_object": {
+    "points": 1,
+    "streamlines": 12,
+    "skeletons": 200,
+    "graphs": 1,
+    "meshes": 144
+  },
+  "codec": "zstd",
+  "workdir": "/tmp/zv_large_work",
+  "workdir_fstype": "ext4",
+  "fractions": [
+    0.001,
+    0.01,
+    0.1,
+    0.5,
+    1.0
+  ],
+  "fraction_n": 1000000,
+  "fixed_selection": 100,
+  "chunk_sweep_n": 1000000,
+  "chunk_sides": [
+    500.0,
+    250.0,
+    200.0,
+    125.0,
+    100.0,
+    50.0
+  ]
+}

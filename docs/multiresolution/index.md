@@ -51,34 +51,43 @@ rest of this section assumes it.
 
 ## Who owns what
 
-Core (`zarr_vectors`) deliberately ships only a *basic*, dependency-free
+The parent package deliberately ships only a *basic*, dependency-free
 multiresolution layer: the `per_object` binning pyramid and `random`
-object selection, plus a plug-in registry at
-`zarr_vectors.multiresolution.registry`. Everything richer — skeleton and
-polyline coarsening, spatial-coverage / length / attribute /
+object selection, plus a plug-in strategy registry reached through its
+supported `zarr_vectors.building.register_coarsen_strategy` and
+`register_selection_strategy` entry points. Everything richer — skeleton
+and polyline coarsening, spatial-coverage / length / attribute /
 point-thinning selection, and the third-party dependencies they need —
 lives in this package.
 
+Importing `zarr_vectors_tools` registers this package's strategies into
+that registry, which widens what the parent package will accept:
+
 ```python
-# Importing zarr_vectors_tools runs _register_multiscale_strategies(),
-# which does two things:
-import zarr_vectors_tools  # noqa: F401
+import zarr_vectors as zv
 
-#  1. populates the tools-local coarsener registry, so
-#     zarr_vectors_tools.multiresolution.coarsen.coarsen_level dispatches;
-#  2. calls register_coarsen_strategy("skeleton"|"polyline", ...) and
-#     register_selection_strategy("spatial_coverage"|"length"|...) into
-#     zarr_vectors.multiresolution.registry.
+zv.coarsen_methods()          # ('per_object',)
 
-# Core can now dispatch by name without importing tools:
-from zarr_vectors.multiresolution.coarsen import coarsen_level
+import zarr_vectors_tools     # noqa: F401  — registers on import
 
-coarsen_level("skel.zv", 0, 1, method="skeleton")
+zv.coarsen_methods()          # ('per_object', 'polyline', 'skeleton')
 ```
 
-The registration is one-directional. Tools depends on core; core never
-depends on tools, and degrades quietly (the registry import is wrapped in
-a `try`/`except ImportError`) against a core that predates the registry.
+`zarr_vectors.coarsen_methods()` is the supported way to ask what is
+available in a given installation, rather than passing a name and finding
+out from the exception.
+
+The registration is one-directional. Tools depends on the parent package;
+the parent package never depends on tools, and degrades quietly (the
+registry import is wrapped in a `try`/`except ImportError`) against a core
+that predates the registry.
+
+:::{note}
+Build pyramids through this package's `build_pyramid` (above), or through
+the parent package's supported surface. `zarr_vectors.multiresolution` is
+**internal** to that package and may change without notice — see
+{zvpy}`the API reference <api/index.html>`.
+:::
 
 :::{note}
 Pyramid *refresh* is the one piece not injected this way.

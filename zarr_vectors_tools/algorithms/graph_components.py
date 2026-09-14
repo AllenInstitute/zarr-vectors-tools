@@ -5,7 +5,7 @@ the cross-chunk array. Scales beyond memory because per-chunk edge
 arrays are loaded one at a time.
 
 ``write_back=True`` persists the component labels via
-:meth:`ZVWriter.add_node_attribute_sync` under
+:func:`~zarr_vectors_tools._attributes.write_vertex_attribute` under
 ``attributes/component_label/``.
 """
 
@@ -17,11 +17,15 @@ from typing import Any
 
 import numpy as np
 
-from zarr_vectors.core.arrays import list_chunk_keys, read_links
-from zarr_vectors.core.store import get_resolution_level, open_store
-from zarr_vectors.lazy import open_zv
-from zarr_vectors.spatial.boundary import chunk_local_to_global_offsets
+from zarr_vectors.building import (
+    chunk_local_to_global_offsets,
+    get_resolution_level,
+    list_chunk_keys,
+    open_store,
+    read_links,
+)
 
+from zarr_vectors_tools._attributes import write_vertex_attribute
 from zarr_vectors_tools.algorithms._links import link_prefetch_plan
 
 
@@ -70,7 +74,7 @@ def compute_connected_components(
         level: Resolution level to operate on.
         write_back: When True, persist the labels under
             ``attributes/component_label/`` via
-            :meth:`ZVWriter.add_node_attribute_sync`.
+            :func:`~zarr_vectors_tools._attributes.write_vertex_attribute`.
 
     Returns:
         Dict with:
@@ -114,9 +118,11 @@ def compute_connected_components(
             sizes[k] = v
 
     if write_back and n_vertices:
-        zv = open_zv(str(store_path))
-        with zv[level].writer() as w:
-            w.add_node_attribute_sync("component_label", labels, dtype=np.uint32)
+        # A second, writable handle: the read path above opens mode="r".
+        write_vertex_attribute(
+            get_resolution_level(open_store(str(store_path), mode="r+"), level),
+            "component_label", labels, dtype=np.uint32,
+        )
 
     return {
         "labels": labels,

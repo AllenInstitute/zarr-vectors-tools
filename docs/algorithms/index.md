@@ -4,7 +4,7 @@ Eleven streaming algorithms across two domains: graphs (and skeletons,
 which are graphs with a tree convention) and triangle meshes. They all
 read directly from a chunked Zarr Vectors store — no full
 materialisation — and a subset can write their results back to the
-same store via `ZVWriter.add_node_attribute_sync`.
+same store via `zarr_vectors_tools._attributes.write_vertex_attribute`.
 
 ## Matrix
 
@@ -125,5 +125,5 @@ How each algorithm resolves this:
 
 - [Multiresolution](../multiresolution/index.md) — building the levels these algorithms read.
 - [Cross-level links](../multiresolution/cross_level_links.md) — the `delta != 0` families in the same layout.
-- [`ZVWriter.add_node_attribute_sync`](https://zarr-vectors.readthedocs.io/en/latest/api/lazy.html)
+- `zarr_vectors_tools._attributes.write_vertex_attribute`
   — the write-back surface used by the four functions above.

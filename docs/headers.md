@@ -1,6 +1,6 @@
 # Headers
 
-Format-specific metadata that doesn't fit into the ZVF geometry model
+Format-specific metadata that doesn't fit into the Zarr Vectors geometry model
 itself — TRK voxel-to-RAS affines, SWC `coordinate_space` comments,
 OBJ object-name lists, CSV normalisation parameters — is preserved
 alongside the data so the matching `export_*` can recover the original
@@ -42,8 +42,10 @@ trk.scalar_names           # ['fa', 'md']
 reg.remove("trk")          # drop the header
 ```
 
-Pass either a store path or an already-open `FsGroup` root handle to
-the constructor; the path form opens the store with `mode="r+"`.
+Pass either a store path or an already-open `Group` root handle to the
+constructor; the path form opens the store with `mode="r+"`.  The class
+subclasses core's `zarr_vectors.headers.HeaderRegistry`, adding only the
+typed `Header` (de)serialisation on top of core's dict storage.
 
 ## Format-specific header classes
 
@@ -107,6 +109,32 @@ Summary statistics for the source graph: `node_count`, `edge_count`,
 `is_directed`, `mean_degree`, `n_components`, `largest_component_size`.
 Written by `ingest_edgelist` and `ingest_graphml` when
 `compute_summary=True`.
+
+### `H5ADHeader`
+
+The widest of the headers, because AnnData carries three kinds of
+information that numeric Zarr Vectors attribute arrays cannot hold on their own:
+
+- **Names.** `obs` columns and genes become attribute arrays whose names
+  are sanitised for Zarr paths, so the originals live in the parallel
+  `obs_names`/`obs_attrs` and `gene_names`/`gene_attrs` lists.
+- **Types and categories.** `categories` maps a column to its level labels
+  so export can rebuild the `pandas.Categorical`; `dtypes` records the
+  source dtype for the encodings that are lossy in name only (`bool` →
+  uint8, `datetime64` → int64).
+- **Order and identity.** Zarr Vectors orders vertices by spatial chunk, not by
+  source row, so `row_attr` names the attribute holding each cell's source
+  row index and `obs_index` inlines the barcodes when the cell count is
+  under `max_obs_index`.
+
+Also carries `spatial_key`, `spatial_ndim`, `spatial_columns`, `n_obs`,
+`n_vars`, `layer`, `object_id_column` and `object_id_categories`.
+
+Written by `ingest_h5ad` and `ingest_table`, and *extended in place* by
+`attach_h5ad` / `attach_table` as further files are staged in — which is
+what lets `export_h5ad` emit staged columns under their original labels,
+indistinguishable from columns written at ingest. See
+[Single-cell and spatial omics](ingest/single_cell.md).
 
 ## See also
 

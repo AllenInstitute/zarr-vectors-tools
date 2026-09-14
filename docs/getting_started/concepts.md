@@ -27,22 +27,26 @@ Every public entry point in this package either:
    (`zarr_vectors_tools.algorithms`), or
 4. **Reads** a store and writes a file format (`zarr_vectors_tools.export`).
 
-New to the format itself? Read
-[Getting started with Zarr Vectors](zarr_vectors.md) first.
+:::{important}
+This page describes **this package's** workflows only. The format they
+operate on — stores, chunks, bins, fragments, links, the object model — is
+owned and documented by
+[`zarr-vectors-py`](https://zarr-vectors-py.readthedocs.io/en/latest).
+Start at {zvpy}`Core concepts <getting_started/concepts.html>`, and see
+[How this package relates to `zarr-vectors-py`](zarr_vectors.md) for the
+division of labour.
+:::
 
 ## Relationship to `zarr-vectors-py`
 
-The on-disk format, the chunk encoding, the spatial index, links, and
-lazy access all live in
-[`zarr-vectors`](https://zarr-vectors-py.readthedocs.io/en/latest). That
-package provides:
+The format itself, the chunk encoding, the spatial index, links, and lazy
+access all live in the parent package and are documented there. What this
+package consumes from it:
 
-- The `write_points`, `write_mesh`, `write_graph`, `write_polylines` and
-  `write_lines` writers that this package calls under the hood.
-- The fragment encoding that lets several objects share a chunk.
-- The `ZVWriter` mutation handle that
-  `compute_connected_components(..., write_back=True)` and the
-  mesh-attribute write-back paths route through.
+- The store-creating writers and per-chunk write helpers on the supported
+  `zarr_vectors.building` surface ({zvpy}`the building API <api/building.html>`), which every
+  ingest path and every write-back path here routes through.
+- The `zarr_vectors.api` surface ({zvpy}`the data API <api/api.html>`) for reading.
 - A **basic** multiresolution layer — `per_object` binning plus `random`
   object selection — and a plug-in strategy registry.
 
@@ -68,18 +72,31 @@ This package adds:
 
 Importing `zarr_vectors_tools` has a side effect: it registers this
 package's coarseners (`skeleton`, `polyline`) and selectors
-(`spatial_coverage`, `length`, `attribute`, `point_thinning`) into
-`zarr_vectors.multiresolution.registry`.
+(`spatial_coverage`, `length`, `attribute`, `point_thinning`) into the
+parent package's strategy registry, through its supported
+`zarr_vectors.building.register_coarsen_strategy` and
+`register_selection_strategy` entry points.
 
-That is what lets core dispatch into tools —
-`zarr_vectors.multiresolution.coarsen_level(method="skeleton")` works
-once tools has been imported — **without core taking a dependency on
-tools**. The registration degrades silently on a core too old to have the
+That is what lets the parent package dispatch into tools **without taking
+a dependency on it**. Ask what an installation has with
+`zarr_vectors.coarsen_methods()`:
+
+```python
+import zarr_vectors as zv
+
+zv.coarsen_methods()          # ('per_object',)
+
+import zarr_vectors_tools     # noqa: F401
+
+zv.coarsen_methods()          # ('per_object', 'polyline', 'skeleton')
+```
+
+The registration degrades silently on a core too old to have the
 registry.
 
-One thing is deliberately *not* wired up: pyramid refresh.
-`EditSession(refresh_pyramid=...)` uses core's basic refresher. To get the
-rich re-coarsening after an edit, call
+One thing is deliberately *not* wired up: pyramid refresh. The parent
+package's editing path (`ds.editing(refresh_pyramid=True)`) uses its own
+basic refresher. To get the rich re-coarsening after an edit, call
 [`rebuild_pyramid_from_level`](../multiresolution/refresh.md) yourself.
 
 ## Geometry types and which ingest goes with which
@@ -113,63 +130,48 @@ from zarr_vectors_tools.ingest import ingest_csv              # ImportError
 ## Chunk shape and bin shape
 
 Ingest writers take a required `chunk_shape` and an optional `bin_shape`.
+Both are format-level concepts owned by the parent package — what they
+mean, how they interact, and how to size them are specified at
+{zvpy}`chunk shape <spec/chunking/chunk_shape.html>`,
+{zvpy}`bin shape <spec/chunking/bin_shape.html>` and
+{zvpy}`chunk versus bin <spec/chunking/chunk_vs_bin.html>`, with the sizing reasoning at
+{zvpy}`Choosing chunk and bin shape <how_to/choose_chunk_and_bin.html>`.
 
-- `chunk_shape` — the physical extent of one Zarr chunk in store
-  coordinates. Controls how I/O is parallelised and how spatial queries
-  shard.
-- `bin_shape` — an optional supervoxel grid *inside* each chunk, used as
-  the spatial-hash bucket size by some accelerators.
+What is specific to this package is only how those values are *supplied*
+to an ingest, and the one path that derives them for you:
 
-For most ingests, set `chunk_shape` to roughly the working spatial
-resolution and leave `bin_shape` unset. See
-[Choosing chunk and bin shape](../how_to/choose_chunk_and_bin.md).
+- Every ingest function takes `chunk_shape` explicitly, and `bin_shape`
+  optionally.
+- The `trk` path is the exception: it takes `--num-chunks` (a target chunk
+  *count*) instead of an explicit shape, and derives the shape from the
+  data bounds.
 
-The `trk` path is the exception: it takes `--num-chunks` (a target chunk
-*count*) instead of an explicit shape, and derives the shape from the
-data bounds.
+See [Choosing chunk and bin shape](../how_to/choose_chunk_and_bin.md) for
+the flags this package adds on top.
 
 ## What lives where on disk
 
-A store written at format version {{ zvf_version }} looks like:
+The on-disk layout is specified by the parent package, not here. Read it
+at {zvpy}`Directory structure <spec/layout/directory_structure.html>`, with the two metadata
+documents at {zvpy}`root metadata <spec/layout/root_metadata.html>` and
+{zvpy}`level metadata <spec/layout/level_groups.html>`, and connectivity at
+{zvpy}`Links <spec/object_model/links.html>`.
 
-```text
-my_store.zarrvectors/
-├── zarr.json                      # Zarr v3 group marker
-├── .zattrs                        # root metadata (geometry types, bounds, axes, …)
-├── 0/                             # resolution level 0
-│   ├── vertices/                  # per-chunk vertex blobs
-│   ├── vertex_fragments/          # per-chunk fragment index
-│   ├── links/                     # ALL connectivity — one family
-│   │   ├── 0/                     # delta 0: offsets groups live below
-│   │   │   ├── <offsets>/         # one array per offsets segment
-│   │   │   └── ...
-│   │   └── ...
-│   ├── link_fragments/
-│   ├── attributes/<name>/         # per-vertex attributes
-│   ├── object_attributes/<name>/  # per-object attributes
-│   ├── object_index/              # object manifests (which fragments per object)
-│   └── fragment_attributes/
-├── 1/                             # coarser level, same layout
-├── 2/
-└── headers/<format>/              # preserved format-specific metadata
-```
+This release targets on-disk format version {{ zv_version }}.
+
+You should not need to touch any of it directly. The ingest, pyramid,
+algorithm and export functions in this package handle every read and write
+through the supported `zarr_vectors.api` and `zarr_vectors.building`
+surfaces.
 
 :::{warning}
-**There is no `cross_chunk_links/` group at format {{ zvf_version }}.**
-Connectivity was merged into a single family under
-`links/<delta>/<offsets>/`, where an intra-chunk link is simply one whose
-offsets are all zero. If you are porting code or reading older notes that
-mention `cross_chunk_links/`, see the double-count trap in
-[Algorithms](../algorithms/index.md) before you trust it.
-
-Note also that `links/<delta>` is a **group**, not an array. Naming the
-group where an array is expected fails *silently* — `list_chunks` returns
-`[]` and prefetch quietly does nothing.
+One layout fact is worth repeating here because it changes how *algorithm*
+code in this package must be written: at format {{ zv_version }} all
+connectivity lives in a single `links/` family, so a read returns the whole
+family. The old idiom of reading per-chunk links and then adding
+cross-chunk links counts every intra-chunk edge twice. See the double-count
+trap in [Algorithms](../algorithms/index.md).
 :::
-
-You should not need to touch any of this directly. The ingest, pyramid,
-algorithm and export functions handle every read and write through the
-`zarr-vectors` public API.
 
 ## Headers
 
@@ -189,9 +191,10 @@ and pass it in. See [Headers](../headers.md) and
 
 ## See also
 
-- [Getting started with Zarr Vectors](zarr_vectors.md) — the format primer.
+- [How this package relates to `zarr-vectors-py`](zarr_vectors.md) — the division of labour.
 - [Quickstart](quickstart.md) — concrete code for each workflow.
 - [The `zvtools` CLI](cli.md)
 - [Modules](../modules/index.md) — what each subpackage owns.
 - [Coarsening versus sparsity](../multiresolution/concepts.md)
-- Parent package: [zarr-vectors concepts](https://zarr-vectors-py.readthedocs.io/en/latest/getting_started/concepts.html)
+- **Parent package:** {zvpy}`Core concepts <getting_started/concepts.html>` — the format itself.
+- **Parent package:** {zvpy}`the specification <spec/index.html>` — the normative specification.

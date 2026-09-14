@@ -9,7 +9,7 @@ return a summary dict.
 from zarr_vectors_tools.export.ply import export_ply
 
 result = export_ply(
-    "cloud.zv",             # store_path — source ZVF store
+    "cloud.zv",             # store_path — source Zarr Vectors store
     "cloud.ply",            # output_path — file to write
     level=0,                # resolution level to read from
     bbox=([-100.0] * 3, [100.0] * 3),   # optional filters, AND-ed together
@@ -30,16 +30,24 @@ import from the module (`zarr_vectors_tools.export.ply`) every time.
 | --- | --- | --- | --- | --- |
 | points | `zarr_vectors_tools.export.csv_points.export_csv` | CSV / XYZ text | `bbox`, `object_ids`, `chunks` | none |
 | points | `zarr_vectors_tools.export.ply.export_ply` | PLY (binary or ASCII) | `bbox`, `object_ids`, `chunks` | `ply` |
-| polylines | `zarr_vectors_tools.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks` | `streamlines` |
-| polylines | `zarr_vectors_tools.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks` | `streamlines` |
+| points | `zarr_vectors_tools.export.h5ad.export_h5ad` | AnnData `.h5ad` | `bbox`, `chunks` *(see note)* | `h5ad` |
+| polylines | `zarr_vectors_tools.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks` | `trk` |
+| polylines | `zarr_vectors_tools.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks` | `trx` |
 | graphs (trees) | `zarr_vectors_tools.export.swc.export_swc` | SWC | `chunks` | none |
 | meshes | `zarr_vectors_tools.export.obj.export_obj` | Wavefront OBJ | `bbox`, `object_ids`, `chunks` | none |
 
-Install an extra with `pip install "zarr-vectors-tools[streamlines]"`.
+Install an extra with `pip install "zarr-vectors-tools[trk]"`.
 
 Filters AND together: `bbox=(...)` *and* `object_ids=[3, 5]` means
 "objects 3 and 5, intersected with the bounding box". Passing `None`
 (the default) disables that filter.
+
+:::{note}
+`export_h5ad` accepts `object_ids` only alongside `attribute_names=[]`.
+Core's object-filtered read path drops vertex attributes, which for an
+`.h5ad` would mean silently writing an empty `obs`; it raises instead.
+See [Single-cell and spatial omics](single_cell.md).
+:::
 
 ## Exporting from a coarser level
 
@@ -86,7 +94,7 @@ one tree or surface into several disconnected pieces.
 
 ## Format headers
 
-Ingest preserves format-specific metadata that the ZVF geometry model
+Ingest preserves format-specific metadata that the Zarr Vectors geometry model
 cannot hold — TRK affines, SWC comment lines, OBJ object names, CSV
 normalisation parameters — under `/headers/<format>/` on the store.
 

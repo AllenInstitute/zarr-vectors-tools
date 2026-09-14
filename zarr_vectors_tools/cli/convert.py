@@ -42,6 +42,8 @@ def _print_summary(action: str, summary: dict) -> None:
     for k in (
         "streamline_count", "vertex_count", "object_count",
         "chunk_count", "cross_chunk_link_count", "chunk_shape", "bounds",
+        "spatial_key", "n_obs", "n_vars", "obs_columns_stored", "genes_stored",
+        "columns_stored", "dropped_na", "key_column",
     ):
         if k in summary:
             print(f"  {k}: {summary[k]}")
@@ -82,6 +84,10 @@ def _convert_trk(args, factors, chunk_scale) -> int:
             compressor=(None if args.compressor == "none" else args.compressor),
             compute_length=args.compute_length,
             compute_endpoints=args.compute_endpoints,
+            object_attrs=set(args.object_attrs or []),
+            vertex_attrs=set(args.vertex_attrs or []),
+            attr_seed=args.attr_seed,
+            register_to_rasmm=args.apply_affine,
             build_multiscale=factors is not None,
             pyramid_factors=factors,
             chunk_scale_factors=chunk_scale,
@@ -100,6 +106,66 @@ def run(args) -> int:
     factors = build_factors(args.coarsen, args.sparsity)
     chunk_scale = args.chunk_scale
 
+    # --apply-affine only applies to trk (the one format read in raw,
+    # unregistered voxmm coordinates).  Everything else is either already in RAS
+    # world space (trx/tck) or has no source affine (meshes/points/graphs), so
+    # reject the flag there rather than accept-and-ignore it.
+    if getattr(args, "apply_affine", False) and fmt.name != "trk":
+        why = (
+            "its streamlines are already read in RAS world space"
+            if fmt.geometry == "streamlines"
+            else "this format has no source affine to bake"
+        )
+        raise SystemExit(
+            f"error: --apply-affine only applies to trk input, not {fmt.name!r} "
+            f"({why})"
+        )
+
+    # The synthetic attribute generators are wired into the trk parallel path
+    # only.  trx/tck carry their own native per-vertex/per-object scalars, and
+    # non-streamline formats have no streamlines to derive them from — so reject
+    # rather than accept-and-ignore (mirrors --apply-affine above).
+    if (getattr(args, "object_attrs", None) or getattr(args, "vertex_attrs", None)) \
+            and fmt.name != "trk":
+        raise SystemExit(
+            f"error: --object-attr/--vertex-attr only apply to trk input, "
+            f"not {fmt.name!r}"
+        )
+
+    # The h5ad and table groups address side tables / named columns that the
+    # other formats have no equivalent of — reject rather than
+    # accept-and-ignore, as above.  Each flag lists the formats that read it.
+    flag_owners = {
+        "--spatial-key": ({"h5ad"}, getattr(args, "spatial_key", "auto") != "auto"),
+        "--spatial-columns": ({"h5ad"}, getattr(args, "spatial_columns", None) is not None),
+        "--obs-column": ({"h5ad"}, bool(getattr(args, "obs_columns", None))),
+        "--no-obs": ({"h5ad"}, bool(getattr(args, "no_obs", False))),
+        "--gene": ({"h5ad"}, bool(getattr(args, "genes", None))),
+        "--layer": ({"h5ad"}, getattr(args, "layer", None) is not None),
+        "--backed": ({"h5ad"}, bool(getattr(args, "backed", False))),
+        "--position-columns": ({"table"}, getattr(args, "position_columns", None) is not None),
+        "--key-column": ({"table"}, getattr(args, "key_column", None) is not None),
+        "--column": ({"table"}, bool(getattr(args, "columns", None))),
+        "--delimiter": ({"table"}, getattr(args, "delimiter", ",") != ","),
+        "--object-id-column": ({"h5ad", "table"},
+                               getattr(args, "object_id_column", None) is not None),
+        "--drop-na": ({"h5ad", "table"}, bool(getattr(args, "drop_na", False))),
+    }
+    rejected = [
+        (flag, owners) for flag, (owners, given) in flag_owners.items()
+        if given and fmt.name not in owners
+    ]
+    if rejected:
+        detail = "; ".join(
+            f"{flag} applies to {'/'.join(sorted(owners))} input" for flag, owners in rejected
+        )
+        raise SystemExit(f"error: {detail} — not {fmt.name!r}")
+
+    if fmt.name == "table" and not args.position_columns:
+        raise SystemExit(
+            "error: --position-columns X,Y[,Z] is required for --format table"
+        )
+
     _maybe_overwrite(args.output, args.overwrite)
 
     # The "length" pyramid strategy ranks by per-object length, which must be
@@ -112,38 +178,95 @@ def run(args) -> int:
 
     # trk has its own streaming path with an inline pyramid + num_chunks knob.
     if fmt.name == "trk":
-        return _convert_trk(args, factors, chunk_scale)
+        rc = _convert_trk(args, factors, chunk_scale)
+        if rc != 0:
+            return rc
+    else:
+        if args.chunk_shape is None:
+            raise SystemExit(f"error: --chunk-shape X,Y,Z is required for format {fmt.name!r}")
 
-    if args.chunk_shape is None:
-        raise SystemExit(f"error: --chunk-shape X,Y,Z is required for format {fmt.name!r}")
+        ingest = load_ingest_func(fmt)
+        kwargs: dict = {"bin_shape": args.bin_shape, "dtype": args.dtype}
+        if fmt.geometry == "streamlines":  # trx / tck
+            kwargs["compute_length"] = args.compute_length
+            kwargs["compute_endpoints"] = args.compute_endpoints
+        if fmt.geometry == "points" and args.knn_distance_k is not None:  # ply / las / csv
+            kwargs["knn_distance_k"] = args.knn_distance_k
+        if fmt.name == "table":
+            kwargs["position_columns"] = args.position_columns
+            kwargs["key_column"] = args.key_column
+            kwargs["columns"] = args.columns
+            kwargs["delimiter"] = args.delimiter
+            kwargs["object_id_column"] = args.object_id_column
+            if args.drop_na:
+                kwargs["drop_na"] = True
+        if fmt.name == "h5ad":
+            kwargs["spatial_key"] = args.spatial_key
+            kwargs["spatial_columns"] = args.spatial_columns
+            # None = every obs column; [] = none.  --no-obs is the only way to
+            # spell the empty list on a repeatable append flag.
+            kwargs["obs_columns"] = [] if args.no_obs else args.obs_columns
+            kwargs["genes"] = args.genes
+            kwargs["layer"] = args.layer
+            kwargs["object_id_column"] = args.object_id_column
+            kwargs["backed"] = args.backed
+            kwargs["drop_na"] = args.drop_na
 
-    ingest = load_ingest_func(fmt)
-    kwargs: dict = {"bin_shape": args.bin_shape, "dtype": args.dtype}
-    if fmt.geometry == "streamlines":  # trx / tck
-        kwargs["compute_length"] = args.compute_length
-        kwargs["compute_endpoints"] = args.compute_endpoints
-    if fmt.geometry == "points" and args.knn_distance_k is not None:  # ply / las / csv
-        kwargs["knn_distance_k"] = args.knn_distance_k
-
-    try:
-        if fmt.name == "edgelist":
-            if not args.nodes:
-                raise SystemExit("error: --nodes NODES.csv is required for format 'edgelist'")
-            summary = ingest(
-                str(args.input), str(args.nodes), str(args.output),
-                tuple(args.chunk_shape), bin_shape=args.bin_shape, dtype=args.dtype,
+        try:
+            if fmt.name == "edgelist":
+                if not args.nodes:
+                    raise SystemExit("error: --nodes NODES.csv is required for format 'edgelist'")
+                summary = ingest(
+                    str(args.input), str(args.nodes), str(args.output),
+                    tuple(args.chunk_shape), bin_shape=args.bin_shape, dtype=args.dtype,
+                )
+            else:
+                summary = ingest(str(args.input), str(args.output), tuple(args.chunk_shape), **kwargs)
+        except ImportError as exc:  # a heavy reader dep was missing at call time
+            hint = (
+                f" — install it with: pip install 'zarr-vectors-tools[{fmt.extra}]'"
+                if fmt.extra else ""
             )
-        else:
-            summary = ingest(str(args.input), str(args.output), tuple(args.chunk_shape), **kwargs)
-    except ImportError as exc:  # a heavy reader dep was missing at call time
-        hint = (
-            f" — install it with: pip install 'zarr-vectors-tools[{fmt.extra}]'"
-            if fmt.extra else ""
-        )
-        raise SystemExit(f"error: {fmt.name} ingest failed ({exc}){hint}")
+            raise SystemExit(f"error: {fmt.name} ingest failed ({exc}){hint}")
 
-    _print_summary(f"ingested {fmt.name} ({fmt.geometry})", summary)
+        _print_summary(f"ingested {fmt.name} ({fmt.geometry})", summary)
 
-    if factors is not None:
-        _build_pyramid_post(args, factors, chunk_scale)
+        if factors is not None:
+            _build_pyramid_post(args, factors, chunk_scale)
+
+    # Sharding is a single-process post-pass (safe: parallel workers can't
+    # co-write a shard file).  Applies to every level's per-chunk arrays.
+    _maybe_shard(getattr(args, "shard", None), args.output)
+    return 0
+
+
+def _maybe_shard(shard_shape, output) -> None:
+    """Pack per-chunk cells into shards after the store is fully written.
+
+    ``shard_shape`` is the outer-chunk size in *inner-chunk* (spatial-chunk)
+    units — an int broadcasts to every axis (``8`` → ``8×8×8`` ≈ 512
+    chunks/shard).  ``None`` leaves the store unsharded (one file per chunk).
+    """
+    if shard_shape is None:
+        return
+    from zarr_vectors.building import shard_store
+
+    print(f"sharding store (shard_shape={shard_shape}) ...")
+    stats = shard_store(str(output), shard_shape=shard_shape)
+    print(
+        f"  packed {stats['chunks_packed']} chunks across "
+        f"{stats['arrays_sharded']} arrays into shards of {stats['shard_shape']}"
+    )
+
+
+def run_shard(args) -> int:
+    """``zvtools shard`` — (re)shard or unshard an existing store."""
+    from zarr_vectors.building import reshard
+
+    store = str(args.store)
+    shape = None if args.unshard else args.shard_shape
+    verb = "unsharding" if shape is None else f"sharding (shard_shape={shape})"
+    print(f"{verb} {store} ...")
+    stats = reshard(store, shape)
+    print("  " + ", ".join(f"{k}={v}" for k, v in stats.items()))
     return 0

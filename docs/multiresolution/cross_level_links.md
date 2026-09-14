@@ -108,7 +108,7 @@ store with no cross-level arrays at all. The token now means what it
 says.
 
 ```python
-from zarr_vectors.core.store import open_store, read_root_metadata
+from zarr_vectors.building import open_store, read_root_metadata
 
 md = read_root_metadata(open_store("tracts.zv", mode="r"))
 md.cross_level_depth      # 1

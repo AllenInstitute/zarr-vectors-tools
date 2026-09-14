@@ -7,25 +7,42 @@
 
 ----
 
-**zarr-vectors-tools** is the file-format, algorithm, and multiresolution
-companion to `zarr-vectors-py
-<https://github.com/BRIDGE-Neuroscience/zarr-vectors-py>`_. The core
-read/write APIs — chunk encoding, the spatial index, links, lazy access —
-live in the :mod:`zarr_vectors` package. This package adds the three layers
-that sit on top of it: **conversion workflows** that wrap third-party
-readers and writers (``laspy``, ``plyfile``, ``nibabel``, ``trx-python``,
-``networkx``, ``cloud-volume``), **streaming graph and mesh algorithms**
-that never materialise a whole store, and the **rich multiresolution
-layer** — skeleton and polyline coarsening, spatial-coverage and
-length-ranked object selection, cross-level links.
+**zarr-vectors-tools is an extension of** `zarr-vectors-py
+<https://zarr-vectors-py.readthedocs.io/en/latest>`_. It is not a
+standalone library and does not restate that package's documentation.
 
-It targets the merged ``links/<delta>/<offsets>/`` layout, on-disk format
-version |zvf_version|. Connectivity is a single family at this version;
-there is no ``cross_chunk_links/`` group to fall back to.
+``zarr-vectors-py`` owns **Zarr Vectors** — the specification and the
+Python API over it
+— the store layout, chunk and bin geometry, fragments, links, the object
+model, resolution-level metadata, validation, and the two supported
+surfaces ``zarr_vectors.api`` and ``zarr_vectors.building``. **Those are
+documented there and only there.**
 
-The library implements the `Zarr Vector Format
-<https://github.com/AllenInstitute/zarr_vectors>`_ originally specified
-by Forrest Collman at the Allen Institute for Brain Sciences.
+This package adds the layers built on top: **conversion workflows** that
+wrap third-party readers and writers (``laspy``, ``plyfile``, ``nibabel``,
+``trx-python``, ``networkx``, ``cloud-volume``), **streaming graph and mesh
+algorithms** that never materialise a whole store, the **rich
+multiresolution layer** — skeleton and polyline coarsening,
+spatial-coverage and length-ranked object selection — and the ``zvtools``
+CLI.
+
+.. admonition:: Where to look things up
+   :class: important
+
+   Anything about the **format** or the **core Python API** belongs to
+   ``zarr-vectors-py``: read it at :zvpy:`the specification <spec/index.html>` and
+   :zvpy:`the API reference <api/index.html>`. Pages here link out to it rather than
+   paraphrasing it, deliberately — a second description of the same format
+   is a second description to keep in sync, and the one that drifts is
+   always the copy.
+
+This release is built against on-disk format version |zv_version|. What
+that version *is* — including the merged ``links/<delta>/<offsets>/``
+layout this package assumes — is specified at
+:zvpy:`Links <spec/object_model/links.html>`.
+
+The format was originally specified by Forrest Collman at the Allen
+Institute for Brain Sciences.
 
 ----
 
@@ -35,14 +52,20 @@ Related sites
 .. list-table::
    :widths: 30 70
 
-   * - `Main library docs <https://zarr-vectors-py.readthedocs.io/en/latest>`__
-     - ``zarr-vectors-py`` — the core format, readers, writers, lazy access,
-       and Neuroglancer integration.
-   * - `Specification <https://alleninstitute.github.io/zarr_vectors/>`__
-     - The normative Zarr Vector Format spec: store structure, spatial
-       indexing, links, conformance levels.
-   * - `Schema <https://alleninstitute.github.io/zarr_vectors/08-metadata.html>`__
-     - The LinkML source and generated JSON Schema for ZVF metadata.
+   * - `zarr-vectors-py docs <https://zarr-vectors-py.readthedocs.io/en/latest>`__
+     - **The parent package.** The format specification, the ``api`` and
+       ``building`` surfaces, chunk and bin geometry, links, validation.
+       Start here for anything this package does not itself own.
+   * - :zvpy:`Specification <spec/index.html>`
+     - The Zarr Vectors specification as this implementation targets
+       it: store structure, metadata documents, spatial indexing, links,
+       conformance levels.
+   * - :zvpy:`Core API reference <api/index.html>`
+     - Which core modules are supported, which are internal, and how to ask
+       at runtime with ``zarr_vectors.stability()``.
+   * - `Upstream specification <https://alleninstitute.github.io/zarr_vectors/>`__
+     - The original Allen Institute format definition this implementation
+       derives from.
    * - `GitHub repository <https://github.com/AllenInstitute/zarr-vectors-tools>`__
      - Source, issues, and the notebooks under ``examples/``.
 
@@ -96,6 +119,7 @@ Where to start
 
    ingest/index
    ingest/point_clouds
+   ingest/single_cell
    ingest/lines
    ingest/tractography
    ingest/tractography_at_scale
@@ -103,6 +127,13 @@ Where to start
    ingest/em_skeletons
    ingest/graphs
    ingest/meshes
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Compose
+   :hidden:
+
+   compose/index
 
 .. toctree::
    :maxdepth: 1
@@ -137,6 +168,7 @@ Where to start
 
    export/index
    export/point_clouds
+   export/single_cell
    export/streamlines
    export/skeletons
    export/meshes

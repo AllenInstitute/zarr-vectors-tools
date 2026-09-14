@@ -32,6 +32,8 @@ ingest convention is "ignore cross-chunk edges if missing").
 
 from __future__ import annotations
 
+from zarr_vectors.building import rebuild_presence
+
 import pickle
 import shutil
 import tempfile
@@ -438,7 +440,7 @@ def _build_local_plan(
     """
     from itertools import product
 
-    from zarr_vectors.core.arrays import (
+    from zarr_vectors.building import (
         read_chunk_attributes,
         read_chunk_fragment_attributes,
         read_chunk_links,
@@ -543,7 +545,7 @@ def _build_local_plan(
     # merges.  Reading the v0.8 partitioned ccl per chunk-pair stays local and,
     # unlike geometric coincidence, handles BOTH coincident boundary vertices
     # AND phase-split (distinct-vertex) cross edges.
-    from zarr_vectors.core.arrays import read_links_for_tuple
+    from zarr_vectors.building import read_links_for_tuple
 
     child_set = set(child_ranges)
     oid_of_frag: dict = {}
@@ -675,7 +677,7 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     dominates the runtime).  Workers write disjoint chunk files; the level +
     arrays are created by the coordinator before dispatch.
     """
-    from zarr_vectors.core.store import get_resolution_level, open_store
+    from zarr_vectors.building import get_resolution_level, open_store
     from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
     from zarr_vectors.types.skeletons import write_skeleton_chunk
 
@@ -880,8 +882,7 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
     to its endpoint pair, so disjoint pairs are disjoint cells and the
     partition is race-safe for any grouping.
     """
-    from zarr_vectors.core.arrays import write_link_cells
-    from zarr_vectors.core.store import get_resolution_level, open_store
+    from zarr_vectors.building import get_resolution_level, open_store, write_link_cells
 
     shared = shared or {}
     ndim = shared["ndim"]
@@ -963,7 +964,7 @@ def _reduce_object_index_shard(payload: dict, shared: dict | None = None) -> dic
     ``oid % num_shards``. This worker ingests one shard's spills, groups rows by
     OID, and returns encoded v0.6 manifest blobs for just those OIDs.
     """
-    from zarr_vectors.encoding.fragments import encode_object_manifest_blocks
+    from zarr_vectors.building import encode_object_manifest_blocks
 
     shared = shared or {}
     sid_ndim = int(shared["sid_ndim"])
@@ -1043,32 +1044,31 @@ def coarsen_skeleton_level(
     """
     # Imports are local to avoid a module-load cycle
     # (coarsen.py imports this module).
-    from zarr_vectors.core.arrays import (
+    from zarr_vectors.building import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
-        _write_object_index_manifests,
         create_attribute_array,
         create_fragment_attribute_array,
         create_links_array,
+        create_links_family,
         create_object_attributes_array,
         create_object_index_array,
         create_vertices_array,
-        read_chunk_fragment_attributes,
+        finalize_links,
         list_chunk_keys,
         read_all_object_manifests,
+        read_chunk_fragment_attributes,
         read_object_attributes,
         write_object_attributes,
+        write_object_manifests,
     )
-    from zarr_vectors.core.arrays import create_links_family, finalize_links
     from zarr_vectors_tools.multiresolution.constants import (
         CROSS_LINK_TASK_SHARD_AXIS,
     )
-    from zarr_vectors.core.metadata import (
+    from zarr_vectors.building import (
         LevelMetadata,
-        get_level_chunk_shape,
-    )
-    from zarr_vectors.core.store import (
         create_resolution_level,
+        get_level_chunk_shape,
         get_resolution_level,
         open_store,
         read_level_metadata,
@@ -1076,7 +1076,7 @@ def coarsen_skeleton_level(
     )
     from zarr_vectors.exceptions import ArrayError
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-    from zarr_vectors.core.multiscale import upsert_level_transform
+    from zarr_vectors.building import upsert_level_transform
     from zarr_vectors.types.skeletons import get_coordinate_offset
 
     # Per-target-chunk work is dispatched through ``executor`` (a
@@ -1125,7 +1125,19 @@ def coarsen_skeleton_level(
     attr_names: list[str] = []
     attr_dtypes: dict[str, np.dtype] = {}
     if VERTEX_ATTRIBUTES in src:
-        for name in src[VERTEX_ATTRIBUTES]:
+        # `.children()`, NOT bare iteration. `Group.__iter__` yields sub-GROUPS
+        # only (it is `sorted(self._zarr.group_keys())`), while each per-vertex
+        # attribute is an ARRAY — so `for name in src[VERTEX_ATTRIBUTES]`
+        # silently yielded nothing, `attr_names` stayed empty, and every coarse
+        # level was written with no `vertex_attributes/` at all. Nothing
+        # errored: the store just lost `radius`/`compartment` above level 0,
+        # and the reader zero-fills the missing arrays, so `prop_radius()`
+        # evaluated to 0.0 at every level the camera actually uses.
+        #
+        # `Group.children()` exists precisely for this and says so in its
+        # docstring; `strategies/polylines.py` already uses it here. This is
+        # the only remaining site that did not.
+        for name in src[VERTEX_ATTRIBUTES].children():
             try:
                 meta = src.read_array_meta(f"{VERTEX_ATTRIBUTES}/{name}")
                 attr_dtypes[name] = np.dtype(meta.get("dtype", "float32"))
@@ -1384,7 +1396,7 @@ def coarsen_skeleton_level(
                 for i, oid in enumerate(oids.tolist()):
                     if 0 <= int(oid) < int(n_src):
                         manifest_blobs[int(oid)] = blobs[i]
-        _write_object_index_manifests(level_group, manifest_blobs)
+        write_object_manifests(level_group, manifest_blobs)
         level_group.write_array_meta(OBJECT_INDEX, {
             "zv_array": "object_index",
             "num_objects": int(n_src),
@@ -1432,9 +1444,8 @@ def coarsen_skeleton_level(
     # layout they are ordinary chunk-grid arrays that carry (and race on) the
     # same manifest, so their rebuild belongs to the ``finalize_links`` call
     # after Phase B, which re-derives it per offsets segment.
-    from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
 
-    rebuild_nonempty_manifests(level_group)
+    rebuild_presence(level_group)
 
     # --- Phase B: cross-target links, decentralized per ccl shard -------
     # Each adjacent target-chunk pair's k2 cell falls in one outer shard; group

@@ -27,6 +27,14 @@ def parse_int_list(s: str) -> list[int]:
         raise argparse.ArgumentTypeError(f"expected comma-separated integers, got {s!r}") from exc
 
 
+def parse_str_list(s: str) -> list[str]:
+    """``"x,y,z"`` -> ``["x", "y", "z"]`` (column names)."""
+    names = [x.strip() for x in s.split(",") if x.strip() != ""]
+    if not names:
+        raise argparse.ArgumentTypeError("expected at least one column name")
+    return names
+
+
 def parse_shape(s: str) -> tuple[float, ...]:
     """``"100,100,100"`` -> ``(100.0, 100.0, 100.0)`` (spatial chunk/bin size)."""
     vals = parse_float_list(s)
@@ -116,6 +124,11 @@ FORMAT_REGISTRY: dict[str, Fmt] = {
     "ply":      Fmt("ply", (".ply",), "ply", "ingest_ply", "ply", "points"),
     "las":      Fmt("las", (".las", ".laz"), "las", "ingest_las", "las", "points"),
     "csv":      Fmt("csv", (".csv", ".xyz"), "csv_points", "ingest_csv", None, "points"),
+    "h5ad":     Fmt("h5ad", (".h5ad",), "h5ad", "ingest_h5ad", "h5ad", "points"),
+    # No extension of its own: ``.csv`` auto-detects to the numeric-only
+    # ``csv`` ingester, so the keyed/mixed-type table path is opt-in via
+    # ``--format table``.
+    "table":    Fmt("table", (), "cell_table", "ingest_table", None, "points"),
     "lines":    Fmt("lines", (), "lines", "ingest_lines_csv", None, "lines"),
     "edgelist": Fmt("edgelist", (), "edgelist", "ingest_edgelist", "graph", "graph"),
     "graphml":  Fmt("graphml", (".graphml",), "graphml", "ingest_graphml", "graph", "graph"),

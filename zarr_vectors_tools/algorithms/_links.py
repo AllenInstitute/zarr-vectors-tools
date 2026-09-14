@@ -27,21 +27,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable, Sequence
 
 from zarr_vectors.constants import LINK_FRAGMENTS
-from zarr_vectors.core.arrays import (
-    link_family_policy,
-    list_link_offsets,
-    read_links,
-)
-from zarr_vectors.core.paths import (
+from zarr_vectors.building import (
     is_intra,
     link_attributes_path,
+    link_family_policy,
     links_group_path,
     links_path,
+    list_link_offsets,
     parse_offsets,
+    read_links,
 )
 
 if TYPE_CHECKING:
-    from zarr_vectors.core.store import FsGroup
+    from zarr_vectors.building import Group
     from zarr_vectors.typing import ChunkCoords
 
 __all__ = [
@@ -61,7 +59,7 @@ def chunk_key_str(chunk: Sequence[int]) -> str:
 
 
 def _segment_offsets(
-    level_group: FsGroup, seg: str, delta: int, link_width: int, sid_ndim: int | None,
+    level_group: Group, seg: str, delta: int, link_width: int, sid_ndim: int | None,
 ) -> tuple[ChunkCoords, ...] | None:
     """Offsets for one segment, from the array's meta or the path.
 
@@ -82,7 +80,7 @@ def _segment_offsets(
 
 
 def link_offset_segments(
-    level_group: FsGroup, *, delta: int = 0,
+    level_group: Group, *, delta: int = 0,
 ) -> list[tuple[str, tuple[ChunkCoords, ...]]]:
     """``(segment, offsets)`` for every array under ``links/<delta>/``.
 
@@ -102,7 +100,7 @@ def link_offset_segments(
 
 
 def cross_offset_segments(
-    level_group: FsGroup, *, delta: int = 0,
+    level_group: Group, *, delta: int = 0,
 ) -> list[tuple[str, tuple[ChunkCoords, ...]]]:
     """``(segment, offsets)`` for the NON-intra arrays under ``links/<delta>/``.
 
@@ -118,7 +116,7 @@ def cross_offset_segments(
 
 
 def read_cross_links(
-    level_group: FsGroup, *, delta: int = 0,
+    level_group: Group, *, delta: int = 0,
 ) -> list[tuple[tuple[ChunkCoords, int], ...]]:
     """Every record under ``links/<delta>`` spanning two or more chunks.
 
@@ -140,7 +138,7 @@ def read_cross_links(
 
 
 def list_link_cells(
-    level_group: FsGroup,
+    level_group: Group,
     *,
     delta: int = 0,
     involves: ChunkCoords | None = None,
@@ -188,7 +186,7 @@ def list_link_cells(
 
 
 def link_prefetch_plan(
-    level_group: FsGroup,
+    level_group: Group,
     chunk_keys: Iterable[ChunkCoords],
     *,
     delta: int = 0,
@@ -216,7 +214,7 @@ def link_prefetch_plan(
 
 
 def require_link_width(
-    level_group: FsGroup, expected: int, *, what: str, delta: int = 0,
+    level_group: Group, expected: int, *, what: str, delta: int = 0,
 ) -> int:
     """Assert the level's link family has ``link_width == expected``.
 

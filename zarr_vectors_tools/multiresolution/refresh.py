@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from zarr_vectors.exceptions import EditError
 
 if TYPE_CHECKING:
-    from zarr_vectors.core.group import Group
+    from zarr_vectors.building import Group
 
 
 def rebuild_pyramid_from_level(
@@ -38,14 +38,13 @@ def rebuild_pyramid_from_level(
 
     Returns the list of per-level coarsening summaries.
     """
-    from zarr_vectors.core.metadata import compute_bin_ratio
-    from zarr_vectors.core.store import (
+    from zarr_vectors.building import (
+        commit,
         list_resolution_levels,
         read_level_metadata,
         read_root_metadata,
         remove_resolution_level,
         session_for,
-        commit,
     )
     from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
 
@@ -71,29 +70,60 @@ def rebuild_pyramid_from_level(
 
     # Snapshot per-target settings *before* deleting; deleting wipes the
     # group's attrs along with everything else.
-    plan: list[dict[str, Any]] = []
-    for lv in sorted(above):
+    #
+    # Both factors handed to coarsen_level are ratios against the SOURCE
+    # LEVEL, but the two fields they are recovered from are not:
+    # ``bin_ratio`` is relative to level 0 (it is the NGFF scale) and
+    # ``chunk_shape`` is absolute.  Reading either as a per-level factor
+    # compounds it a second time — a pyramid built with [2, 2, 2] would
+    # come back as bins 2x, 8x, 64x the root instead of 2x, 4x, 8x.  So
+    # snapshot every level's absolute bin/chunk shape first and divide by
+    # the parent's.
+    shapes: dict[int, tuple[tuple[float, ...], tuple[float, ...]]] = {}
+    metas: dict[int, Any] = {}
+    for lv in sorted(levels):
+        if lv == 0:
+            shapes[0] = (tuple(float(b) for b in base_bin), base_chunk)
+            continue
         try:
             lm = read_level_metadata(root, lv)
         except Exception as e:
-            raise EditError(
-                f"Cannot read level metadata for level {lv}: {e}"
-            ) from None
-        bin_ratio = lm.bin_ratio or compute_bin_ratio(
-            base_bin, lm.bin_shape or base_bin,
-        )
-        coarsen_factor = float(bin_ratio[0])
-        # If the level had a per-level chunk override, encode it as a
-        # chunk_scale_factor relative to the root.
-        if lm.chunk_shape is not None:
-            try:
-                scale = tuple(
-                    int(round(s / b))
-                    for s, b in zip(lm.chunk_shape, base_chunk)
-                )
-            except Exception:
-                scale = (1,) * len(base_chunk)
+            if lv in above:
+                raise EditError(
+                    f"Cannot read level metadata for level {lv}: {e}"
+                ) from None
+            continue
+        metas[lv] = lm
+        if lm.bin_shape:
+            bin_shape = tuple(float(b) for b in lm.bin_shape)
         else:
+            # bin_ratio is level-0-relative, so it reconstructs the absolute
+            # bin from the root's — which is exactly what is wanted here.
+            ratio = lm.bin_ratio or (1,) * len(base_bin)
+            bin_shape = tuple(float(b) * float(r) for b, r in zip(base_bin, ratio))
+        chunk_shape = (
+            tuple(float(c) for c in lm.chunk_shape)
+            if lm.chunk_shape is not None else base_chunk
+        )
+        shapes[lv] = (bin_shape, chunk_shape)
+
+    plan: list[dict[str, Any]] = []
+    for lv in sorted(above):
+        lm = metas[lv]
+        parent = lm.parent_level if lm.parent_level is not None else lv - 1
+        parent_bin, parent_chunk = shapes.get(
+            parent, (tuple(float(b) for b in base_bin), base_chunk),
+        )
+        target_bin, target_chunk = shapes[lv]
+        coarsen_factor = (
+            float(target_bin[0]) / float(parent_bin[0]) if parent_bin[0] else 1.0
+        )
+        try:
+            scale = tuple(
+                max(1, int(round(t / p)))
+                for t, p in zip(target_chunk, parent_chunk)
+            )
+        except Exception:
             scale = (1,) * len(base_chunk)
         plan.append({
             "level": lv,
@@ -102,7 +132,7 @@ def rebuild_pyramid_from_level(
                 1.0 / lm.object_sparsity if lm.object_sparsity else 1.0
             ),
             "chunk_scale_factor": scale,
-            "parent_level": lm.parent_level if lm.parent_level is not None else lv - 1,
+            "parent_level": parent,
         })
 
     # Commit pending writes so coarsen_level (which re-opens the store)

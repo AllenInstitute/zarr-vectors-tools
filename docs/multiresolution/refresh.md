@@ -6,7 +6,7 @@ reusing each level's own stored settings so the result is byte-for-byte
 equivalent to a from-scratch `build_pyramid`.
 
 ```python
-from zarr_vectors.core.store import open_store
+from zarr_vectors.building import open_store
 from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
 
 root = open_store("tracts.zv", mode="r+")
@@ -50,40 +50,46 @@ issues a pre-refresh commit itself when `session_for(root)` is not
 `None`, but only for writes made through that same `root` handle.
 :::
 
-## This is not wired into `EditSession`
+## This is not wired into the parent package's editing path
 
-The rich re-coarsening is deliberately **not** injected into core.
-`zarr_vectors_tools.__init__` registers the coarsening and selection
-*strategies* into `zarr_vectors.multiresolution.registry`, but it does
-not register a refresher.
+The rich re-coarsening is deliberately **not** injected into the parent
+package. `zarr_vectors_tools.__init__` registers the coarsening and
+selection *strategies* into its registry, but it does not register a
+refresher.
+
+So editing with `refresh_pyramid=True` rebuilds the coarser levels with
+the parent package's own basic `per_object` binning pyramid — not the
+topology-preserving skeleton decimation or chunk-local polyline coarsening
+the store was built with. The editing surface itself is documented at
+{zvpy}`the data API <api/api.html>`.
 
 ```python
-from zarr_vectors.ops.edit import EditSession
+import zarr_vectors as zv
+from zarr_vectors.building import open_store
+from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
 
-root = open_store("tracts.zv", mode="r+")
+ds = zv.open("tracts.zv")
 
-# refresh_pyramid=True calls zarr_vectors.ops.refresh.rebuild_pyramid_from_level
-# — CORE's same-named basic refresher, NOT the tools one imported above.
-with EditSession(root, refresh_pyramid=True) as session:
+# For the rich re-coarsening: let the edit record what went stale, flush
+# (which commits), then drive the refresh yourself.
+with ds.editing(refresh_pyramid=False) as edit:
     ...
-
-# For the rich re-coarsening: let the session record what went stale,
-# flush (which commits), then drive the refresh yourself.
-with EditSession(root, refresh_pyramid=False) as session:
-    ...
-    report = session.flush()
+    report = edit.flush()
     report.dirty_pyramid_levels   # every level above the lowest one touched
 
-rebuild_pyramid_from_level(root, source_level=0)
+rebuild_pyramid_from_level(open_store("tracts.zv", mode="r+"), source_level=0)
 ```
 
-The two functions share a name and differ in package, which is the whole
-trap: `refresh_pyramid=True` on a skeleton or streamline store rebuilds
-its coarser levels with core's `per_object` binning pyramid —
-geometrically valid, but not the topology-preserving skeleton decimation
-or the chunk-local polyline coarsening the store was built with.
-`refresh_pyramid=False` is the honest setting: it leaves the coarse
-levels stale and tells you so via `report.dirty_pyramid_levels`.
+`refresh_pyramid=False` is the honest setting: it leaves the coarse levels
+stale and tells you so via `report.dirty_pyramid_levels`, which is what
+this package's refresher is then pointed at.
+
+:::{warning}
+This package's `rebuild_pyramid_from_level` and the parent package's
+internal refresher share a name. They are different functions in different
+packages, and only the one imported from `zarr_vectors_tools` uses the
+rich strategies.
+:::
 
 :::{note}
 `rebuild_pyramid_from_level` calls `coarsen_level` with only the four

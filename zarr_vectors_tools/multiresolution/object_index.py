@@ -16,7 +16,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
     create_fragment_attribute_array,
     create_object_attributes_array,
     write_chunk_fragment_attributes,

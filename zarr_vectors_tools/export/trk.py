@@ -80,6 +80,28 @@ def export_trk(
 
     if affine is None:
         affine = np.eye(4, dtype=np.float32)
+    affine = np.asarray(affine, dtype=np.float32)
+
+    # Fill the header's voxel size / dimensions / voxel->RAS explicitly. The
+    # streamlines are in the store's own (voxel) coordinates and ``affine`` is the
+    # voxel->RAS matrix in MILLIMETRES. Without an explicit header nibabel leaves
+    # voxel_sizes/dimensions at (1,1,1)/identity and merely bakes the affine into
+    # the points, which loses the physical frame -- freeview then refuses to place
+    # the tract, and any metre->millimetre factor in the affine silently shrinks a
+    # whole brain to a sub-millimetre speck.
+    voxel_sizes = np.linalg.norm(affine[:3, :3], axis=0).astype(np.float32)
+    if streamlines:
+        all_pts = np.concatenate(streamlines, axis=0)
+        dims = np.clip(
+            np.ceil(np.abs(all_pts).max(axis=0)).astype(np.int64) + 1, 1, 32767
+        ).astype(np.int16)
+    else:
+        dims = np.array([1, 1, 1], dtype=np.int16)
+    header = {
+        Field.VOXEL_SIZES: tuple(float(v) for v in voxel_sizes),
+        Field.DIMENSIONS: tuple(int(v) for v in dims),
+        Field.VOXEL_TO_RASMM: affine,
+    }
 
     try:
         output_path = Path(output_path)
@@ -89,7 +111,7 @@ def export_trk(
             streamlines=streamlines,
             affine_to_rasmm=affine,
         )
-        trk_file = TrkFile(tractogram=tractogram)
+        trk_file = TrkFile(tractogram=tractogram, header=header)
         trk_file.save(str(output_path))
     except Exception as e:
         raise ExportError(f"Failed to write TRK '{output_path}': {e}") from e

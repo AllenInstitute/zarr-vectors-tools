@@ -29,43 +29,46 @@ from zarr_vectors.constants import (
     COARSEN_PER_OBJECT,
     DEFAULT_CROSS_LEVEL_DEPTH,
     DEFAULT_CROSS_LEVEL_STORAGE,
+    GEOM_MESH,
     LINKS_IMPLICIT_BRANCHES,
     LINKS_IMPLICIT_SEQUENTIAL,
     OBJECT_ATTRIBUTES,
+    VERTEX_FRAGMENTS,
     VERTICES,
     XLEVEL_EXPLICIT,
     XLEVEL_NONE,
     VALID_XLEVEL_STORAGE,
 )
-from zarr_vectors.core.arrays import (
+from zarr_vectors.building import (
+    rebuild_presence,
+    LevelMetadata,
+    assign_chunks,
+    build_vertex_chunk_mapping,
     create_links_array,
     create_links_family,
     create_object_attributes_array,
     create_object_index_array,
+    create_resolution_level,
     create_vertices_array,
     finalize_links,
+    get_level_chunk_shape,
+    get_resolution_level,
     list_chunk_keys,
+    list_resolution_levels,
+    open_store,
+    partition_cross_level_edges,
     read_all_object_manifests,
     read_chunk_vertices,
+    read_level_metadata,
     read_links,
     read_object_attributes,
+    read_root_metadata,
+    update_root_metadata,
     write_chunk_links,
     write_chunk_vertices,
     write_links,
     write_object_attributes,
     write_object_index,
-)
-from zarr_vectors.core.metadata import (
-    LevelMetadata,
-    get_level_chunk_shape,
-)
-from zarr_vectors.core.store import (
-    create_resolution_level,
-    get_resolution_level,
-    list_resolution_levels,
-    open_store,
-    read_level_metadata,
-    read_root_metadata,
 )
 from zarr_vectors.exceptions import ArrayError, CoarseningError
 from zarr_vectors_tools.multiresolution.coarsen_implicit import (
@@ -73,14 +76,12 @@ from zarr_vectors_tools.multiresolution.coarsen_implicit import (
     positions_in_run,
     segment_object_by_coarse_chunk,
 )
-from zarr_vectors_tools._manifests import rebuild_nonempty_manifests
-from zarr_vectors_tools.algorithms._links import read_cross_links
-from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-from zarr_vectors.spatial.boundary import (
-    build_vertex_chunk_mapping,
-    partition_cross_level_edges,
+from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
+from zarr_vectors_tools.multiresolution.groupings import (
+    propagate_groupings,
+    surviving_oids_from,
 )
-from zarr_vectors.spatial.chunking import assign_chunks
+from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
 from zarr_vectors.typing import ChunkCoords
 
 
@@ -95,6 +96,12 @@ from zarr_vectors.typing import ChunkCoords
 # :func:`register_coarsener` without editing :func:`coarsen_level`.
 Coarsener = Callable[..., dict[str, Any]]
 _COARSENERS: dict[str, Coarsener] = {}
+
+#: Cells per deferred-write flush.  ``Group.batched_writes`` buffers each
+#: queued cell's encoded bytes until the block exits, so an unbounded block
+#: over a wide level would hold a second copy of that level in memory.  This
+#: caps the buffer while still amortising the per-cell round-trip away.
+_WRITE_BATCH_CHUNKS = 4096
 
 
 def register_coarsener(key: str, fn: Coarsener) -> None:
@@ -117,12 +124,19 @@ def select_coarsener_key(root_meta: Any) -> str:
     """Pick the coarsener key for a store from its root metadata.
 
     Skeleton stores (``implicit_sequential_with_branches``) use the
-    skeleton-aware decimator; streamline stores (``implicit_sequential`` with
-    geometry_type ``"streamline"``) use the RDP polyline coarsener; everything
-    else uses the per-object pyramid.
+    skeleton-aware decimator; mesh stores use chunk-local vertex clustering;
+    streamline stores (``implicit_sequential`` with geometry_type
+    ``"streamline"``) use the RDP polyline coarsener; everything else uses the
+    per-object pyramid.
     """
     if root_meta.links_convention == LINKS_IMPLICIT_BRANCHES:
         return "skeleton"
+    # Meshes must not reach the per-object pyramid: it concatenates every
+    # fragment each object names (quadratic when objects share chunk-wide
+    # fragments) and rebuilds links at a hardcoded ``link_width=2``, which a
+    # triangle cannot survive.
+    if GEOM_MESH in (root_meta.geometry_types or []):
+        return "mesh"
     if (
         root_meta.links_convention == LINKS_IMPLICIT_SEQUENTIAL
         and "streamline" in (root_meta.geometry_types or [])
@@ -149,6 +163,7 @@ def coarsen_level(
     coarsen_mode: str = "rdp",
     compressor: Any = None,
     executor: Any = None,
+    method: str | None = None,
 ) -> dict[str, Any]:
     """Coarsen a single level and write it to the store.
 
@@ -161,8 +176,12 @@ def coarsen_level(
         store_path: Path to the zarr vectors store.
         source_level: Level to read from.
         target_level: Level to write to (must not exist).
-        coarsen_factor: Per-object vertex aggregation factor (≥ 1).
-            ``1.0`` is the identity (no aggregation).
+        coarsen_factor: Per-object vertex aggregation factor (>= 1),
+            expressed as a **ratio against the source level's bin**, not the
+            root's: the target bin is ``source_level.bin_shape *
+            coarsen_factor``, seeded from the root's effective bin at level 0.
+            Factors therefore compound down a pyramid.  ``1.0`` is the identity
+            (no aggregation).
         sparsity_factor: Object-dropping factor (≥ 1).  Survivors keep
             their OIDs; dropped objects leave empty manifest slots.
             ``1.0`` is the identity (no drop).
@@ -214,7 +233,11 @@ def coarsen_level(
     # or improved per-geometry coarseners can be plugged in without editing
     # this function.  Default keys: ``"skeleton"`` (implicit-branch stores)
     # and ``"per_object"`` (everything else).
-    coarsener = get_coarsener(select_coarsener_key(root_meta))
+    # ``method`` overrides the automatic geometry routing. The default (None)
+    # keeps ``select_coarsener_key``'s behaviour; "per_fragment" opts into the
+    # reuse-preserving strategy, which no root metadata can imply because it is
+    # a policy choice (structure over compression), not a property of the data.
+    coarsener = get_coarsener(method or select_coarsener_key(root_meta))
     return coarsener(
         store_path,
         source_level,
@@ -256,7 +279,6 @@ def _per_object_coarsen(
     root = open_store(str(store_path), mode="r+")
     root_meta = read_root_metadata(root)
     ndim = root_meta.sid_ndim
-    base_bin = root_meta.effective_bin_shape
 
     # Source level's chunk_shape — may itself be a per-level override.
     try:
@@ -264,6 +286,16 @@ def _per_object_coarsen(
     except Exception:
         src_level_meta = None
     source_chunk_shape = get_level_chunk_shape(root_meta, src_level_meta)
+
+    # The bin ``coarsen_factor`` multiplies is the SOURCE LEVEL's, not the
+    # root's, so factors compose per level: ``[2, 2, 2]`` bins at 2x, 4x, 8x
+    # the root bin rather than 2x three times over.  Level 0 carries no
+    # bin_shape of its own, so the root's effective bin seeds the chain.
+    _src_bin = getattr(src_level_meta, "bin_shape", None) if src_level_meta else None
+    base_bin = (
+        tuple(float(b) for b in _src_bin) if _src_bin
+        else root_meta.effective_bin_shape
+    )
 
     # Target level's chunk_shape = source × chunk_scale_factor (per-axis).
     if isinstance(chunk_scale_factor, (tuple, list)):
@@ -299,14 +331,36 @@ def _per_object_coarsen(
 
     # --- Step 0: read source manifests + vertex positions ----------------
     # Read source vertex positions, indexed by (chunk_coords, fragment_idx).
+    src_chunk_keys = list(list_chunk_keys(src_group, VERTICES))
     src_fragment_positions: dict[tuple[ChunkCoords, int], npt.NDArray] = {}
-    for cc in list_chunk_keys(src_group, VERTICES):
-        try:
-            fragments = read_chunk_vertices(src_group, cc, dtype=np.float32, ndim=ndim)
-        except ArrayError:
-            continue
-        for fragment_idx, fragment in enumerate(fragments):
-            src_fragment_positions[(cc, fragment_idx)] = fragment
+    # Chunk-local start row of every fragment, accumulated as its chunk is
+    # read.  ``read_chunk_vertices`` returns fragments in fragment-index
+    # order, so the running sum here is the same answer the post-hoc scan
+    # used to produce -- at O(fragments) rather than O(chunks x fragments).
+    src_chunk_fragment_starts: dict[ChunkCoords, dict[int, int]] = {}
+    # One asyncio.gather for the whole source level rather than one
+    # round-trip per chunk.  read_chunk_vertices' own _maybe_batched_reads
+    # is a no-op inside an outer plan, so each chunk is served from this
+    # prefetch instead of opening a prefetch of its own.
+    _src_key_strs = [chunk_key_str(cc) for cc in src_chunk_keys]
+    with src_group.batched_reads([
+        (VERTICES, _src_key_strs),
+        (VERTEX_FRAGMENTS, _src_key_strs),
+    ]):
+        for cc in src_chunk_keys:
+            try:
+                fragments = read_chunk_vertices(
+                    src_group, cc, dtype=np.float32, ndim=ndim,
+                )
+            except ArrayError:
+                continue
+            starts_map: dict[int, int] = {}
+            cum = 0
+            for fragment_idx, fragment in enumerate(fragments):
+                src_fragment_positions[(cc, fragment_idx)] = fragment
+                starts_map[fragment_idx] = cum
+                cum += len(fragment)
+            src_chunk_fragment_starts[cc] = starts_map
 
     src_has_objects = "object_index" in src_group
     if src_has_objects:
@@ -315,7 +369,7 @@ def _per_object_coarsen(
         # No object_index — treat the level as one implicit object whose
         # manifest enumerates every fragment in chunk-major order.
         implicit: list[tuple[ChunkCoords, int]] = []
-        for cc in list_chunk_keys(src_group, VERTICES):
+        for cc in src_chunk_keys:
             fragment_idx = 0
             while (cc, fragment_idx) in src_fragment_positions:
                 implicit.append((cc, fragment_idx))
@@ -386,6 +440,7 @@ def _per_object_coarsen(
         _write_empty_preserve_level(
             root, source_level, target_level,
             base_bin=base_bin,
+            root_bin=root_meta.effective_bin_shape,
             coarsen_factor=coarsen_factor,
             sparsity_factor=sparsity_factor,
             inherited_num_objects=n_src_objects,
@@ -401,7 +456,8 @@ def _per_object_coarsen(
 
     all_pos = np.concatenate(flat_positions, axis=0)
 
-    # Target bin shape: source bin_shape × coarsen_factor.
+    # Target bin shape: the SOURCE level's bin_shape x coarsen_factor, so the
+    # factor is a per-level ratio and successive levels compound.
     target_bin_shape = tuple(float(b) * float(coarsen_factor) for b in base_bin)
 
     # Compute per-vertex bin coords: (N, ndim) int64.
@@ -416,11 +472,15 @@ def _per_object_coarsen(
     n_metavertices = int(inverse.max()) + 1 if inverse.size > 0 else 0
 
     # --- Step 3 (continued): centroid per bin --------------------------
-    meta_positions = np.zeros((n_metavertices, ndim), dtype=np.float32)
-    bin_counts = np.zeros(n_metavertices, dtype=np.int64)
-    np.add.at(meta_positions, inverse, all_pos)
-    np.add.at(bin_counts, inverse, 1)
-    meta_positions /= bin_counts[:, None]
+    # ``np.bincount`` rather than ``np.add.at``: the latter is the unbuffered
+    # ufunc.at path and runs an order of magnitude slower for the same
+    # scatter-add, which matters once a level carries millions of vertices.
+    bin_counts = np.bincount(inverse, minlength=n_metavertices)
+    meta_positions = np.empty((n_metavertices, ndim), dtype=np.float32)
+    for d in range(ndim):
+        meta_positions[:, d] = np.bincount(
+            inverse, weights=all_pos[:, d], minlength=n_metavertices,
+        ) / bin_counts
 
     # --- Step 4: chunk-assign metavertices ------------------------------
     chunk_assignments = assign_chunks(meta_positions, chunk_shape)
@@ -515,19 +575,8 @@ def _per_object_coarsen(
         # walking the source manifest in fragment order and pairing each
         # source vertex with its (run_idx, pos_in_run) so we know which
         # coarse fragment owns it.
-        src_chunk_fragment_starts: dict[ChunkCoords, dict[int, int]] = {}
-        src_chunks_seen = {c for (c, _) in src_fragment_positions.keys()}
-        for cc in src_chunks_seen:
-            fids = sorted(
-                fid for (c, fid) in src_fragment_positions.keys() if c == cc
-            )
-            starts_map: dict[int, int] = {}
-            cum = 0
-            for fid in fids:
-                starts_map[fid] = cum
-                cum += len(src_fragment_positions[(cc, fid)])
-            src_chunk_fragment_starts[cc] = starts_map
-
+        # src_chunk_fragment_starts is built up in Step 0 as each chunk is
+        # read -- see there.
         src_endpoint_map: dict[
             tuple[ChunkCoords, int], tuple[ChunkCoords, int]
         ] = {}
@@ -603,7 +652,14 @@ def _per_object_coarsen(
         vertex_count=int(n_metavertices),
         arrays_present=arrays_present,
         bin_shape=target_bin_shape,
-        bin_ratio=tuple(max(1, int(round(coarsen_factor))) for _ in range(ndim)),
+        # Fold-change relative to LEVEL 0, not to the source level: this is
+        # what becomes the NGFF ``scale`` transform. With per-level coarsen
+        # factors the two differ — [2, 2] is ratio 2 then 4 — so it has to be
+        # derived from the bin shapes rather than echoing coarsen_factor.
+        bin_ratio=tuple(
+            max(1, int(round(float(t) / float(r))))
+            for t, r in zip(target_bin_shape, root_meta.effective_bin_shape)
+        ),
         chunk_shape=target_chunk_shape_override,
         object_sparsity=(1.0 / sparsity_factor),
         coarsening_method=COARSEN_PER_OBJECT,
@@ -625,8 +681,24 @@ def _per_object_coarsen(
         if src_has_objects:
             create_object_index_array(level_group)
 
-    for cc, groups in sorted(per_chunk_groups.items()):
-        write_chunk_vertices(level_group, cc, groups, dtype=np.float32)
+    # Batched: each per-chunk write is two cells (vertices + vertex_fragments)
+    # and each cell was a separate sync round-trip plus a read-modify-write of
+    # the array-wide ``nonempty_chunks`` attribute -- which grows with the
+    # level, so the serial form cost O(chunks^2) bytes of metadata rewriting on
+    # top of the round-trips.  The flush writes each array's cells in one
+    # concurrent ``set_coordinate_selection`` and stamps the manifest once.
+    # Codecs are fixed when an array is created (the block above), so opening
+    # this one with compressor=None does not alter the arrays' encoding.
+    #
+    # Flushed in slices rather than as one block: a batch holds every queued
+    # cell's encoded bytes in memory until its flush, so a level wide enough to
+    # matter would otherwise buffer a second copy of itself.  A few thousand
+    # cells per flush keeps the round-trip saving and bounds the buffer.
+    _write_items = sorted(per_chunk_groups.items())
+    for _i in range(0, len(_write_items), _WRITE_BATCH_CHUNKS):
+        with level_group.batched_writes(compressor=compressor):
+            for cc, groups in _write_items[_i:_i + _WRITE_BATCH_CHUNKS]:
+                write_chunk_vertices(level_group, cc, groups, dtype=np.float32)
 
     # --- Step 7 (legacy): emit per-object manifests ---------------------
     if not use_implicit_sequential:
@@ -654,6 +726,14 @@ def _per_object_coarsen(
         write_object_index(
             level_group, new_manifests, sid_ndim=ndim,
             total_objects=n_src_objects,
+        )
+        # Carry the group taxonomy forward. Object ids are preserved, so a
+        # group's membership is meaningful here unchanged; without this the
+        # coarse level has an object index but no way to say what any object
+        # IS, and a reader has to reach back to level 0 for the taxonomy.
+        propagate_groupings(
+            src_group, level_group,
+            surviving_oids=surviving_oids_from(keep_oids, sparsity_factor),
         )
 
     # --- Step 9b: boundary-spanning links at delta 0 --------------------
@@ -695,6 +775,12 @@ def _per_object_coarsen(
                 level_group, new_cross_links, sid_ndim=ndim, delta=0,
                 directed=True,
             )
+        else:
+        # ``write_links`` stamps the family counts as a side effect, so a
+        # family with nothing to write would otherwise carry policy but no
+        # ``num_links`` — a shape every family is supposed to be free of.
+        # Finalize explicitly to stamp the zero.
+            finalize_links(level_group, delta=0)
     else:
         # Legacy Step 9b: one fragment per metavertex, so consecutive
         # manifest entries are bridged with an explicit record.  Entries
@@ -719,6 +805,12 @@ def _per_object_coarsen(
             write_links(
                 level_group, cross_links, sid_ndim=ndim, delta=0,
             )
+        else:
+        # ``write_links`` stamps the family counts as a side effect, so a
+        # family with nothing to write would otherwise carry policy but no
+        # ``num_links`` — a shape every family is supposed to be free of.
+        # Finalize explicitly to stamp the zero.
+            finalize_links(level_group, delta=0)
 
     # --- Step 10: per-object attributes with present_mask ---------------
     src_obj_attr_group_name = f"{OBJECT_ATTRIBUTES}"
@@ -792,7 +884,7 @@ def _per_object_coarsen(
     # This coarsener writes serially (no cross-process manifest race), but
     # re-derive the per-array ``nonempty_chunks`` manifests from disk anyway for
     # uniformity with the parallel coarseners and idempotence.
-    rebuild_nonempty_manifests(level_group)
+    rebuild_presence(level_group)
 
     return {
         "vertex_count": int(n_metavertices),
@@ -839,11 +931,11 @@ def _emit_inline_cross_level_links(
       first row in its chunk (multiple per-object fragments may include
       the same metavertex, but cross-level links use the first).
     """
-    # bin_key_bytes → mv_idx (bin-key-ordered, matches np.unique output).
+    # bin_key → mv_idx.  ``np.unique`` output is sorted, so a metavertex id is
+    # ``searchsorted`` on it — which lets the per-vertex lookup below run as
+    # one vectorised call per fragment instead of a dict probe (and a fresh
+    # ``bytes`` object) for every source vertex in the level.
     unique_keys = np.unique(bin_keys)
-    bin_key_to_mv: dict[bytes, int] = {
-        bytes(k): i for i, k in enumerate(unique_keys)
-    }
 
     # mv_idx → chunk-major-flat coarse index.
     coarse_chunk_assignments, n_coarse = _reconstruct_chunk_assignments(
@@ -878,26 +970,53 @@ def _emit_inline_cross_level_links(
     key_dtype = np.dtype((
         np.void, int(bin_shape_arr.shape[0]) * np.dtype(np.int64).itemsize,
     ))
-    for cc in list_chunk_keys(src_group, VERTICES):
-        try:
-            fragments = read_chunk_vertices(
-                src_group, cc, dtype=np.float32, ndim=ndim,
-            )
-        except ArrayError:
-            continue
-        for fragment in fragments:
-            n_local = int(fragment.shape[0])
-            if n_local == 0:
+    # mv_idx → coarse row, as an array so the per-vertex translation below is a
+    # gather rather than a dict probe.  -1 marks a metavertex with no coarse
+    # row, which reads back as the same "leave parent at -1" outcome.
+    # n_mv >= 1: callers gate this function on ``n_metavertices > 0`` and
+    # unique_keys is the same set of bins.
+    n_mv = int(unique_keys.shape[0])
+    mv_to_coarse_arr = np.full(max(n_mv, 1), -1, dtype=np.int64)
+    for mv_idx, coarse_idx in mv_to_coarse_global.items():
+        if 0 <= mv_idx < n_mv:
+            mv_to_coarse_arr[mv_idx] = coarse_idx
+
+    # Same one-gather-per-level prefetch as the coarsener's own source read:
+    # this is a second full walk of the source level, and unbatched it paid a
+    # round-trip per chunk.
+    src_chunk_keys = list(list_chunk_keys(src_group, VERTICES))
+    _src_key_strs = [chunk_key_str(cc) for cc in src_chunk_keys]
+    with src_group.batched_reads([
+        (VERTICES, _src_key_strs),
+        (VERTEX_FRAGMENTS, _src_key_strs),
+    ]):
+        for cc in src_chunk_keys:
+            try:
+                fragments = read_chunk_vertices(
+                    src_group, cc, dtype=np.float32, ndim=ndim,
+                )
+            except ArrayError:
                 continue
-            local_bins = np.floor(
-                np.asarray(fragment, dtype=np.float32) / bin_shape_arr,
-            ).astype(np.int64)
-            local_keys = np.ascontiguousarray(local_bins).view(key_dtype).ravel()
-            for j in range(n_local):
-                mv = bin_key_to_mv.get(bytes(local_keys[j]))
-                if mv is not None:
-                    parent[cursor + j] = mv_to_coarse_global[int(mv)]
-            cursor += n_local
+            for fragment in fragments:
+                n_local = int(fragment.shape[0])
+                if n_local == 0:
+                    continue
+                local_bins = np.floor(
+                    np.asarray(fragment, dtype=np.float32) / bin_shape_arr,
+                ).astype(np.int64)
+                local_keys = np.ascontiguousarray(local_bins).view(
+                    key_dtype,
+                ).ravel()
+                # searchsorted gives the insertion point, which is the mv id
+                # only where the key is actually present — hence the equality
+                # check, standing in for the dict's ``.get(...) is None``.
+                idx = np.searchsorted(unique_keys, local_keys)
+                np.clip(idx, 0, n_mv - 1, out=idx)
+                hit = unique_keys[idx] == local_keys
+                parent[cursor:cursor + n_local] = np.where(
+                    hit, mv_to_coarse_arr[idx], -1,
+                )
+                cursor += n_local
 
     _write_cross_level_edges(
         root,
@@ -919,11 +1038,16 @@ def _write_empty_preserve_level(
     target_level: int,
     *,
     base_bin: tuple[float, ...],
+    root_bin: tuple[float, ...],
     coarsen_factor: float,
     sparsity_factor: float,
     inherited_num_objects: int,
 ) -> None:
-    """Write an empty ID-preserving level when no surviving object has vertices."""
+    """Write an empty ID-preserving level when no surviving object has vertices.
+
+    ``base_bin`` is the SOURCE level's bin (what ``coarsen_factor`` multiplies);
+    ``root_bin`` is level 0's, needed for the level-0-relative ``bin_ratio``.
+    """
     ndim = len(base_bin)
     target_bin_shape = tuple(float(b) * float(coarsen_factor) for b in base_bin)
     level_meta = LevelMetadata(
@@ -931,7 +1055,14 @@ def _write_empty_preserve_level(
         vertex_count=0,
         arrays_present=[VERTICES, "object_index"],
         bin_shape=target_bin_shape,
-        bin_ratio=tuple(max(1, int(round(coarsen_factor))) for _ in range(ndim)),
+        # Fold-change relative to LEVEL 0, not to the source level: this is
+        # what becomes the NGFF ``scale`` transform. With per-level coarsen
+        # factors the two differ — [2, 2] is ratio 2 then 4 — so it has to be
+        # derived from the bin shapes rather than echoing coarsen_factor.
+        bin_ratio=tuple(
+            max(1, int(round(float(t) / float(r))))
+            for t, r in zip(target_bin_shape, root_bin)
+        ),
         object_sparsity=(1.0 / sparsity_factor),
         coarsening_method=COARSEN_PER_OBJECT,
         parent_level=source_level,
@@ -951,25 +1082,21 @@ def _write_empty_preserve_level(
 
 
 def _stamp_root_capability(root_group, cap: str) -> None:
-    """Add ``cap`` to root metadata's ``format_capabilities`` (idempotent)."""
-    attrs = root_group.attrs.to_dict()
-    zv = attrs.get("zarr_vectors", {})
-    caps = list(zv.get("format_capabilities", []))
-    if cap not in caps:
-        caps.append(cap)
-        zv["format_capabilities"] = caps
-        root_group.attrs.update({"zarr_vectors": zv})
+    """Add ``cap`` to root metadata's ``format_capabilities`` (idempotent).
+
+    A thin alias now: core owns the read-modify-write of its own attrs
+    block, which is what this hand-rolled while there was no primitive.
+    """
+    update_root_metadata(root_group, add_capabilities=[cap])
 
 
 def _stamp_root_cross_level(
     root_group, *, depth: int, storage: str,
 ) -> None:
     """Persist cross_level_depth/cross_level_storage on root metadata."""
-    attrs = root_group.attrs.to_dict()
-    zv = attrs.get("zarr_vectors", {})
-    zv["cross_level_depth"] = int(depth)
-    zv["cross_level_storage"] = storage
-    root_group.attrs.update({"zarr_vectors": zv})
+    update_root_metadata(
+        root_group, cross_level_depth=int(depth), cross_level_storage=storage,
+    )
 
 
 def _reconstruct_chunk_assignments(
@@ -988,16 +1115,25 @@ def _reconstruct_chunk_assignments(
     chunk_keys = list_chunk_keys(level_group, VERTICES)
     assignments: dict[ChunkCoords, npt.NDArray[np.int64]] = {}
     cursor = 0
-    for cc in chunk_keys:
-        try:
-            fragments = read_chunk_vertices(level_group, cc, dtype=np.float32, ndim=ndim)
-        except ArrayError:
-            continue
-        n = sum(int(fragment.shape[0]) for fragment in fragments)
-        if n == 0:
-            continue
-        assignments[cc] = np.arange(cursor, cursor + n, dtype=np.int64)
-        cursor += n
+    key_strs = [chunk_key_str(cc) for cc in chunk_keys]
+    # One prefetch for the level rather than one round-trip per chunk; this
+    # runs twice per coarsen step (once per level of the pair).
+    with level_group.batched_reads([
+        (VERTICES, key_strs),
+        (VERTEX_FRAGMENTS, key_strs),
+    ]):
+        for cc in chunk_keys:
+            try:
+                fragments = read_chunk_vertices(
+                    level_group, cc, dtype=np.float32, ndim=ndim,
+                )
+            except ArrayError:
+                continue
+            n = sum(int(fragment.shape[0]) for fragment in fragments)
+            if n == 0:
+                continue
+            assignments[cc] = np.arange(cursor, cursor + n, dtype=np.int64)
+            cursor += n
     return assignments, cursor
 
 
@@ -1210,8 +1346,11 @@ def _write_cross_level_edges(
         create_links_array(
             fine_lg, link_width=2, delta=delta, sid_ndim=sid_ndim,
         )
-        for cc, rows in aligned.items():
-            write_chunk_links(fine_lg, cc, [rows], delta=delta)
+        # Batched: one cell per chunk of the fine level, and finalize_links
+        # below reads the arrays back, so the block must close before it.
+        with fine_lg.batched_writes():
+            for cc, rows in aligned.items():
+                write_chunk_links(fine_lg, cc, [rows], delta=delta)
     if cross:
         # Scopes its delete to the offsets segments these records land in,
         # so the aligned (all-zero-offsets) array written above survives.
@@ -1243,8 +1382,9 @@ def _write_cross_level_edges(
             create_links_array(
                 coarse_lg, link_width=2, delta=-delta, sid_ndim=sid_ndim,
             )
-            for cc, rows in rev_aligned.items():
-                write_chunk_links(coarse_lg, cc, [rows], delta=-delta)
+            with coarse_lg.batched_writes():
+                for cc, rows in rev_aligned.items():
+                    write_chunk_links(coarse_lg, cc, [rows], delta=-delta)
         if rev_cross:
             write_links(
                 coarse_lg, rev_cross, sid_ndim=sid_ndim, delta=-delta,
@@ -1269,6 +1409,7 @@ def build_pyramid(
     coarsen_mode: str = "rdp",
     compressor: Any = None,
     executor: Any = None,
+    method: str | None = None,
 ) -> dict[str, Any]:
     """Build a multi-resolution pyramid for an existing store.
 
@@ -1282,7 +1423,10 @@ def build_pyramid(
     Args:
         store_path: Path to the store with level 0.
         factors: List of ``(coarsen_factor, sparsity_factor)`` tuples,
-            one per coarser level.
+            one per coarser level.  Both are **per-level ratios against the
+            level below**, so they compound: ``[(2, 1), (2, 1), (2, 1)]`` bins
+            at 2x, 4x and 8x the root bin.  (Sparsity was already cumulative
+            via ``relative_to="alive"``; coarsening now matches it.)
         chunk_scale_factors: Optional per-level multipliers applied to
             the source level's ``chunk_shape`` to derive each target
             level's ``chunk_shape``.  Aligned with ``factors`` (same
@@ -1360,6 +1504,9 @@ def build_pyramid(
             # not propagate to the coarser ones.
             compressor=compressor,
             executor=executor,
+            # Explicit strategy override, or None to keep the automatic
+            # geometry routing for every level.
+            method=method,
         ))
 
     # Compose deeper-delta cross-level links from the inline-emitted +1
@@ -1497,3 +1644,25 @@ def _polyline_coarsener(
 register_coarsener("skeleton", _skeleton_coarsener)
 register_coarsener("per_object", _per_object_coarsener)
 register_coarsener("polyline", _polyline_coarsener)
+
+from zarr_vectors_tools.multiresolution.strategies.fragments import (  # noqa: E402
+    _per_fragment_coarsener,
+)
+
+register_coarsener("per_fragment", _per_fragment_coarsener)
+
+from zarr_vectors_tools.multiresolution.strategies.meshes import (  # noqa: E402
+    _mesh_coarsener,
+)
+
+register_coarsener("mesh", _mesh_coarsener)
+
+from zarr_vectors_tools.multiresolution.strategies.mesh_decimate_level import (  # noqa: E402
+    _mesh_decimate_coarsener,
+)
+
+# Quadric edge collapse. Registered under its own key rather than replacing
+# "mesh", so a store can be rebuilt either way and the two compared on the
+# same data; select_coarsener_key still routes mesh stores to the incumbent
+# unless build_pyramid is given method="mesh_decimate".
+register_coarsener("mesh_decimate", _mesh_decimate_coarsener)

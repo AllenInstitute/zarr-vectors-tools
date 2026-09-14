@@ -44,10 +44,7 @@ def _register_multiscale_strategies() -> None:
 
     # Core plug-in registry — absent on pre-PR#27 cores; degrade quietly.
     try:
-        from zarr_vectors.multiresolution.registry import (
-            register_coarsen_strategy,
-            register_selection_strategy,
-        )
+        from zarr_vectors.building import register_coarsen_strategy, register_selection_strategy
     except ImportError:
         return
 

@@ -21,7 +21,7 @@ result["component_sizes"]         # (n_components,) int64, indexed by label
 
 `write_back`
 : When `True`, the per-vertex `labels` array is persisted under
-  `attributes/component_label/` via `ZVWriter.add_node_attribute_sync`
+  `attributes/component_label/` via `zarr_vectors_tools._attributes.write_vertex_attribute`
   so later reads / other algorithms / downstream tools can use it
   without recomputing.
 

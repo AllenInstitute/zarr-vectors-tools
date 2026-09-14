@@ -1,6 +1,13 @@
 """Integration tests for lazy API, headers, sharding, rechunking, and composite stores.
 
 Each test exercises a multi-feature pipeline end-to-end.
+
+The ``open_zv`` classes below are the one place in this repo that still
+imports a core internal on purpose.  ``zarr_vectors.lazy`` is deprecated
+in favour of ``zarr_vectors.open()``, but these tests exist to exercise
+the lazy layer itself -- its filter chaining, its per-polyline compute,
+its ``rechunk`` -- so pointing them at ``Dataset`` would delete the
+coverage rather than move it.  They retire when the layer does.
 """
 
 from __future__ import annotations
@@ -8,6 +15,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
+
+# Deliberate use of a deprecated API (see the module docstring), so the
+# warning is expected output rather than a signal.
+pytestmark = pytest.mark.filterwarnings("ignore:open_zv:DeprecationWarning")
 
 
 def _make_streamlines(rng, n=100, ndim=3):
@@ -91,7 +103,11 @@ class TestShardReshardChain:
 
     def test_shard_chain(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points, read_points
-        from zarr_vectors.sharding.io import reshard, is_sharded, get_shard_info
+        from zarr_vectors.building import reshard, get_shard_info
+        # The store-wide question. Core's array-level helper is now named
+        # array_is_sharded, so the two no longer collide; building exports
+        # get_shard_info() for this one.
+        from zarr_vectors.sharding.io import is_sharded
         from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
@@ -136,8 +152,12 @@ class TestShardedPyramid:
     def test_pyramid_then_shard(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import write_points, read_points
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
-        from zarr_vectors.sharding.io import reshard, is_sharded
-        from zarr_vectors.core.store import open_store, list_resolution_levels
+        from zarr_vectors.building import reshard
+        # The store-wide question. Core's array-level helper is now named
+        # array_is_sharded, so the two no longer collide; building exports
+        # get_shard_info() for this one.
+        from zarr_vectors.sharding.io import is_sharded
+        from zarr_vectors.building import open_store, list_resolution_levels
         from zarr_vectors.validate import validate
 
         rng = np.random.default_rng(42)
@@ -173,8 +193,7 @@ class TestRechunkByGroup:
     def test_group_rechunk(self, tmp_path: Path) -> None:
         from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors.rechunk import rechunk, RechunkSpec
-        from zarr_vectors.core.store import open_store
-        from zarr_vectors.core.arrays import list_chunk_keys, read_chunk_vertices
+        from zarr_vectors.building import list_chunk_keys, open_store, read_chunk_vertices
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 60)
@@ -211,8 +230,7 @@ class TestRechunkByAttribute:
     def test_length_rechunk(self, tmp_path: Path) -> None:
         from tests._source_helpers import write_polylines_with_segment_id as write_polylines
         from zarr_vectors.rechunk import rechunk, RechunkSpec
-        from zarr_vectors.core.store import open_store
-        from zarr_vectors.core.arrays import list_chunk_keys
+        from zarr_vectors.building import list_chunk_keys, open_store
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 80)
