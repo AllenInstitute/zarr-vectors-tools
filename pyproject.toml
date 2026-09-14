@@ -123,6 +123,16 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Two tiers.  The full suite takes ~30 minutes on one machine and longer when
+# anything else is running, which is too slow to gate a pull request on, so the
+# handful of tests that dominate it -- end-to-end TRK ingests and the ones that
+# spawn worker processes -- carry the ``slow`` marker:
+#
+#     pytest -m "not slow"     # the fast tier, for every push
+#     pytest                   # everything, before a merge
+markers = [
+    "slow: end-to-end ingests and process-pool tests (minutes, not seconds)",
+]
 filterwarnings = [
     # Zarr Vectors stores every per-chunk array as Zarr's variable-length-bytes dtype,
     # which has no stable Zarr v3 spec yet — the warning fires on every array

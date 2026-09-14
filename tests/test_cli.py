@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
@@ -234,6 +235,9 @@ class TestUtilities:
 # trk (needs a fixture writer; skip if nibabel absent)
 # ===================================================================
 
+# Every test here runs a full TRK ingest; together they are the largest
+# single block of suite time.
+@pytest.mark.slow
 class TestTrk:
     def test_trk_convert_serial_with_pyramid(self, tmp_path):
         pytest.importorskip("nibabel")
@@ -347,8 +351,6 @@ class TestTrk:
         so the size assertion means something.
         """
         pytest.importorskip("nibabel")
-        import json
-
         sizes = {}
         for comp in ("none", "zstd"):
             trk = _write_smooth_trk(tmp_path / f"{comp}.trk")
@@ -398,7 +400,6 @@ class TestTrk:
         pyramid levels silently stay raw while level 0 is compressed.
         """
         pytest.importorskip("nibabel")
-        import json
 
         trk = _write_smooth_trk(tmp_path / "pyr.trk")
         out = tmp_path / "pyr.zv"
@@ -458,7 +459,6 @@ class TestOverwrite:
 # --shard / shard subcommand
 # ===================================================================
 
-import json
 
 
 def _vertices_sharded(store: Path, level: int = 0) -> bool:

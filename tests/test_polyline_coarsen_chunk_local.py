@@ -29,22 +29,21 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections import defaultdict
 from functools import partial
 
 import numpy as np
 import pytest
-
 from zarr_vectors.building import (
+    get_resolution_level,
+    open_store,
     read_all_object_manifests,
     read_chunk_fragment_attributes,
     read_chunk_vertices,
 )
-from zarr_vectors_tools.algorithms._links import read_cross_links
-from zarr_vectors.building import get_resolution_level, open_store
-from tests._source_helpers import write_polylines_with_segment_id as write_polylines
-from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
 
+from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+from zarr_vectors_tools.algorithms._links import read_cross_links
+from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
 
 # ===================================================================
 # Fixtures
@@ -342,6 +341,7 @@ def test_rdp_coarsen_factor_above_one_still_simplifies(tmp_path):
 # ===================================================================
 
 
+@pytest.mark.slow
 def test_serial_matches_process_pool_executor(tmp_path):
     a = tmp_path / "serial.zv"
     b = tmp_path / "parallel.zv"
