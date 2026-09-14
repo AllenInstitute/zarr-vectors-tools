@@ -160,6 +160,23 @@ def _moller_trumbore(
 # Public API
 # =====================================================================
 
+
+def _level_chunk_shape(root, root_meta, level: int) -> tuple[float, ...]:
+    """The chunk edge lengths in force at ``level``.
+
+    A coarser level may declare its own, larger ``chunk_shape``; when it does
+    not, it inherits the root's.  Core owns the fallback rule, so ask it
+    rather than re-deriving one here.
+    """
+    from zarr_vectors.building import get_level_chunk_shape, read_level_metadata
+
+    try:
+        level_meta = read_level_metadata(root, level)
+    except Exception:  # noqa: BLE001 - a level with no metadata inherits root
+        level_meta = None
+    return get_level_chunk_shape(root_meta, level_meta)
+
+
 def closest_point(
     store_path: str | Path,
     query: np.ndarray,
@@ -198,7 +215,13 @@ def closest_point(
     root = open_store(str(store_path))
     root_meta = read_root_metadata(root)
     level_group = get_resolution_level(root, level)
-    chunk_shape = np.asarray(root_meta.chunk_shape, dtype=np.float64)
+    # A coarse level may carry its own, larger chunk_shape.  Taking the
+    # root's regardless put every chunk lookup on the wrong grid above
+    # level 0, so the bbox scan visited chunks that do not exist and missed
+    # the ones that do.
+    chunk_shape = np.asarray(
+        _level_chunk_shape(root, root_meta, level), dtype=np.float64,
+    )
     ndim = root_meta.sid_ndim
 
     vmeta = level_group.read_array_meta("vertices")
@@ -234,9 +257,14 @@ def closest_point(
             )
             new = [c for c in candidates if c in occupied and c not in visited]
             if not new:
-                if ring == 0:
-                    continue
-                break
+                # An empty ring is not the end of the search: the mesh may
+                # simply start further out.  Breaking here made every query
+                # more than ~1.5 chunks from the surface return found=False
+                # however many rings the caller allowed.  Stop only once
+                # nothing occupied is left to visit.
+                if len(visited) >= len(occupied):
+                    break
+                continue
 
             for chunk_key in new:
                 visited.add(chunk_key)
@@ -329,7 +357,10 @@ def cast_ray(
     root = open_store(str(store_path))
     root_meta = read_root_metadata(root)
     level_group = get_resolution_level(root, level)
-    chunk_shape = np.asarray(root_meta.chunk_shape, dtype=np.float64)
+    # See closest_point: the grid is the LEVEL's, not the root's.
+    chunk_shape = np.asarray(
+        _level_chunk_shape(root, root_meta, level), dtype=np.float64,
+    )
     ndim = root_meta.sid_ndim
 
     vmeta = level_group.read_array_meta("vertices")

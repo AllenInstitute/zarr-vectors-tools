@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors_tools.algorithms import cast_ray, closest_point
@@ -146,3 +147,75 @@ class TestCastRay:
             max_distance=2.0,
         )
         assert not result["hit"]
+
+
+def _plane_store(tmp_path: Path, chunk_shape) -> Path:
+    """A subdivided plane far from the origin, so the grid choice matters."""
+    n = 9
+    u = np.linspace(28.0, 32.0, n)
+    w = np.linspace(0.5, 4.5, n)
+    uu, ww = np.meshgrid(u, w, indexing="ij")
+    verts = np.column_stack(
+        [uu.ravel(), ww.ravel(), np.full(uu.size, 1.0)],
+    ).astype(np.float32)
+    faces = []
+    for i in range(n - 1):
+        for j in range(n - 1):
+            a = i * n + j
+            faces += [[a, a + 1, a + n], [a + 1, a + n + 1, a + n]]
+    store = tmp_path / "plane.zv"
+    write_mesh(
+        str(store), verts, np.asarray(faces, dtype=np.int64),
+        chunk_shape=chunk_shape,
+    )
+    return store
+
+
+class TestLevelGrid:
+
+    def test_closest_point_uses_the_levels_own_chunk_shape(
+        self, tmp_path: Path,
+    ) -> None:
+        """A coarse level may declare a larger chunk_shape than the root.
+
+        Taking the root's regardless puts the bbox scan on the wrong grid:
+        the query resolves to a chunk coordinate the level does not have,
+        so nothing is found however close the surface is.
+        """
+        from zarr_vectors.building import open_store, read_level_metadata
+        from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+
+        store = _plane_store(tmp_path, (10.0, 10.0, 10.0))
+        build_pyramid(
+            str(store), factors=[(1.0, 1.0)], chunk_scale_factors=[2],
+            method="mesh", cross_level_depth=0, cross_level_storage="none",
+        )
+        level_meta = read_level_metadata(open_store(str(store)), 1)
+        assert level_meta.chunk_shape == (20.0, 20.0, 20.0)
+
+        query = np.array([30.0, 2.5, 4.0])
+        # rings=0 searches only the query's own chunk, so it succeeds
+        # exactly when that chunk was resolved on the right grid.
+        result = closest_point(store, query, level=1, max_expansion_rings=0)
+        assert result["found"]
+        assert result["chunk_key"] == (1, 0, 0)
+        assert result["distance"] == pytest.approx(3.0, abs=1e-5)
+
+
+class TestRingExpansion:
+
+    def test_an_empty_ring_does_not_end_the_search(self, tmp_path: Path) -> None:
+        """Breaking on the first empty ring capped the reach at ~1.5 chunks.
+
+        Any query further out than that returned ``found=False`` no matter
+        what ``max_expansion_rings`` allowed.
+        """
+        store = _plane_store(tmp_path, (10.0, 10.0, 10.0))
+        query = np.array([30.0, 2.5, 61.0])  # ~6 chunks above the surface
+
+        near = closest_point(store, query, max_expansion_rings=1)
+        assert not near["found"], "1 ring genuinely cannot reach this far"
+
+        far = closest_point(store, query, max_expansion_rings=12)
+        assert far["found"]
+        assert far["distance"] == pytest.approx(60.0, abs=1e-5)
