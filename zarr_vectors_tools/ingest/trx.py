@@ -18,6 +18,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.polylines import write_polylines
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.ingest._segment_ids import stamp_segment_ids
+
 
 def ingest_trx(
     input_path: str | Path,
@@ -213,5 +215,9 @@ def ingest_trx(
         dtype=dtype,
         geometry_type="streamline",
     )
+    # The pyramid needs a per-fragment segment id, and core's writer does
+    # not produce one -- without this the ingest succeeds and the coarsening
+    # step refuses the store it just wrote.  See ingest._segment_ids.
+    stamp_segment_ids(output_path)
     result.update(enrichment_summary)
     return result
