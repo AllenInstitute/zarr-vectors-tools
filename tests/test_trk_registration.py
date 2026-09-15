@@ -35,7 +35,7 @@ from zarr_vectors.building import (
     read_chunk_vertices,
 )
 
-from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
 # Each test ingests a real TRK end to end.
 pytestmark = pytest.mark.slow

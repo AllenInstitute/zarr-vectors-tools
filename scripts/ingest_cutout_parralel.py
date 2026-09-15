@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 """Ingest a 4x4x2 flywire .frags cutout centered on a mip_0 point, in parallel."""
 import numpy as np
-from zarr_vectors_tools.ingest.precomputed_skeletons import (
-    PrecomputedFragsReader, enumerate_frag_keys, run_ingest,
+
+from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
+    PrecomputedFragsReader,
+    enumerate_frag_keys,
+    run_ingest,
 )
 
 URL = "gs://flywire_v141_m783/skeletons_mip_1"

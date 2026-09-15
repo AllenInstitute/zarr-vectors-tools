@@ -9,7 +9,7 @@ is turned back into a single analysable file.
 Needs the `h5ad` extra: `pip install "zarr-vectors-tools[h5ad]"`.
 
 ```python
-from zarr_vectors_tools.export.h5ad import export_h5ad
+from zarr_vectors_tools.convert.export.h5ad import export_h5ad
 
 summary = export_h5ad(
     "xenium.zv",                # store_path

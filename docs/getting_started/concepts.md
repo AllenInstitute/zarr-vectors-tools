@@ -20,12 +20,12 @@ a shared on-disk format:
 
 Every public entry point in this package either:
 
-1. **Reads** a file format and writes a store (`zarr_vectors_tools.ingest`),
+1. **Reads** a file format and writes a store (`zarr_vectors_tools.convert.ingest`),
 2. **Coarsens** a store into additional resolution levels
    (`zarr_vectors_tools.multiresolution`),
 3. **Computes** over a store and optionally writes results back
    (`zarr_vectors_tools.algorithms`), or
-4. **Reads** a store and writes a file format (`zarr_vectors_tools.export`).
+4. **Reads** a store and writes a file format (`zarr_vectors_tools.convert.export`).
 
 :::{important}
 This page describes **this package's** workflows only. The format they
@@ -114,13 +114,13 @@ The export modules cover the formats most users round-trip back to: CSV,
 PLY, TRK, TRX, SWC, OBJ.
 
 :::{warning}
-Neither `zarr_vectors_tools.ingest` nor `zarr_vectors_tools.export` has
+Neither `zarr_vectors_tools.convert.ingest` nor `zarr_vectors_tools.convert.export` has
 re-exports — their `__init__.py` files are empty. Always import from the
 concrete module:
 
 ```python
-from zarr_vectors_tools.ingest.csv_points import ingest_csv   # correct
-from zarr_vectors_tools.ingest import ingest_csv              # ImportError
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv   # correct
+from zarr_vectors_tools.convert.ingest import ingest_csv              # ImportError
 ```
 
 `zarr_vectors_tools.algorithms` **does** re-export, so

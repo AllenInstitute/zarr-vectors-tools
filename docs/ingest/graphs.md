@@ -13,7 +13,7 @@ node CSV holds `node_id` plus coordinates plus anything else. Node IDs
 are matched by value, not by row order.
 
 ```python
-from zarr_vectors_tools.ingest.edgelist import ingest_edgelist
+from zarr_vectors_tools.convert.ingest.edgelist import ingest_edgelist
 
 # edges.csv:  source,target,synapse_count
 # nodes.csv:  node_id,x,y,z,cell_type
@@ -65,7 +65,7 @@ raises `IngestError` rather than falling back, so leave it `False`
 ## GraphML — `ingest_graphml`
 
 ```python
-from zarr_vectors_tools.ingest.graphml import ingest_graphml
+from zarr_vectors_tools.convert.ingest.graphml import ingest_graphml
 
 ingest_graphml(
     "network.graphml",

@@ -39,10 +39,10 @@ from tests._surface_fixtures import (  # noqa: E402
     write_surf_gii,
 )
 from zarr_vectors_tools.headers.registry import HeaderRegistry  # noqa: E402
-from zarr_vectors_tools.ingest._surface_store import map_name  # noqa: E402
-from zarr_vectors_tools.ingest.cifti import attach_cifti  # noqa: E402
-from zarr_vectors_tools.ingest.freesurfer import ingest_freesurfer  # noqa: E402
-from zarr_vectors_tools.ingest.gifti import (  # noqa: E402
+from zarr_vectors_tools.convert.ingest._surface_store import map_name  # noqa: E402
+from zarr_vectors_tools.convert.ingest.cifti import attach_cifti  # noqa: E402
+from zarr_vectors_tools.convert.ingest.freesurfer import ingest_freesurfer  # noqa: E402
+from zarr_vectors_tools.convert.ingest.gifti import (  # noqa: E402
     classify_gifti,
     ingest_gifti,
 )
@@ -221,6 +221,27 @@ class TestGiftiIngest:
         with pytest.raises(IngestError, match="both .* look like the pial"):
             ingest_gifti(tmp_path, tmp_path / "out.zv", CHUNK)
 
+    def test_a_map_named_like_a_store_attribute_is_refused(
+        self, tmp_path: Path,
+    ) -> None:
+        """Otherwise it would silently replace the pial surface."""
+        source = write_gifti_subject(tmp_path / "gii")
+        write_shape_gii(source / "sub-01_hemi-L_morph.shape.gii",
+                        [np.zeros(N), np.ones(N)], names=["coords_pial", "other"])
+        with pytest.raises(IngestError, match="collide"):
+            ingest_gifti(source, tmp_path / "s.zv", CHUNK)
+
+    def test_a_name_that_is_a_label_on_one_side_and_a_map_on_the_other(
+        self, tmp_path: Path,
+    ) -> None:
+        source = write_gifti_subject(tmp_path / "gii")
+        write_shape_gii(source / "sub-01_hemi-L_desc-parc.shape.gii",
+                        [np.zeros(N)])
+        write_label_gii(source / "sub-01_hemi-R_desc-parc.label.gii",
+                        parcels(N), primary=PRIMARY["right"])
+        with pytest.raises(IngestError, match="parcellations on one hemisphere"):
+            ingest_gifti(source, tmp_path / "s.zv", CHUNK)
+
     def test_unnamed_arrays_in_one_file_are_one_multicolumn_attribute(
         self, tmp_path: Path,
     ) -> None:
@@ -254,7 +275,7 @@ class TestGiftiIngest:
         ("sub-01_hemi-R_desc-aparc.label.gii", "aparc"),
         ("100307.aparc.32k_fs_LR.dlabel.nii", "aparc"),
         ("lh.sulc.gii", "sulc"),
-        ("lh.aparc.a2009s.label.gii", "aparc_a2009s"),
+        ("lh.aparc.a2009s.label.gii", "aparc.a2009s"),
         ("sub-01_task-rest_space-fsLR_den-91k_bold.dtseries.nii", "bold"),
     ])
     def test_attribute_names_come_from_what_the_file_measures(
@@ -345,6 +366,32 @@ class TestFreeSurferIngest:
         assert summary["c_ras"] is None
         with pytest.raises(IngestError, match="needs c_ras"):
             ingest_freesurfer(subject, tmp_path / "b.zv", CHUNK, space="scanner")
+
+    def test_an_invalid_footer_is_ignored(self, tmp_path: Path) -> None:
+        """fsaverage's footers say ``valid = 0`` and carry a bogus cras."""
+        subject = write_freesurfer_subject(tmp_path / "fsavg", footer_valid=False)
+        summary = ingest_freesurfer(subject, tmp_path / "a.zv", CHUNK)
+        assert summary["space"] == "surface"
+        assert summary["c_ras"] is None
+
+    def test_the_volume_supplies_c_ras_when_the_footer_cannot(
+        self, tmp_path: Path,
+    ) -> None:
+        offset = np.array([4.0, -3.0, 12.5])
+        subject = write_freesurfer_subject(
+            tmp_path / "s", footer_valid=False, orig_cras=offset,
+        )
+        store = tmp_path / "a.zv"
+        summary = ingest_freesurfer(subject, store, CHUNK, geometry="white")
+        assert summary["space"] == "scanner"
+        assert summary["c_ras_source"] == "mri/orig.mgz"
+        np.testing.assert_allclose(summary["c_ras"], offset, atol=1e-4)
+        positions, columns = read_surface_columns(store, {})
+        hemi, vertex = _split(columns["zv_join_key"])
+        white, _ = sheet("left")
+        np.testing.assert_allclose(
+            positions[hemi == 0], white[vertex[hemi == 0]] + offset, atol=1e-3,
+        )
 
     def test_defaults_are_optional_but_named_files_are_required(
         self, tmp_path: Path,
@@ -549,9 +596,8 @@ class TestSurfacePyramid:
             list_chunk_keys,
             open_store,
             read_chunk_attributes,
+            read_chunk_vertices,
         )
-
-        from zarr_vectors.building import read_chunk_vertices
 
         level = get_resolution_level(open_store(str(gifti_store)), 1)
         chunks = list_chunk_keys(level, "vertices")
@@ -596,9 +642,8 @@ class TestCli:
         assert HeaderRegistry(str(store)).get("surface").source == "gifti"
         from zarr_vectors.building import open_store, read_level_metadata
 
-        assert read_level_metadata(open_store(str(store)), 1).coarsening_method in (
-            "mesh", "mesh_decimate",
-        )
+        method = read_level_metadata(open_store(str(store)), 1).coarsening_method
+        assert method.startswith("mesh"), method
 
     def test_convert_detects_a_freesurfer_subject(self, tmp_path: Path) -> None:
         from zarr_vectors_tools.cli import main

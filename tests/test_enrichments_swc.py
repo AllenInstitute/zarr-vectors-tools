@@ -7,14 +7,14 @@ from pathlib import Path
 import numpy as np
 from zarr_vectors.types.graphs import read_graph
 
-from zarr_vectors_tools.ingest._tree_enrichments import (
+from zarr_vectors_tools.convert.ingest._tree_enrichments import (
     BRANCH,
     CONTINUATION,
     SOMA,
     TERMINAL,
     compute_tree_metrics,
 )
-from zarr_vectors_tools.ingest.swc import ingest_swc
+from zarr_vectors_tools.convert.ingest.swc import ingest_swc
 
 # ---------------------------------------------------------------------
 # Direct helper tests against a hand-built tree.

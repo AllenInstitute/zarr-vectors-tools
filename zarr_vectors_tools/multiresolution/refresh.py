@@ -72,7 +72,8 @@ def rebuild_pyramid_from_level(
     """Re-coarsen every level above ``source_level`` from scratch.
 
     Reads each existing target level's metadata (``bin_ratio``,
-    ``object_sparsity``, ``chunk_shape``, ``coarsening_method``) and re-runs
+    ``object_sparsity``, ``chunk_shape``, ``coarsening_method``, and the
+    tools-owned coarsening record's ``rdp_tolerance``) and re-runs
     :func:`zarr_vectors_tools.multiresolution.coarsen.coarsen_level` with the
     same parameters, replacing the old level data in place.
 
@@ -80,7 +81,11 @@ def rebuild_pyramid_from_level(
     ``rdp``/``decimate`` mode for polylines: recovering only the numeric
     factors rebuilt a decimated streamline pyramid with Douglas-Peucker
     instead (measured: 114 vertices became 42), which is a different level,
-    not a refreshed one.
+    not a refreshed one.  An ``rdp`` level built with an explicit tolerance
+    is rebuilt at that tolerance, read back from the level's coarsening
+    record (:func:`~zarr_vectors_tools.multiresolution.coarsen.read_coarsening_record`);
+    a derived one is derived again from the recovered bin, which gives the
+    same value.
 
     Args:
         root: Open store handle.
@@ -118,7 +123,10 @@ def rebuild_pyramid_from_level(
         session_for,
     )
 
-    from zarr_vectors_tools.multiresolution.coarsen import coarsen_level
+    from zarr_vectors_tools.multiresolution.coarsen import (
+        coarsen_level,
+        read_coarsening_record,
+    )
 
     levels = list_resolution_levels(root)
     above = [lv for lv in levels if lv > source_level]
@@ -153,6 +161,7 @@ def rebuild_pyramid_from_level(
     # the parent's.
     shapes: dict[int, tuple[tuple[float, ...], tuple[float, ...]]] = {}
     metas: dict[int, Any] = {}
+    records: dict[int, dict[str, Any]] = {}
     for lv in sorted(levels):
         if lv == 0:
             shapes[0] = (tuple(float(b) for b in base_bin), base_chunk)
@@ -166,6 +175,9 @@ def rebuild_pyramid_from_level(
                 ) from None
             continue
         metas[lv] = lm
+        # The tools-owned record sits in the same attrs the delete wipes, so
+        # it is snapshotted here with everything else.
+        records[lv] = read_coarsening_record(root, lv)
         if lm.bin_shape:
             bin_shape = tuple(float(b) for b in lm.bin_shape)
         else:
@@ -217,6 +229,18 @@ def rebuild_pyramid_from_level(
                 f"coarsen_factors={{{lv}: <stride>}}, or rebuild with "
                 f"build_skeleton_pyramid."
             )
+        # Only an EXPLICIT tolerance is passed back.  A derived one is a
+        # function of the bin, which is recovered above exactly, so deriving
+        # it again gives the same value -- and keeps the rebuilt level
+        # labelled "derived" rather than turning it into a pinned tolerance
+        # that no longer follows the factors.
+        record = records.get(lv, {})
+        rdp_tolerance = (
+            record.get("rdp_tolerance")
+            if method_tag == "polyline_rdp"
+            and record.get("rdp_tolerance_source") == "explicit"
+            else None
+        )
         plan.append({
             "level": lv,
             "coarsen_factor": coarsen_factor,
@@ -231,6 +255,7 @@ def rebuild_pyramid_from_level(
             "coarsen_mode": (
                 "decimate" if method_tag == "polyline_decimate" else "rdp"
             ),
+            "rdp_tolerance": rdp_tolerance,
         })
 
     # Commit pending writes so coarsen_level (which re-opens the store)
@@ -255,6 +280,7 @@ def rebuild_pyramid_from_level(
             chunk_scale_factor=entry["chunk_scale_factor"],
             method=entry["method"],
             coarsen_mode=entry["coarsen_mode"],
+            rdp_tolerance=entry["rdp_tolerance"],
             sparsity_strategy=sparsity_strategy,
             # Advanced per level exactly as build_pyramid does, so a seeded
             # refresh reproduces the seeded build rather than applying one

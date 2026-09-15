@@ -83,3 +83,42 @@ def build_object_index(
     create_object_attributes_array(level_group, SEGMENT_ID_ATTR, dtype="uint64")
     write_object_attributes(level_group, SEGMENT_ID_ATTR, seg_arr)
     return oid_of_seg
+
+
+def shard_rows_by_object(
+    rows: np.ndarray, *, rows_per_shard: int = 250_000,
+) -> list[np.ndarray]:
+    """Cut object-index rows into shards of whole objects, in object-id order.
+
+    ``rows[:, 0]`` is the object id; the remaining columns are whatever the
+    reducer needs (fragment index, chunk coords, ...).  Every row of an
+    object lands in the same shard -- a reducer needs all of an object's
+    fragments to write its manifest -- and each shard is a contiguous,
+    ascending id range of about ``rows_per_shard`` rows, the working set of
+    one Phase C task.  Rows of one object keep their input order.
+
+    This is how the parallel coarseners hand their gathered rows to the
+    object-index reduce.  They used to bucket rows by ``oid % shards`` into
+    one temp file per (target chunk, shard) and read those back one by one;
+    at 250k rows a shard the whole level's rows are a few tens of megabytes
+    of int64, which is the same order as the cross-chunk anchor arrays the
+    same coordinators already gather inline.
+
+    Returns ``[]`` when ``rows`` is empty.
+    """
+    rows = np.asarray(rows)
+    n = int(rows.shape[0])
+    if n == 0:
+        return []
+    order = np.argsort(rows[:, 0], kind="stable")
+    rows = rows[order]
+    oids = rows[:, 0]
+    step = max(1, int(rows_per_shard))
+    cuts = [0]
+    while cuts[-1] < n:
+        nxt = min(n, cuts[-1] + step)
+        if nxt < n:
+            # Never split an object: advance the cut past its last row.
+            nxt = int(np.searchsorted(oids, oids[nxt], side="right"))
+        cuts.append(nxt)
+    return [rows[a:b] for a, b in zip(cuts[:-1], cuts[1:])]

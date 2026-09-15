@@ -48,6 +48,7 @@ def main() -> None:
     import shutil
 
     from zarr_vectors.building import list_resolution_levels, open_store
+
     from zarr_vectors_tools.multiresolution.coarsen import (
         _finalize_cross_level_for_store,
         coarsen_level,
@@ -124,7 +125,7 @@ def main() -> None:
         )
 
     if WORKERS > 1:
-        from zarr_vectors_tools.ingest._parallel import dask_executor
+        from zarr_vectors_tools.convert.ingest._parallel import dask_executor
         with dask_executor(WORKERS) as ex:
             _run(ex)
     else:

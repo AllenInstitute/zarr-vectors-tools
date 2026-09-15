@@ -22,8 +22,8 @@ from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.types.points import write_points
 from zarr_vectors.types.polylines import write_polylines
 
-from zarr_vectors_tools.export.csv_points import export_csv
-from zarr_vectors_tools.export.swc import export_swc
+from zarr_vectors_tools.convert.export.csv_points import export_csv
+from zarr_vectors_tools.convert.export.swc import export_swc
 
 CHUNK = (10.0, 10.0, 10.0)
 
@@ -74,7 +74,7 @@ class TestPlyExport:
 
     def test_requested_attribute_reaches_the_file(self, tmp_path: Path) -> None:
         plyfile = pytest.importorskip("plyfile")
-        from zarr_vectors_tools.export.ply import export_ply
+        from zarr_vectors_tools.convert.export.ply import export_ply
 
         store, _positions, intensity = _point_store(tmp_path / "p.zv")
         out = tmp_path / "p.ply"
@@ -106,7 +106,7 @@ class TestTrxExport:
         filled.
         """
         trx_memmap = pytest.importorskip("trx.trx_file_memmap")
-        from zarr_vectors_tools.export.trx import export_trx
+        from zarr_vectors_tools.convert.export.trx import export_trx
 
         polylines = [
             np.array(
@@ -122,7 +122,8 @@ class TestTrxExport:
 
         out = tmp_path / "out.trx"
         summary = export_trx(str(store), str(out))
-        assert summary == {"streamline_count": 2, "vertex_count": 5}
+        assert summary["streamline_count"] == 2
+        assert summary["vertex_count"] == 5
 
         loaded = trx_memmap.load(str(out))
         try:

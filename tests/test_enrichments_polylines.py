@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from zarr_vectors_tools.ingest._polyline_enrichments import (
+from zarr_vectors_tools.convert.ingest._polyline_enrichments import (
     arc_length_normalized,
     compute_endpoints,
     compute_lengths,

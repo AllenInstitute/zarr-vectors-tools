@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from zarr_vectors.types.lines import read_lines
 
-from zarr_vectors_tools.ingest.lines import ingest_lines_csv
+from zarr_vectors_tools.convert.ingest.lines import ingest_lines_csv
 
 
 def _write_lines_csv(path: Path, rows: list[list[float]]) -> None:

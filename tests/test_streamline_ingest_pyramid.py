@@ -91,7 +91,7 @@ def _streamlines() -> list[np.ndarray]:
 
 def test_tck_ingest_produces_a_coarsenable_store(tmp_path: Path) -> None:
     pytest.importorskip("nibabel")
-    from zarr_vectors_tools.ingest.tck import ingest_tck
+    from zarr_vectors_tools.convert.ingest.tck import ingest_tck
 
     source = _write_tck(tmp_path / "t.tck", _streamlines())
     store = tmp_path / "tck.zv"
@@ -101,7 +101,7 @@ def test_tck_ingest_produces_a_coarsenable_store(tmp_path: Path) -> None:
 
 def test_trk_ingest_produces_a_coarsenable_store(tmp_path: Path) -> None:
     nib = pytest.importorskip("nibabel")
-    from zarr_vectors_tools.ingest.trk import ingest_trk
+    from zarr_vectors_tools.convert.ingest.trk import ingest_trk
 
     source = tmp_path / "t.trk"
     tractogram = nib.streamlines.Tractogram(

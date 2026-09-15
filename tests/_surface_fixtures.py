@@ -170,10 +170,10 @@ def write_gifti_subject(root: Path, hemispheres=("left", "right")) -> Path:
 # FreeSurfer
 # ---------------------------------------------------------------------------
 
-def _volume_info(cras) -> OrderedDict:
+def _volume_info(cras, valid: bool = True) -> OrderedDict:
     return OrderedDict([
         ("head", np.array([2, 0, 20], dtype=np.int32)),
-        ("valid", "1  # volume info valid"),
+        ("valid", "1  # volume info valid" if valid else "0  # volume info invalid"),
         ("filename", "../mri/filled-pretess255.mgz"),
         ("volume", np.array([256, 256, 256])),
         ("voxelsize", np.array([1.0, 1.0, 1.0])),
@@ -189,16 +189,37 @@ def write_freesurfer_subject(
     *,
     hemispheres=("left", "right"),
     with_cras: bool = True,
+    footer_valid: bool = True,
+    orig_cras=None,
     morphometry=("thickness", "curv"),
 ) -> Path:
-    """A minimal ``recon-all`` subject: surf/ and label/ for each hemisphere."""
+    """A minimal ``recon-all`` subject: surf/ and label/ for each hemisphere.
+
+    ``footer_valid=False`` writes the footer the way ``fsaverage`` ships it:
+    present, marked invalid, with a meaningless ``cras``.  ``orig_cras``
+    writes an ``mri/orig.mgz`` whose header records that offset.
+    """
+    import nibabel as nib
     import nibabel.freesurfer as fs
 
     surf = root / "surf"
     label = root / "label"
     surf.mkdir(parents=True, exist_ok=True)
     label.mkdir(parents=True, exist_ok=True)
-    info = _volume_info(CRAS) if with_cras else None
+    if orig_cras is not None:
+        (root / "mri").mkdir(exist_ok=True)
+        # MGH derives c_ras from the affine: the world position of the
+        # volume centre, shape / 2.
+        affine = np.eye(4)
+        affine[:3, 3] = np.asarray(orig_cras, dtype=float) - 2.0
+        nib.save(nib.MGHImage(np.zeros((4, 4, 4), dtype=np.uint8), affine),
+                 str(root / "mri" / "orig.mgz"))
+    if not with_cras:
+        info = None
+    elif footer_valid:
+        info = _volume_info(CRAS)
+    else:
+        info = _volume_info([-1.9991, 0.0, -1.9991], valid=False)
     for hemisphere in hemispheres:
         prefix = "lh" if hemisphere == "left" else "rh"
         vertices, faces = sheet(hemisphere)

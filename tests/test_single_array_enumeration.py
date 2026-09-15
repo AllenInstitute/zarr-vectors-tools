@@ -36,6 +36,7 @@ from functools import partial
 from pathlib import Path
 
 import numpy as np
+import pytest
 from zarr_vectors.building import get_resolution_level, list_chunk_keys, open_store
 
 from tests._source_helpers import write_polylines_with_segment_id as write_polylines
@@ -99,6 +100,8 @@ def test_level0_vertices_is_single_array(tmp_path):
     assert _vertex_chunk_set(store, 0), "no chunks enumerated at level 0"
 
 
+# The three tests below build pyramids over a real process pool.
+@pytest.mark.slow
 def test_parallel_pyramid_enumerates_same_chunks_as_serial(tmp_path):
     """Every level of a multi-process pyramid must enumerate exactly the chunks
     a serial build does — proving the manifest survives the parallel write race.
@@ -134,6 +137,7 @@ def test_parallel_pyramid_enumerates_same_chunks_as_serial(tmp_path):
         _assert_single_array_layout(b, level)
 
 
+@pytest.mark.slow
 def test_negative_coordinates_enumerate_through_parallel_coarsener(tmp_path):
     """Points below the grid origin produce negative chunk coords (addressed via
     ``chunk_grid_origin``); they must enumerate and round-trip through a
@@ -166,6 +170,7 @@ def test_negative_coordinates_enumerate_through_parallel_coarsener(tmp_path):
     )
 
 
+@pytest.mark.slow
 def test_dense_parallel_cross_link_pyramid_completes(tmp_path):
     """A dense, boundary-crossing bundle survives a multi-process pyramid.
 

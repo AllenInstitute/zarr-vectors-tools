@@ -19,7 +19,7 @@ class TestPointCloudPipeline:
         from zarr_vectors.types.points import read_points, write_points
         from zarr_vectors.validate import validate
 
-        from zarr_vectors_tools.export.csv_points import export_csv
+        from zarr_vectors_tools.convert.export.csv_points import export_csv
         from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
         rng = np.random.default_rng(42)
@@ -70,8 +70,8 @@ class TestCSVPipeline:
     def test_csv_round_trip(self, tmp_path: Path) -> None:
         from zarr_vectors.types.points import read_points
 
-        from zarr_vectors_tools.export.csv_points import export_csv
-        from zarr_vectors_tools.ingest.csv_points import ingest_csv
+        from zarr_vectors_tools.convert.export.csv_points import export_csv
+        from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
         rng = np.random.default_rng(99)
         positions = rng.uniform(0, 100, size=(200, 3))
@@ -102,8 +102,8 @@ class TestSkeletonPipeline:
         from zarr_vectors.types.graphs import read_graph
         from zarr_vectors.validate import validate
 
-        from zarr_vectors_tools.export.swc import export_swc
-        from zarr_vectors_tools.ingest.swc import ingest_swc
+        from zarr_vectors_tools.convert.export.swc import export_swc
+        from zarr_vectors_tools.convert.ingest.swc import ingest_swc
         from zarr_vectors_tools.multiresolution.strategies.graphs import prune_skeleton
 
         swc_in = tmp_path / "neuron.swc"
@@ -157,8 +157,8 @@ class TestMeshPipeline:
         from zarr_vectors.types.meshes import read_mesh
         from zarr_vectors.validate import validate
 
-        from zarr_vectors_tools.export.obj import export_obj
-        from zarr_vectors_tools.ingest.obj import ingest_obj
+        from zarr_vectors_tools.convert.export.obj import export_obj
+        from zarr_vectors_tools.convert.ingest.obj import ingest_obj
         from zarr_vectors_tools.multiresolution.strategies.meshes import coarsen_mesh_cluster
 
         obj_in = tmp_path / "grid.obj"

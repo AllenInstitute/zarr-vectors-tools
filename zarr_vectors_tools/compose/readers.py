@@ -1,6 +1,6 @@
 """Readers that return geometry instead of building a store.
 
-Every module in :mod:`zarr_vectors_tools.ingest` ends in a ``write_*``
+Every module in :mod:`zarr_vectors_tools.convert.ingest` ends in a ``write_*``
 call.  That is the right shape for "turn this file into a store" and the
 wrong shape for "put this file into the store I already have": the
 caller wants the streamlines, not a second store to reconcile.  These

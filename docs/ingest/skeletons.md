@@ -9,7 +9,7 @@ segment skeletons pulled out of an EM volume, see
 ## SWC — `ingest_swc`
 
 ```python
-from zarr_vectors_tools.ingest.swc import ingest_swc
+from zarr_vectors_tools.convert.ingest.swc import ingest_swc
 
 summary = ingest_swc(
     "neuron.swc",
@@ -68,6 +68,38 @@ depths measured from only one of them.
 `SWCHeader`. Many tools stash `coordinate_space` and scaling annotations
 there, and export needs them to write a file the original toolchain will
 still read.
+
+## Per-segment metrics — `compute_skeleton_metrics`
+
+One pass over a level's chunks measures every object and stores the result as
+object attributes, indexed by object id:
+
+```python
+from zarr_vectors_tools.algorithms.skeleton_metrics import compute_skeleton_metrics
+
+df = compute_skeleton_metrics("flywire.zv", level=0)   # writes object_attributes/*
+df.sort_values("cable_length").tail()
+```
+
+The metrics are `cable_length`, `node_count`, `leaf_count`, `branch_count`,
+`component_count`, `max_strahler` and `extent` (bounding-box size, one column
+per axis).
+
+- Cross-chunk edges are included, and the boundary vertex igneous duplicates
+  into both chunks counts once.
+- Strahler order is rooted at the stored root when there is one (SWC),
+  otherwise at the tip with the smallest (x, y, z).
+- Objects a sparsity level emptied read 0, and NaN for `extent`.
+- Pass `metrics=[...]` for a subset, `write=False` to only return the frame,
+  and `executor=` to summarise chunks in parallel.
+
+Cable length and counts are per level: a decimated level is shorter and has
+fewer nodes than level 0.
+
+:::{note}
+The `attribute` sparsity strategy cannot yet pick objects by a stored metric:
+no coarsener passes object attribute values through to it.
+:::
 
 ## See also
 

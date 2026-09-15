@@ -9,6 +9,9 @@ Subcommands:
     info      Print a store's geometry, resolution levels, and metadata.
     attach    Stage a table's columns (or CIFTI maps) onto a store's vertices.
     shard     Repack per-chunk cells into shards, or undo it.
+    bundles   Summarise each group of a streamline store.
+    synapses  Join a synapse table to an EM skeleton store by segment id.
+    run       Run a recipe: several of the above in order, resumable.
 
 Also runnable as ``python -m zarr_vectors_tools``.
 """
@@ -18,11 +21,12 @@ from __future__ import annotations
 import argparse
 import sys
 
-from zarr_vectors_tools.ingest.attach import DEFAULT_KEY_ATTRIBUTE
+from zarr_vectors_tools.convert.ingest.attach import DEFAULT_KEY_ATTRIBUTE
 
 from . import attach as _attach
 from . import compose as _compose
 from . import convert as _convert
+from . import pipeline as _pipeline
 from . import pyramid as _pyramid
 from ._args import (
     EXPORT_REGISTRY,
@@ -77,6 +81,29 @@ def _add_pyramid_args(p: argparse.ArgumentParser) -> None:
     g.add_argument(
         "--coarsen-mode", dest="coarsen_mode", choices=("rdp", "decimate"),
         default="rdp", help="streamline/polyline vertex reduction (default: rdp)",
+    )
+    g.add_argument(
+        "--rdp-tolerance", type=parse_float_list, dest="rdp_tolerance",
+        default=None, metavar="T1,T2,...",
+        help="streamlines, rdp mode: per-level Douglas-Peucker tolerance, the "
+             "furthest a level may stray from the level below, in store units "
+             "(e.g. mm). One per --coarsen entry. Default: half the smallest "
+             "edge of each level's bin",
+    )
+    # Shared by convert and pyramid.  On a point, graph or line store these
+    # links are most of the build: a 300k-point pyramid took 80 s with the
+    # default explicit links and 5 s with none.
+    g.add_argument(
+        "--cross-level-storage", dest="cross_level_storage",
+        choices=("none", "implicit", "explicit"), default=None,
+        help="links between pyramid levels: 'explicit' writes both directions "
+             "(the default when omitted), 'implicit' fine-to-coarse only, "
+             "'none' skips them",
+    )
+    g.add_argument(
+        "--cross-level-depth", dest="cross_level_depth", type=int, default=None,
+        metavar="N",
+        help="largest level gap to link (default 1; -1 = every pair of levels)",
     )
 
 
@@ -153,6 +180,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "'dask' (needs the [parallel] extra)")
     c.add_argument("--n-parts", type=int, dest="n_parts", default=None,
                    help="trk: file-split granularity")
+    c.add_argument("--scratch-dir", dest="scratch_dir", default=None, metavar="DIR",
+                   help="trk: keep the intermediate part files and a progress "
+                        "record here instead of a temporary directory")
+    c.add_argument("--resume", action="store_true",
+                   help="trk: reuse what an earlier run with the same options "
+                        "finished in --scratch-dir (the file scan, Phase A, "
+                        "level 0, finished pyramid levels)")
     c.add_argument("--apply-affine", action="store_true", dest="apply_affine",
                    help="trk only (rejected for other inputs): bake the "
                         "vox_to_ras affine into vertex positions (RAS world "
@@ -247,7 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--hemisphere", action="append", dest="hemispheres", default=None,
         choices=("left", "right", "lh", "rh"),
         help="freesurfer: hemispheres to read (repeatable; default both). "
-             "gifti: the hemisphere of files that do not name one",
+             "gifti: the hemisphere of files that do not name one. gifti "
+             "export: which hemispheres to write",
     )
     sf.add_argument(
         "--space", choices=("auto", "scanner", "surface"), default="auto",
@@ -259,7 +294,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--surface", action="append", dest="surfaces", default=None,
         metavar="NAME",
         help="freesurfer: other surfaces to keep (repeatable; default white, "
-             "pial, inflated, sphere when present)",
+             "pial, inflated, sphere when present). gifti export: which "
+             "surfaces to write (default all)",
     )
     sf.add_argument(
         "--morph", action="append", dest="morph", default=None, metavar="NAME",
@@ -273,10 +309,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     pc = c.add_argument_group(
-        "precomputed (Neuroglancer skeleton layer)",
-        "A layer with a spatial index keeps its own chunk grid, so "
-        "--chunk-shape is left out; one without needs --chunk-shape, in nm. "
-        "--coarsen gives each level's decimation stride.",
+        "precomputed (Neuroglancer skeleton or mesh layer)",
+        "A skeleton layer with a spatial index keeps its own chunk grid, so "
+        "--chunk-shape is left out; one without needs --chunk-shape, in nm, "
+        "and --coarsen gives each level's decimation stride. A mesh layer "
+        "(the mesh directory, not the segmentation above it) needs "
+        "--chunk-shape too, and builds its pyramid like any mesh input.",
     )
     pc.add_argument(
         "--anchor", type=parse_int_list, default=None, metavar="X,Y,Z",
@@ -296,8 +334,13 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument(
         "--segment-id", action="append", type=int, dest="segment_ids",
         default=None, metavar="ID",
-        help="no spatial index: ingest only this segment (repeatable; "
-             "default: every ID in segment_properties)",
+        help="no spatial index, or a mesh layer: ingest only this segment "
+             "(repeatable; default: every segment in the layer)",
+    )
+    pc.add_argument(
+        "--lod", type=int, default=None, metavar="N",
+        help="multi-resolution mesh layer: level of detail to read "
+             "(default: 0, the finest)",
     )
     pc.add_argument(
         "--drop-interior-below", type=int, dest="drop_interior_below",
@@ -329,7 +372,25 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument(
         "--attribute", action="append", dest="export_attributes",
         default=None, metavar="NAME",
-        help="per-vertex attributes to include (repeatable; csv/ply/h5ad)",
+        help="per-vertex attributes to include (repeatable). csv/ply/h5ad "
+             "write none by default; trk/trx write every numeric one unless "
+             "this names them",
+    )
+    e.add_argument(
+        "--object-attribute", action="append", dest="export_object_attributes",
+        default=None, metavar="NAME",
+        help="trk/trx: per-streamline attributes to include (repeatable; "
+             "default: every numeric one)",
+    )
+    e.add_argument(
+        "--unit", dest="export_unit", default=None, metavar="UNIT",
+        help="precomputed: the store's coordinate unit (nanometer, micrometer, "
+             "millimeter) when its metadata does not record one",
+    )
+    e.add_argument(
+        "--prefix", dest="export_prefix", default=None, metavar="TEXT",
+        help="gifti: leading file-name part, e.g. sub-01 gives "
+             "sub-01_hemi-L_pial.surf.gii",
     )
     c.set_defaults(func=_convert.run)
 
@@ -340,9 +401,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("store", help="existing zarr-vectors store path")
     _add_pyramid_args(p)
-    p.add_argument("--cross-level-storage", dest="cross_level_storage",
-                   choices=("none", "implicit", "explicit"), default=None)
-    p.add_argument("--cross-level-depth", dest="cross_level_depth", type=int, default=None)
     p.add_argument("--compressor", choices=("none", "zstd", "blosc"),
                    default="none",
                    help="codec for the coarser levels' per-chunk arrays "
@@ -366,6 +424,54 @@ def build_parser() -> argparse.ArgumentParser:
     i = sub.add_parser("info", help="print store geometry, levels, and metadata")
     i.add_argument("store", help="zarr-vectors store path")
     i.set_defaults(func=_pyramid.run_info)
+
+    # ---- synapses ----------------------------------------------------------
+    sy = sub.add_parser(
+        "synapses", help="join a synapse table to an EM skeleton store by segment id",
+        description="Write a CAVE-style synapse table as a point store whose object "
+                    "ids are the skeleton store's, and count each neuron's pre- and "
+                    "post-synaptic sites onto it.",
+    )
+    sy.add_argument("table", help="synapse table: .csv, .tsv, or .parquet with pyarrow")
+    sy.add_argument("skeletons", help="skeleton store with per-object segment ids")
+    sy.add_argument("output", help="point store to write")
+    sy.add_argument("--side", choices=("post", "pre"), default="post",
+                    help="whose segment owns each synapse (default: post)")
+    sy.add_argument("--position", default="ctr_pt_position", metavar="COLUMN",
+                    help="position column, '[x y z]' strings or COLUMN_x/_y/_z "
+                         "(default: ctr_pt_position)")
+    sy.add_argument("--resolution", type=parse_float_list, default=[1.0, 1.0, 1.0],
+                    metavar="X,Y,Z", help="nanometres per voxel of the positions, "
+                                          "e.g. 4,4,40 (default: 1,1,1)")
+    sy.add_argument("--chunk-shape", type=parse_shape, dest="chunk_shape", default=None,
+                    metavar="X,Y,Z", help="chunk size in nm (default: the skeleton store's)")
+    sy.add_argument("--column", action="append", dest="columns", default=None,
+                    metavar="NAME", help="further numeric column to keep (repeatable)")
+    sy.add_argument("--unmatched", choices=("keep", "drop", "error"), default="keep",
+                    help="synapses whose segment the skeleton store lacks (default: keep "
+                         "as one extra object)")
+    sy.add_argument("--no-counts", action="store_true", dest="no_counts",
+                    help="do not write synapse counts to the skeleton store")
+    sy.set_defaults(func=_convert.run_synapses)
+
+    # ---- bundles -----------------------------------------------------------
+    b = sub.add_parser(
+        "bundles", help="summarise each object group of a streamline store",
+        description="One row per group: streamline count, length statistics, "
+                    "mean tortuosity and endpoint centroids, written to the "
+                    "store as group attributes unless --no-write.",
+    )
+    b.add_argument("store", help="zarr-vectors streamline store path")
+    b.add_argument("--level", type=int, default=None,
+                   help="summarise this level from its own geometry and write it "
+                        "there only (default: level 0, written to every level)")
+    b.add_argument("--no-write", action="store_true", dest="no_write",
+                   help="print the table without storing it")
+    b.add_argument("--as-stored", action="store_true", dest="as_stored",
+                   help="average endpoints as stored instead of orienting each bundle")
+    b.add_argument("--csv", default=None, metavar="FILE",
+                   help="also write the table to this CSV file")
+    b.set_defaults(func=_pyramid.run_bundles)
 
     # ---- attach ------------------------------------------------------------
     a = sub.add_parser(
@@ -529,6 +635,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="print the parts and their sizes, and stop")
     sp.set_defaults(func=_compose.run_split)
+
+    # ---- run ---------------------------------------------------------------
+    r = sub.add_parser(
+        "run", help="run a recipe of zvtools steps in order, resumably",
+        description="Run the steps a recipe lists (convert, pyramid, attach, "
+                    "merge, split, validate, info, shard), each with the same "
+                    "options as its own command. Progress is kept next to the "
+                    "recipe, so a rerun skips the steps that already finished.",
+    )
+    r.add_argument("recipe", help="recipe file: .yaml, .toml or .json")
+    r.add_argument("--force", action="store_true",
+                   help="rerun every step, even ones that finished")
+    r.add_argument("--from", type=int, dest="start", default=None, metavar="N",
+                   help="rerun from step N (1-based) onward")
+    r.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print each step's zvtools command, and stop")
+    r.set_defaults(func=_pipeline.run)
 
     return parser
 

@@ -26,13 +26,13 @@ Full flag reference: [The `zvtools` CLI](cli.md).
 ## From Python
 
 :::{warning}
-`zarr_vectors_tools.ingest` and `zarr_vectors_tools.export` have **empty**
+`zarr_vectors_tools.convert.ingest` and `zarr_vectors_tools.convert.export` have **empty**
 `__init__.py` files — there are no re-exports. Import from the concrete
 module or you will get an `ImportError`:
 
 ```python
-from zarr_vectors_tools.ingest.csv_points import ingest_csv   # correct
-from zarr_vectors_tools.ingest import ingest_csv              # ImportError
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv   # correct
+from zarr_vectors_tools.convert.ingest import ingest_csv              # ImportError
 ```
 
 `zarr_vectors_tools.algorithms` is the exception — it does re-export.
@@ -41,7 +41,7 @@ from zarr_vectors_tools.ingest import ingest_csv              # ImportError
 ### Ingest a point cloud
 
 ```python
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
 result = ingest_csv(
     "cells.csv",
@@ -95,7 +95,7 @@ this works on stores much larger than memory.
 ### Export a subset
 
 ```python
-from zarr_vectors_tools.export.ply import export_ply
+from zarr_vectors_tools.convert.export.ply import export_ply
 
 export_ply(
     "cells.zarrvectors",
@@ -113,9 +113,9 @@ small enough to open in a viewer.
 ## A skeleton round trip
 
 ```python
-from zarr_vectors_tools.ingest.swc import ingest_swc
+from zarr_vectors_tools.convert.ingest.swc import ingest_swc
 from zarr_vectors_tools.algorithms import compute_connected_components
-from zarr_vectors_tools.export.swc import export_swc
+from zarr_vectors_tools.convert.export.swc import export_swc
 
 # 1. Ingest an SWC skeleton, deriving Strahler order and node kinds.
 ingest_swc(

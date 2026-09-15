@@ -17,8 +17,8 @@ anndata = pytest.importorskip("anndata", reason="anndata not installed")
 
 import pandas as pd  # noqa: E402  (after the importorskip guard)
 
-from zarr_vectors_tools.export.h5ad import export_h5ad  # noqa: E402
-from zarr_vectors_tools.ingest.h5ad import ingest_h5ad  # noqa: E402
+from zarr_vectors_tools.convert.export.h5ad import export_h5ad  # noqa: E402
+from zarr_vectors_tools.convert.ingest.h5ad import ingest_h5ad  # noqa: E402
 
 
 def make_adata(

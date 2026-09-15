@@ -25,17 +25,22 @@ arrays and prefetch actually happens.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from zarr_vectors.building import (
+    apply_perm_inverse,
     is_intra,
     link_attributes_path,
     link_family_policy,
     links_group_path,
+    links_has_perm,
     links_path,
     list_link_offsets,
     parse_offsets,
+    read_chunk_links,
     read_links,
+    read_links_for_tuple,
 )
 from zarr_vectors.constants import LINK_FRAGMENTS
 
@@ -46,10 +51,14 @@ if TYPE_CHECKING:
 __all__ = [
     "chunk_key_str",
     "cross_offset_segments",
+    "link_cell_prefetch_plan",
+    "link_cell_reads",
     "link_offset_segments",
     "link_prefetch_plan",
     "list_link_cells",
+    "prune_prefetch_plan",
     "read_cross_links",
+    "read_link_cell_records",
     "require_link_width",
 ]
 
@@ -186,6 +195,156 @@ def list_link_cells(
     return sorted(out, key=lambda t: (len(t), t))
 
 
+def link_cell_reads(
+    level_group: Group, *, delta: int = 0,
+) -> tuple[list[tuple[ChunkCoords, ...]], list[int], dict[str, Any]]:
+    """Every cross-chunk cell, plus what a worker needs to read it blind.
+
+    The coordinator-side half of :func:`read_link_cell_records`.  Returns
+    ``(cells, segments, spec)``: ``cells`` exactly as :func:`list_link_cells`
+    lists them (same tuples, same order), ``segments[i]`` the index into
+    ``spec["arrays"]`` of the offsets array cell ``i`` lives in, and ``spec``
+    the family policy (``link_width``, ``directed``, ``store``), the intra
+    array's path (``intra_path``, ``None`` if the level has none) and, per
+    cross array, its ``path``, ``offsets``, ``dtype`` and ``has_perm``.
+
+    ``spec`` is small and picklable, so it travels to workers once per phase.
+    With it a worker reads a cell's records from nothing but the cell itself:
+    no family-policy lookup, no segment listing, no per-segment metadata and
+    no presence probe -- which :func:`read_links_for_tuple` repeats for every
+    cell and which dominated the chunk-local coarseners' Phase A on a local
+    filesystem (every lookup is a ``zarr.json`` open).  Costs the same
+    listings :func:`list_link_cells` already paid.
+
+    ``delta == 0`` only, for the reason :func:`list_link_cells` gives.
+    """
+    if delta != 0:
+        raise NotImplementedError(
+            "link_cell_reads supports delta=0 only; cross-level cells need "
+            "anchor_chunk with both levels' scales."
+        )
+    spec: dict[str, Any] = {
+        "link_width": None, "directed": False, "store": "canonical",
+        "intra_path": None, "arrays": [],
+    }
+    policy = link_family_policy(level_group, delta)
+    if policy is None:
+        return [], [], spec
+    link_width, sid_ndim, directed, store = policy
+    spec.update(link_width=link_width, directed=directed, store=store)
+    found: list[tuple[tuple[int, ...], tuple[ChunkCoords, ...], int]] = []
+    for seg in list_link_offsets(level_group, delta):
+        path = f"{links_group_path(delta)}/{seg}"
+        meta = level_group.read_array_meta(path) or {}
+        raw = meta.get("offsets")
+        if raw is not None:
+            offsets = tuple(tuple(int(c) for c in o) for o in raw)
+        elif sid_ndim is not None:
+            try:
+                offsets = parse_offsets(seg, sid_ndim=sid_ndim, link_width=link_width)
+            except ValueError:
+                continue
+        else:
+            continue
+        if is_intra(offsets):
+            spec["intra_path"] = links_path(delta, offsets)
+            continue
+        index = len(spec["arrays"])
+        spec["arrays"].append({
+            "path": links_path(delta, offsets),
+            "offsets": [list(o) for o in offsets],
+            "dtype": str(meta.get("dtype", "int64")),
+            # The rule read_links_for_tuple applies: trust the array's stamp,
+            # else recompute it from the family policy.
+            "has_perm": bool(meta.get(
+                "has_perm",
+                links_has_perm(offsets, delta=delta, directed=directed, store=store),
+            )),
+        })
+        for key in level_group.list_chunks(links_path(delta, offsets)):
+            try:
+                src = tuple(int(p) for p in key.split("."))
+            except ValueError:
+                continue
+            cell = (src,) + tuple(
+                tuple(s + int(o) for s, o in zip(src, off)) for off in offsets
+            )
+            found.append((cell, offsets, index))
+    # list_link_cells' order and de-duplication (a cell names one array).
+    by_cell: dict[tuple[ChunkCoords, ...], int] = {}
+    for cell, _offsets, index in found:
+        by_cell.setdefault(cell, index)
+    cells = sorted(by_cell, key=lambda t: (len(t), t))
+    return cells, [by_cell[c] for c in cells], spec
+
+
+def link_cell_prefetch_plan(
+    cells: Sequence[Sequence[ChunkCoords]],
+    segments: Sequence[int],
+    spec: dict[str, Any],
+) -> list[tuple[str, list[str]]]:
+    """``batched_reads`` entries for exactly the cells named, grouped by array.
+
+    Every entry exists (the cells came from :func:`link_cell_reads`), so the
+    plan needs no pruning against the presence manifests.
+    """
+    keys: dict[str, list[str]] = {}
+    for cell, seg in zip(cells, segments):
+        keys.setdefault(spec["arrays"][seg]["path"], []).append(chunk_key_str(cell[0]))
+    return [(path, sorted(set(ks))) for path, ks in keys.items()]
+
+
+def read_link_cell_records(
+    level_group: Group,
+    cell: Sequence[ChunkCoords],
+    segment: int,
+    spec: dict[str, Any],
+) -> list[tuple[tuple[ChunkCoords, int], ...]]:
+    """``read_links_for_tuple(level_group, cell, delta=0)`` from a known cell.
+
+    ``cell``, ``segment`` and ``spec`` come from :func:`link_cell_reads`.
+    Decodes through the public per-cell reader
+    :func:`~zarr_vectors.building.read_chunk_links` and returns the records
+    ``read_links_for_tuple`` would -- same order, input endpoint order,
+    ``perm_idx`` reversed -- without resolving the family policy, the level
+    scales or the presence manifest again.  At ``delta == 0`` the tuple's
+    anchor is its own source chunk, so the listed cell is the one that
+    function would resolve; the single exception, an unsorted tuple on an
+    undirected canonical family (which that function sorts first), is
+    handed to it unchanged.
+    """
+    link_width = int(spec["link_width"])
+    chunks = tuple(tuple(int(c) for c in ch) for ch in cell)
+    if (
+        not spec["directed"] and spec["store"] == "canonical"
+        and tuple(sorted(chunks)) != chunks
+    ):
+        return read_links_for_tuple(level_group, chunks, delta=0)
+    array = spec["arrays"][segment]
+    offsets = tuple(tuple(int(c) for c in o) for o in array["offsets"])
+    has_perm = bool(array["has_perm"])
+    ncols = link_width + 1 if has_perm else link_width
+    groups = read_chunk_links(
+        level_group, chunks[0], dtype=array["dtype"], link_width=link_width,
+        delta=0, offsets=offsets,
+    )
+    if not groups:
+        return []
+    rows = np.concatenate(
+        [np.asarray(g, dtype=np.int64).reshape(-1, ncols) for g in groups], axis=0,
+    )
+    if rows.size == 0:
+        return []
+    if not has_perm:
+        return [tuple(zip(chunks, vis)) for vis in rows[:, :link_width].tolist()]
+    return [
+        tuple(apply_perm_inverse(
+            list(zip(chunks, row[1:1 + link_width])), int(row[0]), link_width,
+        ))
+        for row in rows.tolist()
+    ]
+
+
 def link_prefetch_plan(
     level_group: Group,
     chunk_keys: Iterable[ChunkCoords],
@@ -212,6 +371,34 @@ def link_prefetch_plan(
         for name in attrs:
             plan.append((link_attributes_path(name, delta, offsets), keys))
     return plan
+
+
+def prune_prefetch_plan(
+    level_group: Group, plan: list[tuple[str, list[str]]],
+) -> list[tuple[str, list[str]]]:
+    """Drop the cells ``plan`` names that the presence manifests say are absent.
+
+    ``batched_reads`` treats a missing cell as free, and against an object
+    store it nearly is; against a local directory the direct reader pays a
+    failed ``open()`` per absent cell, which on NTFS costs about what a hit
+    does.  A links family has one array per offsets segment, so a plan from
+    :func:`link_prefetch_plan` is mostly absent cells -- measured on a
+    100k-streamline pyramid level: 2,600 opens per target chunk, most of them
+    misses.  One listing per array, cached for the life of an enclosing
+    ``cached_nodes`` block, prunes them.  An array that cannot be listed is
+    left to the reader as it was.
+    """
+    out: list[tuple[str, list[str]]] = []
+    for name, keys in plan:
+        try:
+            present = set(level_group.list_chunks(name))
+        except Exception:
+            out.append((name, keys))
+            continue
+        kept = [k for k in keys if k in present]
+        if kept:
+            out.append((name, kept))
+    return out
 
 
 def require_link_width(

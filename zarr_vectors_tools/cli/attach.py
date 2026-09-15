@@ -17,7 +17,7 @@ def _resolve_source(input_path: str, explicit: str | None) -> str:
     """Decide whether the incoming file is an ``.h5ad``, CIFTI, or a table."""
     if explicit and explicit != "auto":
         return explicit
-    from zarr_vectors_tools.ingest.cifti import is_cifti_path
+    from zarr_vectors_tools.convert.ingest.cifti import is_cifti_path
 
     if is_cifti_path(input_path):
         return "cifti"
@@ -51,7 +51,7 @@ def run_attach(args) -> int:
         raise SystemExit("error: --name applies to cifti input only")
 
     if source == "cifti":
-        from zarr_vectors_tools.ingest.cifti import attach_cifti
+        from zarr_vectors_tools.convert.ingest.cifti import attach_cifti
 
         _refuse_for_cifti(args)
         summary = attach_cifti(
@@ -63,7 +63,7 @@ def run_attach(args) -> int:
             shard_shape=args.shard,
         )
     elif source == "h5ad":
-        from zarr_vectors_tools.ingest.h5ad import attach_h5ad
+        from zarr_vectors_tools.convert.ingest.h5ad import attach_h5ad
 
         if not args.genes and not args.columns:
             raise SystemExit(
@@ -85,7 +85,7 @@ def run_attach(args) -> int:
             progress=True,
         )
     else:
-        from zarr_vectors_tools.ingest.cell_table import attach_table
+        from zarr_vectors_tools.convert.ingest.cell_table import attach_table
 
         if not args.key_column:
             raise SystemExit(

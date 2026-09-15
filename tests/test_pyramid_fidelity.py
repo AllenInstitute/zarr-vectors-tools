@@ -36,7 +36,7 @@ from zarr_vectors.types.points import write_points
 from zarr_vectors.types.polylines import read_polylines
 
 from tests._source_helpers import write_polylines_with_segment_id
-from zarr_vectors_tools.ingest.trk_parallel import _compute_chunk_shape
+from zarr_vectors_tools.convert.ingest.trk_parallel import _compute_chunk_shape
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
 

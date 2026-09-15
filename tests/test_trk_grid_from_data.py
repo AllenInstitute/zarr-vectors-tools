@@ -30,7 +30,7 @@ from zarr_vectors.building import (
     read_chunk_vertices,
 )
 
-from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
 from .test_trk_registration import _write_radiological_trk
 
@@ -57,6 +57,10 @@ def _store_chunk_shape(store):
     return np.asarray(_root_attrs(store)["chunk_shape"], dtype=np.float64)
 
 
+# The tests marked slow each ingest a TRK end to end on a 64-cell grid, like
+# test_trk_registration.  test_each_streamline_reassembles_in_order stays in
+# the fast tier: its grid is small, and it keeps one real TRK ingest per push.
+@pytest.mark.slow
 @pytest.mark.parametrize("register", [False, True])
 def test_every_vertex_lands_in_a_chunk_that_contains_it(tmp_path, register):
     """The property the clamp violated: a vertex stored under chunk coord c
@@ -89,6 +93,7 @@ def test_every_vertex_lands_in_a_chunk_that_contains_it(tmp_path, register):
     assert checked > 0
 
 
+@pytest.mark.slow
 def test_store_bounds_cover_the_geometry(tmp_path):
     """The store's declared bounds come from the data, so they contain it —
     the header's box does not even overlap this fixture on two axes."""
@@ -112,6 +117,7 @@ def test_store_bounds_cover_the_geometry(tmp_path):
     assert cloud.max(0)[0] > 100.0, "fixture must exceed the declared FOV"
 
 
+@pytest.mark.slow
 def test_no_vertices_are_lost(tmp_path):
     """Binning is a partition: dropping the clamp must not drop geometry.
     Stored vertices == input vertices + boundary-split duplicates, and every
@@ -140,6 +146,7 @@ def test_no_vertices_are_lost(tmp_path):
     assert np.allclose(np.sort(stored, axis=0), np.sort(want, axis=0), atol=1e-4)
 
 
+@pytest.mark.slow
 def test_chunk_shape_tracks_the_tracts_not_the_declared_fov(tmp_path):
     """chunk_shape is sized from a per-streamline vertex sample, so a header
     declaring a far larger FOV than the tracts occupy no longer inflates it."""

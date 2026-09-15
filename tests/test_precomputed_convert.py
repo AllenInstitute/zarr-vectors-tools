@@ -18,7 +18,7 @@ import pytest
 
 from zarr_vectors_tools.cli import main
 from zarr_vectors_tools.cli._args import resolve_format
-from zarr_vectors_tools.ingest.precomputed import frag_bounds, layer_url
+from zarr_vectors_tools.convert.ingest.precomputed import frag_bounds, layer_url
 
 RADIUS = [{"id": "radius", "data_type": "float32", "num_components": 1}]
 
@@ -185,7 +185,7 @@ class TestDetection:
         assert "skeletons_mip_2" in capsys.readouterr().err
 
     def test_off_grid_frags_are_refused(self) -> None:
-        from zarr_vectors_tools.ingest.precomputed_skeletons import SkeletonInfo
+        from zarr_vectors_tools.convert.ingest.precomputed_skeletons import SkeletonInfo
 
         info = SkeletonInfo(base_url="mem://x", resolution_nm=RESOLUTION,
                             chunk_size_nm=CHUNK_NM)

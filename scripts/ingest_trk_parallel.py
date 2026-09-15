@@ -94,10 +94,10 @@ KEEP_INTERMEDIATE = False
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+    from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
     if WORKERS > 1:
-        from zarr_vectors_tools.ingest._parallel import dask_executor
+        from zarr_vectors_tools.convert.ingest._parallel import dask_executor
         with dask_executor(WORKERS) as ex:
             summary = ingest_trk_parallel(
                 INPUT_TRK,

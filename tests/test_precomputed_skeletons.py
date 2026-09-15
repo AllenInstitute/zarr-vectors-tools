@@ -3,7 +3,7 @@
 These exercise the ETL driver (extract → per-chunk write → object-index
 reduce → pyramid) via the in-memory reader, plus cross-chunk-edge recovery
 and coordinate alignment.  The reader/driver live in
-``zarr_vectors_tools.ingest.precomputed_skeletons``; the format read-back
+``zarr_vectors_tools.convert.ingest.precomputed_skeletons``; the format read-back
 (``read_skeleton_by_segment_id``) and coarsening it calls live in the core
 ``zarr_vectors`` package.
 """
@@ -58,7 +58,7 @@ def _ppool_executor(func, items, shared=None):
 
 def _flywire_cutout_reader():
     """A small flywire-shaped in-memory cutout spanning multiple chunks."""
-    from zarr_vectors_tools.ingest.precomputed_skeletons import (
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
         InMemoryFragsReader,
         SkeletonInfo,
         enumerate_frag_keys,
@@ -74,7 +74,7 @@ def _flywire_cutout_reader():
     anchor = (17910, 8912, 3088)
     counts = (2, 2, 1)
     keys = enumerate_frag_keys(info, anchor, counts)
-    from zarr_vectors_tools.ingest.precomputed_skeletons import parse_frag_key
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import parse_frag_key
     seg = 720575940000000000
     chunks = {}
     for k in keys:
@@ -96,10 +96,12 @@ def _flywire_cutout_reader():
     return reader, keys, bounds
 
 
+# Runs the ingest over a real process pool.
+@pytest.mark.slow
 def test_run_ingest_parallel_matches_serial(tmp_path):
     """A parallel executor (multi-process L0 + pyramid) must produce a
     byte-identical store to the serial default."""
-    from zarr_vectors_tools.ingest.precomputed_skeletons import run_ingest
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import run_ingest
     reader, keys, bounds = _flywire_cutout_reader()
     a = str(tmp_path / "serial.zv")
     b = str(tmp_path / "parallel.zv")
@@ -117,7 +119,7 @@ def test_ingest_driver_offline(tmp_store):
     """End-to-end ETL (extract→write→reduce→pyramid) via an in-memory
     .frags reader, with a flywire-shaped spatial index and a phase-offset
     chunk grid (so one zarr chunk collects pieces from several .frags)."""
-    from zarr_vectors_tools.ingest.precomputed_skeletons import (
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
         InMemoryFragsReader,
         SkeletonInfo,
         enumerate_frag_keys,
@@ -187,7 +189,7 @@ def test_cross_chunk_edges_merge_fragments_one_level_up(tmp_store):
     two fragments + one cross-chunk link; one level up (chunks ×2) both
     pieces fall in the same chunk and the link re-merges them into a single
     connected fragment — no proximity heuristic involved."""
-    from zarr_vectors_tools.ingest.precomputed_skeletons import (
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
         InMemoryFragsReader,
         SkeletonInfo,
         run_ingest,
@@ -232,7 +234,7 @@ def test_alignment_no_split_and_world_roundtrip(tmp_store):
     """With align=True the chunk grid is shifted to the .frag grid, so a
     piece within one .frag stays a single fragment (no phase-split, no
     cross-chunk edges), and reads return absolute world coordinates."""
-    from zarr_vectors_tools.ingest.precomputed_skeletons import (
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
         InMemoryFragsReader,
         SkeletonInfo,
         run_ingest,
@@ -267,7 +269,7 @@ def test_coincident_boundary_vertices_become_cross_chunk_edges(tmp_store):
     adjacent .frags with a shared boundary vertex gets a level-0
     cross-chunk link, and the two fragments merge into one connected
     fragment one level up."""
-    from zarr_vectors_tools.ingest.precomputed_skeletons import (
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
         InMemoryFragsReader,
         SkeletonInfo,
         enumerate_frag_keys,

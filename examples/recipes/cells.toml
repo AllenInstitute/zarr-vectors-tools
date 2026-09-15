@@ -1,0 +1,35 @@
+# Spatial transcriptomics: cells from one table, a second file of gene
+# counts joined on after, then a pyramid.  TOML needs no extra dependency.
+# Run with:  zvtools run cells.toml
+name = "cells"
+
+[[steps]]
+[steps.convert]
+input = "data/cells.csv"
+output = "out/cells.zarrvectors"
+format = "table"
+position_columns = ["x", "y", "z"]
+key_column = "cell_id"
+chunk_shape = [100, 100, 100]
+
+[[steps]]
+[steps.attach]
+store = "out/cells.zarrvectors"
+input = "data/cell_types.csv"
+key_column = "cell_id"
+column = ["cell_type", "leiden"]
+
+[[steps]]
+[steps.pyramid]
+store = "out/cells.zarrvectors"
+coarsen = [2, 4]
+sparsity = [2, 4]
+
+[[steps]]
+[steps.validate]
+store = "out/cells.zarrvectors"
+
+[[steps]]
+[steps.shard]
+store = "out/cells.zarrvectors"
+shape = 8

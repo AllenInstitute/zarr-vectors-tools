@@ -1,13 +1,14 @@
 # Meshes
 
-Two mesh ingests, both pure Python with no extra to install: Wavefront
-OBJ and STL. Both write the **mesh** Zarr Vectors geometry. PLY is points-only in
-this package — see [Point clouds](point_clouds.md).
+Three mesh ingests, all writing the **mesh** Zarr Vectors geometry:
+Wavefront OBJ and STL, which are pure Python with no extra to install, and
+Neuroglancer precomputed mesh layers, which need the `precomputed` extra. PLY
+is points-only in this package — see [Point clouds](point_clouds.md).
 
 ## Wavefront OBJ — `ingest_obj`
 
 ```python
-from zarr_vectors_tools.ingest.obj import ingest_obj
+from zarr_vectors_tools.convert.ingest.obj import ingest_obj
 
 ingest_obj(
     "model.obj",
@@ -45,7 +46,7 @@ and only then opens its groups will put every vertex in object 0.
 ## STL — `ingest_stl`
 
 ```python
-from zarr_vectors_tools.ingest.stl import ingest_stl
+from zarr_vectors_tools.convert.ingest.stl import ingest_stl
 
 ingest_stl(
     "model.stl",
@@ -76,6 +77,63 @@ connected components) return meaningless results.
 
 Per-face normals are parsed out of the STL but are not written to the
 store; recompute vertex normals from the merged geometry instead.
+
+## Neuroglancer precomputed — `ingest_precomputed_meshes`
+
+A precomputed mesh layer holds one mesh per segment. Each segment becomes
+one object, numbered by the rank of its segment id, and the ids are stored
+ascending as the `segment_id` object attribute, as the EM skeleton ingests
+do. `export_precomputed` and lookups by segment id work on the result.
+
+```bash
+zvtools convert gs://bucket/segmentation/mesh cells.zv \
+    --chunk-shape 32000,32000,32000 --segment-id 720575940000000011 --lod 1
+```
+
+```python
+from zarr_vectors_tools.convert.ingest.precomputed_meshes import ingest_precomputed_meshes
+
+ingest_precomputed_meshes(
+    "gs://bucket/segmentation/mesh",   # the mesh directory, with its own info
+    "cells.zv",
+    (32000, 32000, 32000),              # nm; there is no source grid to inherit
+    segment_ids=[720575940000000011],   # default: every segment in the layer
+    lod=1,                              # multi-resolution layers; 0 is the finest
+)
+```
+
+Point it at the mesh directory, not the segmentation layer above it. A
+segmentation layer is refused with a message naming its mesh and skeleton
+directories.
+
+| Layer `info` | Layout | Levels of detail | Segments listed from |
+| --- | --- | --- | --- |
+| `neuroglancer_legacy_mesh` | a `<id>:0` manifest and its fragment files | one | the manifest names |
+| `neuroglancer_multilod_draco` | a `<id>.index` manifest and a `<id>` file of Draco fragments | several | the manifest names |
+| the same, with `sharding` | manifests and fragments packed into `.shard` files | several | each shard's minishard indices |
+
+- **Welding.** Chunked meshing pipelines write a vertex on a chunk face once
+  for each fragment that touches it. `weld=True` (the default) merges
+  vertices with identical coordinates within a segment, then drops faces
+  that collapse or repeat. A segment's mesh then comes back closed where
+  the source mesh was closed. With `weld=False`, the fragments do not
+  share vertices across their seams.
+- **Segment properties.** When the mesh `info` names `segment_properties`,
+  its inline properties become object attributes (strings as `S256`,
+  numbers in their own dtype, tags as a bitmask). Pass
+  `segment_properties=False` to skip them.
+- **Empty segments.** A segment with no faces at the chosen `lod` is left
+  out and listed under `empty_segments` in the summary.
+- **Pyramids.** The pyramid is built afterwards, as for any mesh store:
+  `--coarsen` on the command line, or `build_pyramid` in Python. See
+  [Building pyramids](../multiresolution/building_pyramids.md).
+- **Memory.** Reads are threaded, `batch_size` segments at a time. The store
+  is written in one call, though, so memory holds every ingested segment's
+  vertices and faces at once, about 20 bytes per vertex and 24 per
+  triangle. Select segments to bound it.
+- **Local layers.** A legacy layer's `<id>:0` manifests cannot exist on a
+  Windows filesystem, so read those layers from a bucket there.
+  Multi-resolution layers are fine locally.
 
 ## See also
 

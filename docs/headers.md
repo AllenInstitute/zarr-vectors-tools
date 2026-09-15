@@ -67,8 +67,25 @@ Captures the TrackVis TRK file header so it can be reconstructed by
 | `n_properties`, `property_names` | int, list[str] | per-streamline data field names |
 | `n_count` | int | original streamline count |
 
+| `space` | str or None | `"voxmm"` or `"rasmm"`: the space the stored positions are in |
+| `origin`, `version` | list[float], int | as the file had them |
+
 `TRKHeader.affine` is a convenience `@property` that returns the
 `(4, 4)` numpy array, or `None` if no affine was preserved.
+
+### `TRXHeader`
+
+The reference image a TRX file was written against, so `export_trx` can
+write it back:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `voxel_to_rasmm` | `list[float]` | flattened 4×4 affine |
+| `dimensions` | `(int, int, int)` | reference grid dimensions |
+| `dpv_names`, `dps_names`, `dpg_names` | list[str] | the data arrays the file had |
+
+TRX positions are always RAS millimetres, so there is no stored space to
+record. `TRXHeader.affine` returns the `(4, 4)` array.
 
 ### `NIfTIHeader`
 

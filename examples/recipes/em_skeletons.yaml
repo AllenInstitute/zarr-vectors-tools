@@ -1,0 +1,25 @@
+# A FlyWire skeleton cutout to a store, then one SWC per neuron picked out.
+# Run with:  zvtools run em_skeletons.yaml
+name: em-skeletons
+steps:
+  # A layer with a spatial index keeps its own chunk grid; --anchor and
+  # --counts take an 8x8x4 block of .frags chunks instead of the whole layer.
+  - convert:
+      input: gs://flywire_v141_m783/skeletons_mip_1
+      output: out/flywire_cutout.zarrvectors
+      anchor: [17398, 10448, 3088]
+      counts: [8, 8, 4]
+      coarsen: [8, 8, 8]
+      sparsity: [1, 1, 4]
+      drop_interior_below: 3
+      workers: 8
+  - validate:
+      store: out/flywire_cutout.zarrvectors
+  - shard:
+      store: out/flywire_cutout.zarrvectors
+      shape: 8
+  - convert:
+      input: out/flywire_cutout.zarrvectors
+      output: out/neurons
+      format: swc
+      object_id: [0, 1, 2]

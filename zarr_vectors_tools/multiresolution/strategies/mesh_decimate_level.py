@@ -328,6 +328,27 @@ def _read_level_objects(src_group, ndim: int, link_width: int, attr_spec=None):
 # writing one level from per-object meshes
 # ===================================================================
 
+def _drop_duplicate_faces(faces: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]:
+    """Faces with repeated and degenerate triangles removed, in order.
+
+    Quadric collapse can leave the same triangle twice where a fold closes
+    up: on FreeSurfer's bert, 65 per hemisphere per level.  Each one is a
+    face with no edge of its own, so a closed cortical sheet's Euler
+    characteristic read 67 instead of 2, and a renderer draws the triangle
+    twice.  A triangle is identified by its corners whatever their order,
+    and the first copy, with its winding, is the one kept.
+    """
+    if len(faces) == 0:
+        return faces
+    ordered = np.sort(faces, axis=1)
+    degenerate = np.any(ordered[:, 1:] == ordered[:, :-1], axis=1)
+    _, first = np.unique(ordered, axis=0, return_index=True)
+    keep = np.zeros(len(faces), dtype=bool)
+    keep[first] = True
+    keep &= ~degenerate
+    return faces if keep.all() else faces[keep]
+
+
 def _write_level_objects(
     root, level_group, meshes: dict[int, tuple], chunk_shape, ndim: int,
     link_width: int, n_src_objects: int, dtype_links=np.int64,
@@ -411,6 +432,7 @@ def _write_level_objects(
     for oid, (v, f) in sorted(meshes.items()):
         if len(f) == 0:
             continue
+        f = _drop_duplicate_faces(np.asarray(f, dtype=np.int64))
         loc = local_of[oid]
         ch = chunk_of[oid]
         cor_c = [ch[f[:, k]] for k in range(link_width)]

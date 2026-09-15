@@ -16,7 +16,7 @@ is a vertex; every cell is an object.
 import numpy as np
 import pandas as pd
 
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
 # transcripts.csv:  x,y,z,gene_id,cell_id
 #                   1043.2,880.7,12.0,417,90211
@@ -78,7 +78,7 @@ is supplied. Note that `drop_na` and `drop_duplicates` filter
 ## LAS / LAZ — `ingest_las`
 
 ```python
-from zarr_vectors_tools.ingest.las import ingest_las
+from zarr_vectors_tools.convert.ingest.las import ingest_las
 
 ingest_las(
     "scan.laz",
@@ -105,7 +105,7 @@ There is no CSV-style column selection here — it is all fields or none.
 ## PLY (points) — `ingest_ply`
 
 ```python
-from zarr_vectors_tools.ingest.ply import ingest_ply
+from zarr_vectors_tools.convert.ingest.ply import ingest_ply
 
 ingest_ply(
     "cloud.ply",

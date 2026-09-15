@@ -43,6 +43,7 @@ summary = build_pyramid(
     cross_level_storage="explicit",   # default
     cross_level_depth=1,              # default, from core's DEFAULT_CROSS_LEVEL_DEPTH
     coarsen_mode="rdp",               # polyline stores only
+    rdp_tolerances=None,              # or one distance per level, store units
     compressor="zstd",
     executor=None,                    # serial; see below
 )
@@ -133,8 +134,13 @@ build_pyramid("mesh.zv", factors=[(4.0, 1.0)], compressor="zstd")
 
 # `executor` is a map-like (func, items, shared) -> list[result] callable
 # used by the chunk-local skeleton and polyline coarseners to parallelise
-# per-target-chunk work.  The per_object coarsener ignores it.
-from zarr_vectors_tools.ingest._parallel import process_pool_executor
+# per-target-chunk work.  The per_object, per_fragment and both mesh
+# coarseners run in-process and ignore it, so `--workers` does nothing for
+# a point-cloud, graph or mesh pyramid.  For those the cost that matters is
+# the default explicit cross-level links: on a 300k-point store they took
+# 75 of an 80-second build; pass cross_level_storage="none" (or the CLI's
+# --cross-level-storage none on `zvtools pyramid`) if no reader needs them.
+from zarr_vectors_tools.convert.ingest._parallel import process_pool_executor
 
 with process_pool_executor(8) as ex:
     build_pyramid("skel.zv", factors=[(8.0, 2.0)], executor=ex)

@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from zarr_vectors import open_store
 from zarr_vectors.core.group import Group
 

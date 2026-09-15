@@ -31,7 +31,7 @@ The three built-ins are registered at the bottom of
 | Store condition | Coarsener | Notes |
 | --- | --- | --- |
 | `links_convention == "implicit_sequential_with_branches"` | `"skeleton"` | `coarsen_factor` is reinterpreted as a decimation **stride**; `chunk_scale_factor` defaults to **2**; `sparsity_strategy="random"` silently degrades to deterministic `"length"`; `coarsen_mode` is ignored |
-| `links_convention == "implicit_sequential"` **and** `"streamline" in geometry_types` | `"polyline"` | `coarsen_mode` selects `"rdp"` (Douglas-Peucker) versus `"decimate"` (uniform stride, where `coarsen_factor` is the stride) |
+| `links_convention == "implicit_sequential"` **and** `"streamline" in geometry_types` | `"polyline"` | `coarsen_mode` selects `"rdp"` (Douglas-Peucker) versus `"decimate"` (uniform stride, where `coarsen_factor` is the stride); the only coarsener that accepts an explicit `rdp_tolerance` |
 | everything else | `"per_object"` | `coarsen_mode` and `executor` are accepted for signature parity but no-op |
 
 :::{warning}
@@ -130,15 +130,10 @@ coarsen_polyline_level(
     coarsen_factor=8.0,     # the stride when coarsen_mode="decimate"
     sparsity_factor=2.0,
     coarsen_mode="rdp",     # "rdp" | "decimate"
-    simplify_epsilon=None,  # explicit RDP epsilon; see below when None
+    simplify_epsilon=None,  # explicit RDP tolerance; see below when None
     executor=None,          # (func, items, shared) -> list[result]
 )
 ```
-
-In `"rdp"` mode a `simplify_epsilon` of `None` is derived as
-`min(source_chunk_shape) * 0.5 * coarsen_factor`, so the tolerance scales
-with both the chunk grid and the requested factor. Pass it explicitly
-when you want a fixed tolerance in position units instead.
 
 The important property is memory, not geometry. Peak memory is
 **O(one target chunk's source fan-in)**, independent of dataset size —
@@ -154,6 +149,66 @@ the predecessor and endpoint 1 the successor. Walk order is data for a
 streamline — a viewer computing tangents from an undirected edge list
 would get sign flips at every chunk boundary — so `directed=True` is
 stamped as a family-wide policy on `links/0` and cannot be flipped later.
+
+### The RDP tolerance
+
+In `"rdp"` mode a `simplify_epsilon` of `None` is derived from the
+**target bin**: `0.5 * min(source_level.bin_shape * coarsen_factor)`,
+where level 0's bin is the root's effective bin. The bin compounds down
+the pyramid, so the tolerance does too — `factors=[(2, 1), (2, 1)]` on a
+1-unit bin simplifies at 1.0 then 2.0. A `coarsen_factor` of `1` or less
+derives nothing and the level keeps every vertex.
+
+That is a multiplier of a grid, and what a user usually knows is a
+distance: "no level may move a tract by more than half a millimetre".
+So the tolerance can be given directly, in **store coordinate units**,
+one per coarser level:
+
+```python
+from zarr_vectors.building import open_store
+from zarr_vectors_tools.multiresolution.coarsen import (
+    build_pyramid,
+    read_coarsening_record,
+)
+
+build_pyramid(
+    "tracts.zv",
+    factors=[(2.0, 1.0), (2.0, 1.0), (2.0, 1.0)],
+    rdp_tolerances=[0.5, 1.0, 2.0],   # mm, if the store is in mm
+)
+
+read_coarsening_record(open_store("tracts.zv"), 2)
+# {"rdp_tolerance": 1.0, "rdp_tolerance_source": "explicit"}
+```
+
+`coarsen_level` takes a single `rdp_tolerance=`, and
+`coarsen_polyline_level` its `simplify_epsilon=`; all three spell the same
+thing. What a value means:
+
+- Each level's tolerance bounds how far it strays from **the level below
+  it**, not from level 0: every vertex of the level below lies within the
+  tolerance of the simplified line. Deviation from level 0 is at most the
+  sum of the tolerances up to that level.
+- An explicit tolerance replaces the derived one outright, including at a
+  factor of `1`. The factors still set each level's `bin_shape` (its NGFF
+  scale); they no longer decide how much is simplified.
+- `None` (the default) keeps the derived tolerance for every level.
+
+It is refused, by name and before any level is written, wherever it would
+mean nothing: with `coarsen_mode="decimate"`, when the list length does
+not match `factors`, for a value that is not a finite distance above zero,
+and for any store not routed to the polyline coarsener — points, meshes,
+graphs and skeletons (skeletons decimate by stride), or a streamline store
+forced onto another strategy with `method=`.
+
+Every `"rdp"` level records the tolerance it was built with, explicit or
+derived, under a `zarr_vectors_tools.coarsening` attribute on the level
+group (`rdp_tolerance` is `None` on a level that simplified nothing).
+`LevelMetadata` has no field for it, and core rewrites its own
+`zarr_vectors_level` block wholesale, so the record sits beside that block
+rather than inside it. `rebuild_pyramid_from_level` reads it back: an
+explicit tolerance is rebuilt at that tolerance, and a derived one is
+derived again from the recovered bin. Decimated levels carry no record.
 
 ## Points
 

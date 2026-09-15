@@ -33,7 +33,7 @@ def _write_csvs(tmp_path: Path) -> tuple[Path, Path]:
 class TestEdgelistIngest:
 
     def test_basic_pandas_path(self, tmp_path: Path) -> None:
-        from zarr_vectors_tools.ingest.edgelist import ingest_edgelist
+        from zarr_vectors_tools.convert.ingest.edgelist import ingest_edgelist
 
         edges, nodes = _write_csvs(tmp_path)
         result = ingest_edgelist(
@@ -43,8 +43,8 @@ class TestEdgelistIngest:
         assert result["edge_count"] == 4
 
     def test_with_enrichments(self, tmp_path: Path) -> None:
+        from zarr_vectors_tools.convert.ingest.edgelist import ingest_edgelist
         from zarr_vectors_tools.headers.registry import HeaderRegistry
-        from zarr_vectors_tools.ingest.edgelist import ingest_edgelist
 
         edges, nodes = _write_csvs(tmp_path)
         store = tmp_path / "g.zv"
@@ -67,7 +67,7 @@ class TestEdgelistIngest:
         cudf = pytest.importorskip("cudf", reason="cuDF only on RAPIDS envs")
         del cudf  # only matters that the import succeeded
 
-        from zarr_vectors_tools.ingest.edgelist import ingest_edgelist
+        from zarr_vectors_tools.convert.ingest.edgelist import ingest_edgelist
 
         edges, nodes = _write_csvs(tmp_path)
         result = ingest_edgelist(

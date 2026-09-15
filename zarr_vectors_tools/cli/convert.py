@@ -17,8 +17,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from zarr_vectors_tools.headers.registry import HeaderRegistry
+
 from ._args import (
+    EXPORT_REGISTRY,
     build_factors,
+    check_rdp_tolerances,
     executor_ctx,
     load_export_func,
     load_ingest_func,
@@ -61,12 +65,16 @@ def _print_summary(action: str, summary: dict) -> None:
         "columns_stored", "dropped_na", "key_column",
         # export-side counters
         "node_count", "root_count", "face_count", "attributes_carried",
+        "object_attributes_carried", "groups_carried", "attributes_skipped",
+        "object_count", "file_count", "surfaces", "skipped", "warnings",
+        "edge_count", "properties", "unit", "unit_assumed",
         # cortical surfaces
         "hemispheres", "geometry", "space", "c_ras", "scalars", "labels",
         "alternates", "filled",
-        # precomputed skeleton layers
+        # precomputed skeleton and mesh layers
         "layer", "bounds_nm", "frag_chunks_read", "source_segment_pieces",
         "objects", "level0_fragments", "level0_cross_chunk_edges",
+        "layout", "lod", "vertices_welded", "faces_dropped",
     ):
         if k in summary:
             print(f"  {k}: {summary[k]}")
@@ -76,6 +84,14 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
     """Build a sparsity pyramid on the just-written level-0 store."""
     from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
+    # Forwarded only when given, so an omitted flag keeps build_pyramid's own
+    # default rather than one restated here.
+    extra: dict[str, Any] = {}
+    if getattr(args, "cross_level_storage", None) is not None:
+        extra["cross_level_storage"] = args.cross_level_storage
+    if getattr(args, "cross_level_depth", None) is not None:
+        extra["cross_level_depth"] = args.cross_level_depth
+
     with executor_ctx(args.workers, args.workers_backend) as ex:
         result = build_pyramid(
             str(args.output),
@@ -83,14 +99,16 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
             chunk_scale_factors=chunk_scale,
             sparsity_strategy=args.sparsity_strategy,
             coarsen_mode=args.coarsen_mode,
+            rdp_tolerances=args.rdp_tolerance,
             executor=ex,
+            **extra,
         )
     print(f"  pyramid: {result.get('levels_created', '?')} coarser level(s) built")
 
 
 def _convert_trk(args, factors, chunk_scale) -> int:
     """Streamlines via the memory-bounded parallel ingester (inline pyramid)."""
-    from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+    from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
     with executor_ctx(args.workers, args.workers_backend) as ex:
         summary = ingest_trk_parallel(
@@ -98,6 +116,8 @@ def _convert_trk(args, factors, chunk_scale) -> int:
             str(args.output),
             num_chunks=args.num_chunks,
             n_parts=args.n_parts,
+            intermediate_dir=args.scratch_dir,
+            resume=args.resume,
             workers=(args.workers or 1),
             executor=ex,
             dtype=args.dtype,
@@ -116,6 +136,7 @@ def _convert_trk(args, factors, chunk_scale) -> int:
             chunk_scale_factors=chunk_scale,
             sparsity_strategy=args.sparsity_strategy,
             pyramid_coarsen_mode=args.coarsen_mode,
+            pyramid_rdp_tolerances=args.rdp_tolerance,
             progress=True,
         )
     _print_summary("ingested trk (streamlines)", summary)
@@ -124,13 +145,41 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     return 0
 
 
+def _precomputed_kind(source) -> str:
+    """``"mesh"`` or ``"skeleton"``, from the layer's ``info``."""
+    from zarr_vectors_tools.convert.ingest.precomputed import (
+        layer_kind,
+        layer_url,
+        read_layer_info,
+    )
+
+    return layer_kind(read_layer_info(layer_url(source)))
+
+
 def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
     """A precomputed skeleton layer, with the pyramid built inside the ingest.
 
-    Which of the two precomputed ingesters runs is only known once the
-    layer's ``info`` is read, so the options that belong to one of them are
-    checked there, not here.
+    Which of the two precomputed skeleton ingesters runs is only known once
+    the layer's ``info`` is read, so the options that belong to one of them
+    are checked there, not here.  A mesh layer goes the way of any other
+    mesh input, with the pyramid built after it.
     """
+    try:
+        kind = _precomputed_kind(args.input)
+    except ImportError as exc:  # cloud-files
+        raise SystemExit(
+            f"error: precomputed ingest failed ({exc}) — install it with: "
+            f"pip install 'zarr-vectors-tools[{fmt.extra}]'"
+        )
+    if kind == "mesh":
+        _convert_precomputed_meshes(args, fmt, factors, chunk_scale)
+        return
+    if args.lod is not None:
+        raise SystemExit(
+            f"error: --lod selects a mesh layer's level of detail; {args.input} "
+            f"is a skeleton layer"
+        )
+
     refused = {
         "--bin-shape": args.bin_shape is not None,
         "--dtype": args.dtype != "float32",
@@ -189,6 +238,52 @@ def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
         print(f"  pyramid: {len(strides)} coarser level(s) built")
 
 
+def _convert_precomputed_meshes(args, fmt, factors, chunk_scale) -> None:
+    """A precomputed mesh layer: one object per segment, then the pyramid."""
+    refused = {
+        "--anchor": args.anchor is not None,
+        "--counts": args.counts is not None,
+        "--frags-dir": bool(args.frags_dir),
+        "--drop-interior-below": bool(args.drop_interior_below),
+        "--bin-shape": args.bin_shape is not None,
+        "--dtype": args.dtype != "float32",
+        "--compressor": args.compressor != "none",
+    }
+    rejected = sorted(flag for flag, given in refused.items() if given)
+    if rejected:
+        raise SystemExit(
+            f"error: {', '.join(rejected)} "
+            f"{'do' if len(rejected) > 1 else 'does'} not apply to a precomputed "
+            f"mesh layer: it has no .frags chunks, and its meshes are stored as "
+            f"float32 positions, raw, with no sub-binning"
+        )
+    if args.chunk_shape is None:
+        raise SystemExit(
+            f"error: {args.input} is a mesh layer, which has no chunk grid to "
+            f"inherit; pass --chunk-shape X,Y,Z in nanometres"
+        )
+    from zarr_vectors_tools.convert.ingest.precomputed_meshes import (
+        ingest_precomputed_meshes,
+    )
+
+    try:
+        summary = ingest_precomputed_meshes(
+            args.input, str(args.output), tuple(args.chunk_shape),
+            segment_ids=args.segment_ids, lod=args.lod or 0,
+        )
+    except ImportError as exc:  # cloud-volume / DracoPy
+        raise SystemExit(
+            f"error: precomputed ingest failed ({exc}) — install it with: "
+            f"pip install 'zarr-vectors-tools[{fmt.extra}]'"
+        )
+    _print_summary("ingested precomputed (mesh)", summary)
+    if summary["empty_segments"]:
+        print(f"  empty_segments: {len(summary['empty_segments'])} with no faces "
+              f"at lod {summary['lod']}")
+    if factors is not None:
+        _build_pyramid_post(args, factors, chunk_scale)
+
+
 #: CLI option -> the exporter keyword it fills, for the options an exporter
 #: may or may not take.  ``ExportFmt.accepts`` decides which of these a given
 #: format gets; anything the user set that is not accepted is refused by name.
@@ -198,22 +293,40 @@ _EXPORT_OPTIONS: dict[str, tuple[str, str]] = {
     "export_group_ids": ("group_ids", "--group-id"),
     "export_bbox": ("bbox", "--bbox"),
     "export_attributes": ("attribute_names", "--attribute"),
+    "export_object_attributes": ("object_attribute_names", "--object-attribute"),
+    "hemispheres": ("hemispheres", "--hemisphere"),
+    "surfaces": ("surfaces", "--surface"),
+    "export_prefix": ("prefix", "--prefix"),
+    "segment_ids": ("segment_ids", "--segment-id"),
+    "export_unit": ("unit", "--unit"),
 }
 
 
 def run_export(args) -> int:
     """``zvtools convert STORE OUT.ext`` — write a store back out to a file."""
-    fmt = resolve_export_format(args.output, args.format)
+    if (
+        args.format in (None, "auto") and not Path(args.output).suffix
+        and HeaderRegistry(str(args.input)).has("surface")
+    ):
+        # A surface store exports to a directory of GIFTI files, which has
+        # no extension to name the format by.
+        fmt = EXPORT_REGISTRY["gifti"]
+    else:
+        fmt = resolve_export_format(args.output, args.format)
 
     if args.chunk_shape is not None or args.num_chunks is not None:
         raise SystemExit(
             "error: --chunk-shape / --num-chunks describe how to BUILD a "
             "store; they do not apply when exporting one"
         )
-    if args.coarsen or args.sparsity:
+    if (
+        args.coarsen or args.sparsity or args.rdp_tolerance is not None
+        or getattr(args, "cross_level_storage", None) is not None
+        or getattr(args, "cross_level_depth", None) is not None
+    ):
         raise SystemExit(
-            "error: --coarsen / --sparsity build pyramid levels; to export an "
-            "existing one pass --level N"
+            "error: --coarsen / --sparsity / --rdp-tolerance / --cross-level-* "
+            "build pyramid levels; to export an existing one pass --level N"
         )
 
     kwargs: dict[str, Any] = {"level": args.level}
@@ -324,6 +437,8 @@ def run(args) -> int:
         "--object-id-column": ({"h5ad", "table"},
                                getattr(args, "object_id_column", None) is not None),
         "--drop-na": ({"h5ad", "table"}, bool(getattr(args, "drop_na", False))),
+        "--scratch-dir": ({"trk"}, getattr(args, "scratch_dir", None) is not None),
+        "--resume": ({"trk"}, bool(getattr(args, "resume", False))),
         "--geometry": ({"gifti", "freesurfer"}, getattr(args, "geometry", None) is not None),
         "--hemisphere": ({"gifti", "freesurfer"}, bool(getattr(args, "hemispheres", None))),
         "--space": ({"freesurfer"}, getattr(args, "space", "auto") != "auto"),
@@ -334,8 +449,14 @@ def run(args) -> int:
         "--counts": ({"precomputed"}, getattr(args, "counts", None) is not None),
         "--frags-dir": ({"precomputed"}, bool(getattr(args, "frags_dir", ""))),
         "--segment-id": ({"precomputed"}, bool(getattr(args, "segment_ids", None))),
+        "--lod": ({"precomputed"}, getattr(args, "lod", None) is not None),
         "--drop-interior-below": ({"precomputed"},
                                   bool(getattr(args, "drop_interior_below", 0))),
+        # Only a streamline store is coarsened by Douglas-Peucker.  Skeletons
+        # (swc, precomputed) decimate by stride, and points, meshes, lines
+        # and graphs bin, so a tolerance there would be silently meaningless.
+        "--rdp-tolerance": ({"trk", "trx", "tck"},
+                            getattr(args, "rdp_tolerance", None) is not None),
     }
     rejected = [
         (flag, owners) for flag, (owners, given) in flag_owners.items()
@@ -352,6 +473,35 @@ def run(args) -> int:
             "error: --position-columns X,Y[,Z] is required for --format table"
         )
 
+    # Cross-level links are written by the post-ingest pyramid.  TRK and
+    # precomputed input build their pyramid inside the ingest, with coarseners
+    # that write no cross-level links, and without --coarsen there is no
+    # pyramid at all -- so in both cases the flags would be silently ignored.
+    cross_flags = [
+        flag for flag, given in (
+            ("--cross-level-storage", getattr(args, "cross_level_storage", None) is not None),
+            ("--cross-level-depth", getattr(args, "cross_level_depth", None) is not None),
+        ) if given
+    ]
+    if cross_flags:
+        if fmt.name == "trk" or (
+            fmt.name == "precomputed" and _precomputed_kind(args.input) != "mesh"
+        ):
+            raise SystemExit(
+                f"error: {' / '.join(cross_flags)} do not apply to {fmt.name!r} "
+                f"input: its pyramid is built inside the ingest and writes no "
+                f"cross-level links"
+            )
+        if factors is None:
+            raise SystemExit(
+                f"error: {' / '.join(cross_flags)} link pyramid levels; pass "
+                f"--coarsen and --sparsity to build some"
+            )
+
+    # Before the ingest: the pyramid is the last step, so a tolerance list
+    # that does not fit it would otherwise fail after the conversion ran.
+    check_rdp_tolerances(args.rdp_tolerance, factors, args.coarsen_mode)
+
     _maybe_overwrite(args.output, args.overwrite)
 
     # The "length" pyramid strategy ranks by per-object length, which must be
@@ -360,7 +510,7 @@ def run(args) -> int:
     if args.sparsity_strategy == "length" and fmt.geometry == "streamlines":
         if not args.compute_length:
             args.compute_length = True
-            print("note: --sparsity-strategy length → enabling --compute-length")
+            print("note: --sparsity-strategy length -> enabling --compute-length")
 
     # trk has its own streaming path with an inline pyramid + num_chunks knob.
     if fmt.name == "trk":
@@ -482,4 +632,20 @@ def run_shard(args) -> int:
     print(f"{verb} {store} ...")
     stats = reshard(store, shape)
     print("  " + ", ".join(f"{k}={v}" for k, v in stats.items()))
+    return 0
+
+
+def run_synapses(args) -> int:
+    """``zvtools synapses TABLE SKELETONS OUTPUT``."""
+    from zarr_vectors_tools.convert.ingest.synapses import ingest_synapses
+
+    summary = ingest_synapses(
+        args.table, args.skeletons, args.output, args.chunk_shape,
+        side=args.side, position=args.position, resolution=args.resolution,
+        columns=args.columns, unmatched=args.unmatched, write_counts=not args.no_counts,
+    )
+    print(f"ingested {summary['synapses_written']} synapses ({args.side}-synaptic owner)")
+    for key in ("rows_read", "unmatched", "dropped", "objects", "unassigned_object",
+                "counts_written"):
+        print(f"  {key}: {summary[key]}")
     return 0

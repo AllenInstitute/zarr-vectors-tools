@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,6 +73,46 @@ def build_factors(
     return [(float(c), float(s)) for c, s in zip(coarsen, sparsity)]
 
 
+def check_rdp_tolerances(
+    tolerances: list[float] | None,
+    factors: list[tuple[float, float]] | None,
+    coarsen_mode: str,
+) -> list[float] | None:
+    """Check ``--rdp-tolerance`` against the pyramid it is meant to shape.
+
+    Everything that can be decided without the store: a pyramid to apply to,
+    one tolerance per ``--coarsen`` entry, positive finite distances, and rdp
+    mode.  Run before any ingest, so a bad list does not cost a conversion.
+    Whether the store's geometry has a tolerance is checked by the caller,
+    which knows the format or has the store.
+    """
+    if tolerances is None:
+        return None
+    if factors is None:
+        raise SystemExit(
+            "error: --rdp-tolerance sets each coarser level's tolerance, but "
+            "no pyramid was requested; pass --coarsen and --sparsity too"
+        )
+    if coarsen_mode == "decimate":
+        raise SystemExit(
+            "error: --rdp-tolerance does not apply with --coarsen-mode "
+            "decimate, which thins by a stride and has no distance tolerance"
+        )
+    if len(tolerances) != len(factors):
+        raise SystemExit(
+            f"error: --rdp-tolerance has {len(tolerances)} entries but "
+            f"--coarsen has {len(factors)}; they must match (one per coarser "
+            f"pyramid level)"
+        )
+    bad = [t for t in tolerances if not math.isfinite(t) or t <= 0.0]
+    if bad:
+        raise SystemExit(
+            f"error: --rdp-tolerance values must be distances > 0 in store "
+            f"units; got {', '.join(repr(t) for t in bad)}"
+        )
+    return [float(t) for t in tolerances]
+
+
 @contextmanager
 def executor_ctx(workers: int | None, backend: str = "process"):
     """Yield a parallel executor when ``workers > 1``, else ``None``.
@@ -83,12 +124,12 @@ def executor_ctx(workers: int | None, backend: str = "process"):
     """
     if workers and workers > 1:
         if backend == "dask":
-            from zarr_vectors_tools.ingest._parallel import dask_executor
+            from zarr_vectors_tools.convert.ingest._parallel import dask_executor
 
             with dask_executor(workers) as ex:
                 yield ex
         else:
-            from zarr_vectors_tools.ingest._parallel import process_pool_executor
+            from zarr_vectors_tools.convert.ingest._parallel import process_pool_executor
 
             with process_pool_executor(workers) as ex:
                 yield ex
@@ -121,7 +162,7 @@ class Fmt:
 
     name: str
     exts: tuple[str, ...]          # extensions that auto-detect to this format
-    module: str                    # zarr_vectors_tools.ingest.<module>
+    module: str                    # zarr_vectors_tools.convert.ingest.<module>
     func: str                      # entry function name
     extra: str | None              # optional-dependency extra needed (for hints)
     geometry: str                  # what it produces (for messages)
@@ -177,7 +218,7 @@ class ExportFmt:
 
     name: str
     exts: tuple[str, ...]
-    module: str                    # zarr_vectors_tools.export.<module>
+    module: str                    # zarr_vectors_tools.convert.export.<module>
     func: str
     extra: str | None              # optional-dependency extra, for hints
     geometry: str                  # what it expects to find in the store
@@ -191,15 +232,40 @@ _COMMON = frozenset({"level", "chunks"})
 EXPORT_REGISTRY: dict[str, ExportFmt] = {
     "trk": ExportFmt(
         "trk", (".trk",), "trk", "export_trk", "trk", "streamlines",
-        _COMMON | {"object_ids", "group_ids", "affine"},
+        _COMMON | {
+            "object_ids", "group_ids", "affine",
+            "attribute_names", "object_attribute_names",
+        },
     ),
     "trx": ExportFmt(
         "trx", (".trx",), "trx", "export_trx", "trx", "streamlines",
-        _COMMON | {"object_ids", "group_ids"},
+        _COMMON | {"object_ids", "group_ids", "attribute_names", "object_attribute_names"},
     ),
+    # With object_ids the output is a directory of one .swc per object, so
+    # it has no extension to resolve from: pass --format swc.
     "swc": ExportFmt(
         "swc", (".swc",), "swc", "export_swc", None, "skeleton",
-        _COMMON,
+        _COMMON | {"object_ids"},
+    ),
+    # A surface store goes out as a DIRECTORY of .gii files (one per surface
+    # and per map, per hemisphere), so it has no extension to resolve from:
+    # pass --format gifti, or give a surface store an extensionless OUTPUT.
+    # Not _COMMON: this exporter takes no chunks.
+    "gifti": ExportFmt(
+        "gifti", (), "gifti", "export_gifti", "surfaces", "surface",
+        frozenset({"level", "hemispheres", "surfaces", "attribute_names", "prefix"}),
+    ),
+    # A precomputed layer is a directory or bucket prefix, never a file, so it
+    # has no extension to resolve from: a URL output picks it, or pass
+    # --format precomputed.  Skeleton and graph stores become skeletons, mesh
+    # stores legacy meshes.
+    "precomputed": ExportFmt(
+        "precomputed", (), "precomputed", "export_precomputed", "precomputed",
+        "skeleton, graph or mesh",
+        frozenset({
+            "level", "object_ids", "segment_ids", "attribute_names",
+            "object_attribute_names", "unit",
+        }),
     ),
     "obj": ExportFmt(
         "obj", (".obj",), "obj", "export_obj", None, "mesh",
@@ -240,6 +306,10 @@ def resolve_export_format(
                 f"error: cannot export to {explicit!r}; zvtools exports "
                 f"{{{','.join(EXPORT_REGISTRY)}}}"
             ) from None
+    if "://" in str(output_path):
+        # Only a precomputed layer is written to a URL; every other exporter
+        # writes a local file.
+        return EXPORT_REGISTRY["precomputed"]
     ext = Path(output_path).suffix.lower()
     name = _EXPORT_EXT_TO_FORMAT.get(ext)
     if name is None:
@@ -256,7 +326,7 @@ def load_export_func(fmt: ExportFmt):
     import importlib
 
     try:
-        mod = importlib.import_module(f"zarr_vectors_tools.export.{fmt.module}")
+        mod = importlib.import_module(f"zarr_vectors_tools.convert.export.{fmt.module}")
         return getattr(mod, fmt.func)
     except ImportError as exc:
         hint = (
@@ -269,7 +339,7 @@ def load_export_func(fmt: ExportFmt):
 
 def _directory_format(path: Path) -> str:
     """The format of a directory input: the formats that come as sets of files."""
-    from zarr_vectors_tools.ingest.freesurfer import find_freesurfer_surf_dir
+    from zarr_vectors_tools.convert.ingest.freesurfer import find_freesurfer_surf_dir
 
     if (path / "info").is_file():
         return "precomputed"
@@ -292,7 +362,7 @@ def resolve_format(input_path: str | Path, explicit: str | None) -> Fmt:
     directory.  A URL can only be a precomputed layer: every other ingester
     reads a local file.
     """
-    from zarr_vectors_tools.ingest.precomputed import is_url
+    from zarr_vectors_tools.convert.ingest.precomputed import is_url
 
     if explicit and explicit != "auto":
         return FORMAT_REGISTRY[explicit]
@@ -315,7 +385,7 @@ def load_ingest_func(fmt: Fmt):
     import importlib
 
     try:
-        mod = importlib.import_module(f"zarr_vectors_tools.ingest.{fmt.module}")
+        mod = importlib.import_module(f"zarr_vectors_tools.convert.ingest.{fmt.module}")
         return getattr(mod, fmt.func)
     except ImportError as exc:
         hint = (

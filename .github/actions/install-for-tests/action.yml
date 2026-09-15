@@ -1,0 +1,100 @@
+name: Install for tests
+description: >-
+  Set up Python, install zarr-vectors core from git at the pinned commit, then
+  this package with its dev toolchain and every optional reader the runner can
+  install.  Used by both test tiers in .github/workflows/tests.yml.
+
+inputs:
+  python-version:
+    description: Python version to set up.
+    required: true
+  core-repo:
+    description: Git URL of zarr-vectors-py.
+    required: true
+  core-sha:
+    description: Full commit SHA of zarr-vectors-py to install.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
+
+    - name: Install core at the pin, this package, and the optional readers
+      shell: bash
+      env:
+        CORE: zarr-vectors @ git+${{ inputs.core-repo }}@${{ inputs.core-sha }}
+        PY: ${{ inputs.python-version }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+
+        # Core is named by URL in every install below, so the resolver can
+        # never swap it for a PyPI release (none of those carries the
+        # `zarr_vectors.building` surface this package imports).
+        if python -m pip install "$CORE" -e ".[all,dev]"; then
+          exit 0
+        fi
+
+        # One optional reader has no wheel, or fails to build, for this OS and
+        # Python.  Core, this package and pytest must still install; the extras
+        # then go one at a time so a broken reader costs only its own tests,
+        # which skip through pytest.importorskip.  The annotation keeps that
+        # visible on the run page instead of leaving a quietly thinner suite.
+        echo "::warning title=Optional readers::'.[all,dev]' did not install on $RUNNER_OS / Python $PY; installing the extras one at a time"
+        python -m pip install "$CORE" -e ".[dev]"
+        for extra in las ply trk trx surfaces graph h5ad points-enrichment mesh precomputed parallel; do
+          python -m pip install "$CORE" -e ".[$extra]" \
+            || echo "::warning title=Optional extra not installed::[$extra] did not install on $RUNNER_OS / Python $PY; its tests will be skipped"
+        done
+
+    - name: Check the pin, and report which optional readers are present
+      shell: bash
+      env:
+        CORE_SHA: ${{ inputs.core-sha }}
+      run: |
+        python - <<'EOF'
+        import importlib
+        import json
+        import os
+        import platform
+        from importlib.metadata import distribution
+
+        # pip records the commit it built from; refuse to test anything else.
+        direct = json.loads(distribution("zarr-vectors").read_text("direct_url.json") or "{}")
+        got = direct.get("vcs_info", {}).get("commit_id")
+        if got != os.environ["CORE_SHA"]:
+            raise SystemExit(f"zarr-vectors is at {got!r}, not the pinned {os.environ['CORE_SHA']}")
+        import zarr_vectors
+        import zarr_vectors.building  # this package fails at import without it
+        import zarr_vectors_tools
+
+        readers = {
+            "laspy": "las", "plyfile": "ply", "nibabel": "trk, surfaces", "trx": "trx",
+            "networkx": "graph", "anndata": "h5ad", "scipy": "points-enrichment, mesh",
+            "pyfqmr": "mesh", "cloudvolume": "precomputed", "mapbuffer": "precomputed",
+            "cloudfiles": "precomputed", "dask.distributed": "parallel",
+        }
+        rows = [
+            f"### {platform.system()}, Python {platform.python_version()}",
+            f"zarr-vectors {zarr_vectors.__version__} at `{got}`",
+            "",
+            "| module | extra | importable |",
+            "| --- | --- | --- |",
+        ]
+        for module, extra in readers.items():
+            try:
+                importlib.import_module(module)
+                ok = "yes"
+            except Exception as exc:  # a broken binary counts as missing too
+                ok = f"**no** ({type(exc).__name__}): its tests skip"
+            rows.append(f"| `{module}` | `{extra}` | {ok} |")
+        text = "\n".join(rows) + "\n"
+        print(text)
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+            fh.write(text)
+        EOF

@@ -43,7 +43,7 @@ maps under `filled`.
 ## GIFTI: `ingest_gifti`
 
 ```python
-from zarr_vectors_tools.ingest.gifti import ingest_gifti
+from zarr_vectors_tools.convert.ingest.gifti import ingest_gifti
 
 ingest_gifti(
     "derivatives/fmriprep/sub-01/anat",   # a directory, a list of files, or one file
@@ -73,7 +73,7 @@ Each file is classified from its own metadata first and its name second:
 | `sub-01_hemi-L_thickness.shape.gii` | `thickness` |
 | `100307.L.MyelinMap_BC.32k_fs_LR.func.gii` | `MyelinMap_BC` |
 | `sub-01_hemi-R_desc-aparc.label.gii` | `aparc` |
-| `lh.aparc.a2009s.label.gii` | `aparc_a2009s` |
+| `lh.aparc.a2009s.label.gii` | `aparc.a2009s` |
 
 A file with several distinctly named arrays gives one attribute per array.
 Unnamed arrays, and any time series, give one multi-column attribute.
@@ -92,7 +92,7 @@ first, for example with `wb_command -metric-resample`.
 ## FreeSurfer: `ingest_freesurfer`
 
 ```python
-from zarr_vectors_tools.ingest.freesurfer import ingest_freesurfer
+from zarr_vectors_tools.convert.ingest.freesurfer import ingest_freesurfer
 
 ingest_freesurfer(
     "subjects/bert",                 # the subject directory, or its surf/
@@ -115,12 +115,20 @@ name you pass yourself must exist, and a missing one is an error.
 FreeSurfer writes surfaces in *surface RAS*, centred on the conformed
 volume. The T1, the diffusion data, TRK and TRX tractography and fMRIPrep's
 GIFTI surfaces are all in *scanner RAS*. The two differ by one translation,
-`c_ras`, which each surface file records in its footer.
+`c_ras`.
+
+`c_ras` is read from the surface footer when the footer is marked valid, and
+otherwise from the subject's `mri/orig.mgz`, which every surface was built
+from. A footer marked invalid is never trusted. `fsaverage` ships footers
+marked `valid = 0` with a `cras` of about 2 mm, while its volumes record an
+offset of zero. Using that footer drops the overlap between surface parcels
+and the volume segmentation from 96% to under 40%. The header's
+`c_ras_source` field says where the offset came from.
 
 | `space` | Result |
 | --- | --- |
-| `"auto"` (default) | Scanner RAS when the files record `c_ras`, surface RAS otherwise |
-| `"scanner"` | Scanner RAS, or an error when `c_ras` is missing |
+| `"auto"` (default) | Scanner RAS when `c_ras` is known, surface RAS otherwise |
+| `"scanner"` | Scanner RAS, or an error when `c_ras` is unknown |
 | `"surface"` | FreeSurfer's own coordinates, untouched |
 
 Only anatomical surfaces are shifted. Inflated and spherical surfaces are in
@@ -146,7 +154,7 @@ you already have, so they are attached to a surface store rather than
 ingested:
 
 ```python
-from zarr_vectors_tools.ingest.cifti import attach_cifti
+from zarr_vectors_tools.convert.ingest.cifti import attach_cifti
 
 attach_cifti("sub-01_surfaces.zv", "sub-01.MyelinMap_BC.32k_fs_LR.dscalar.nii")
 attach_cifti("sub-01_surfaces.zv", "Glasser_MMP1.32k_fs_LR.dlabel.nii")
@@ -204,12 +212,132 @@ zvtools attach sub-01_surfaces.zv rest.dtseries.nii --name rest
 
 Every one of these is refused by name for a format it does not apply to.
 
+## The volume beside the surfaces
+
+`scripts/volume_to_ome_zarr.py` writes a subject's `T1.mgz`, with
+`aparc+aseg.mgz` as a label layer, to OME-Zarr 0.5 in the same scanner RAS
+space as a surface store with `c_ras` applied:
+
+```bash
+python scripts/volume_to_ome_zarr.py subjects/bert/mri/T1.mgz bert_T1.ome.zarr \
+    --label aparc_aseg=subjects/bert/mri/aparc+aseg.mgz
+```
+
+The volume is reoriented to RAS first, because OME-Zarr places an array with
+a scale and a translation only. Coarser levels average intensities and take
+the most common label.
+
+:::{warning}
+Write stores to a local disk, then copy them into a OneDrive or Dropbox
+folder. Zarr replaces each metadata file by renaming a temporary file over
+it, and a sync client that has the file open for upload makes that rename
+fail with "Access is denied".
+:::
+
 ## Pyramids
 
 Surface stores are mesh stores, so `zvtools pyramid` and `build_pyramid`
 work unchanged. Continuous maps and the `coords_<name>` surfaces are
-averaged within each vertex cluster. Parcellation codes take a value that
-exists in the source, never an average of two parcels.
+carried to each coarse vertex. Parcellation codes take a value that exists
+in the source, never an average of two parcels.
+
+For a cortical sheet, build the pyramid with quadric decimation
+(`method="mesh_decimate"`, which needs the `mesh` extra for `pyfqmr`). The
+default mesh coarsener clusters vertices, and clustering does not keep a
+closed sheet closed. Measured on FreeSurfer's `bert`, both hemispheres,
+with coarsen factor 4 per level:
+
+| Level | Vertices per hemisphere | Euler characteristic, quadric | Euler characteristic, clustering | Thickness mean drift, quadric |
+| --- | --- | --- | --- | --- |
+| 0 | 133,000 | 2 | 2 | — |
+| 1 | 33,000 | 2 | about 790 | +0.04 mm |
+| 2 | 8,300 | 2 | about 280 | +0.08 mm |
+
+The drift is in the plain vertex mean. A coarse level's vertices are spread
+more evenly than the source's, so an area-weighted mean
+(`parcel_summary`'s `thickness_area_weighted_mean`) is the fairer
+comparison across levels. Parcel codes at every level are codes that
+existed at level 0.
+
+```python
+from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+
+build_pyramid("bert.zarrvectors", factors=[(4.0, 1.0), (4.0, 1.0)], method="mesh_decimate")
+```
+
+## Reading a hemisphere back
+
+The store orders vertices by chunk. `read_hemisphere` puts them back in
+the source file's numbering, using the join key, and can take its
+coordinates from any surface the store kept:
+
+```python
+from zarr_vectors_tools.algorithms.surfaces import read_hemisphere
+
+mid = read_hemisphere("bert.zarrvectors", "lh")
+inflated = read_hemisphere("bert.zarrvectors", "lh", coords="inflated",
+                           attributes=["thickness", "aparc"])
+inflated["vertices"]      # (V, 3), vertex i is source vertex i
+inflated["faces"]         # the same triangles as mid["faces"]
+inflated["attributes"]["thickness"]
+```
+
+At a coarser level the surviving vertices come back ordered by the source
+vertex each stands for, and `source_vertex` says which. A surface, attribute
+or hemisphere the store does not have raises `ValueError` listing the ones
+it does.
+
+## Writing GIFTI back out
+
+`export_gifti` writes a surface store as a directory that Connectome
+Workbench, FreeView and nilearn open, in the source vertex numbering:
+
+```python
+from zarr_vectors_tools.convert.export.gifti import export_gifti
+
+export_gifti("bert.zarrvectors", "bert_gifti", prefix="sub-bert")
+# sub-bert_hemi-L_midthickness.surf.gii, ..._white.surf.gii, ..._thickness.shape.gii,
+# ..._aparc.label.gii, and the same for hemi-R
+```
+
+```bash
+zvtools convert bert.zarrvectors bert_gifti --hemisphere lh --surface pial --attribute thickness
+```
+
+Ingesting that directory with `ingest_gifti` rebuilds the same store. Positions
+are written in the space the store holds, so a FreeSurfer store with `c_ras`
+applied exports in scanner RAS. See [Export → cortical surfaces](../export/surfaces.md).
+
+## Per-parcel summaries
+
+`parcel_summary` gives a table per parcellation, one row per parcel per
+hemisphere, computed the way FreeSurfer's `mris_anatomical_stats` computes
+`?h.aparc.stats`:
+
+| Column | FreeSurfer | How |
+| --- | --- | --- |
+| `vertex_count` | `NumVert` | vertices carrying the code |
+| `surface_area` | `SurfArea` | sum of white-surface vertex areas, a third of each triangle per vertex |
+| `<map>_mean`, `<map>_std` | `ThickAvg`, `ThickStd` | plain mean, population standard deviation |
+| `<map>_area_weighted_mean` | — | mean weighted by vertex area |
+
+```python
+from zarr_vectors_tools.algorithms.parcels import parcel_at, parcel_summary
+
+table = parcel_summary("bert.zarrvectors", "aparc", metrics=["thickness"])
+table.loc[("left", "precentral"), ["vertex_count", "surface_area", "thickness_mean"]]
+
+# Which parcel is nearest a point: a ray-cast hit, a streamline's end.
+parcel_at("bert.zarrvectors", [[-35.0, -20.0, 55.0]], "aparc")
+```
+
+On FreeSurfer's `bert` subject, both hemispheres and all 68 `aparc`
+parcels agree with `lh.aparc.stats` and `rh.aparc.stats` to the stats
+file's own rounding: vertex counts exactly, area to 0.5 mm², thickness
+mean and standard deviation to 0.0005 mm. The test suite repeats the
+comparison when `ZV_FREESURFER_SUBJECT` names a recon-all subject. Areas
+are measured on the `white` surface by default, as FreeSurfer's are; pass
+`surface=None` for the store's geometry.
 
 ## The header
 
@@ -232,8 +360,6 @@ exists in the source, never an average of two parcels.
 
 ## Not yet supported
 
-- Writing surfaces back out as GIFTI.
-- Per-parcel summaries, such as mean thickness per `aparc` region.
 - Parcellated and connectivity CIFTI files (`.pscalar`, `.ptseries`,
   `.dconn`), which have no per-vertex axis.
 

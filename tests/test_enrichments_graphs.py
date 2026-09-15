@@ -38,7 +38,7 @@ class TestGraphEnrichments:
     def test_degree(self, tmp_path: Path) -> None:
         from zarr_vectors.types.graphs import read_graph
 
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
+        from zarr_vectors_tools.convert.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)
@@ -54,7 +54,7 @@ class TestGraphEnrichments:
     def test_component_labels(self, tmp_path: Path) -> None:
         from zarr_vectors.types.graphs import read_graph
 
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
+        from zarr_vectors_tools.convert.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)
@@ -68,9 +68,9 @@ class TestGraphEnrichments:
             assert len(uniq) == 2
 
     def test_summary_header(self, tmp_path: Path) -> None:
+        from zarr_vectors_tools.convert.ingest.graphml import ingest_graphml
         from zarr_vectors_tools.headers.formats import GraphHeader
         from zarr_vectors_tools.headers.registry import HeaderRegistry
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)
@@ -91,7 +91,7 @@ class TestGraphEnrichments:
         """Existing behaviour: nothing computed unless requested."""
         from zarr_vectors.types.graphs import read_graph
 
-        from zarr_vectors_tools.ingest.graphml import ingest_graphml
+        from zarr_vectors_tools.convert.ingest.graphml import ingest_graphml
 
         g = tmp_path / "g.graphml"
         _write_graphml(g)

@@ -127,6 +127,68 @@ class TRKHeader(Header):
 
 
 # ===================================================================
+# TRX
+# ===================================================================
+
+@dataclass
+class TRXHeader(Header):
+    """What a TRX file says about the image its streamlines belong to.
+
+    TRX positions are always RAS millimetres, so unlike TRK there is no
+    stored space to undo.  What an export needs back is the reference
+    image -- its voxel-to-RAS affine and grid dimensions -- because tools
+    that load a TRX against a volume check the two agree.
+    """
+
+    format_name: str = "trx"
+    #: The reference image's voxel-to-RAS affine, flattened 4x4.
+    voxel_to_rasmm: list[float] | None = None
+    #: The reference image's grid dimensions.
+    dimensions: tuple[int, int, int] = (1, 1, 1)
+    #: Names of the per-vertex (dpv), per-streamline (dps) and per-group
+    #: (dpg) arrays the file had, as ingested.
+    dpv_names: list[str] = field(default_factory=list)
+    dps_names: list[str] = field(default_factory=list)
+    dpg_names: list[str] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    _KNOWN = (
+        "format_name", "voxel_to_rasmm", "dimensions",
+        "dpv_names", "dps_names", "dpg_names",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "format_name": self.format_name,
+            "voxel_to_rasmm": self.voxel_to_rasmm,
+            "dimensions": list(self.dimensions),
+            "dpv_names": list(self.dpv_names),
+            "dps_names": list(self.dps_names),
+            "dpg_names": list(self.dpg_names),
+        }
+        out.update(self.extra)
+        return out
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TRXHeader:
+        return cls(
+            voxel_to_rasmm=d.get("voxel_to_rasmm"),
+            dimensions=tuple(d.get("dimensions", [1, 1, 1])),
+            dpv_names=list(d.get("dpv_names", [])),
+            dps_names=list(d.get("dps_names", [])),
+            dpg_names=list(d.get("dpg_names", [])),
+            extra={k: v for k, v in d.items() if k not in cls._KNOWN},
+        )
+
+    @property
+    def affine(self) -> np.ndarray | None:
+        """The reference affine as a 4x4 numpy array."""
+        if self.voxel_to_rasmm is None:
+            return None
+        return np.array(self.voxel_to_rasmm, dtype=np.float64).reshape(4, 4)
+
+
+# ===================================================================
 # NIfTI (spatial reference)
 # ===================================================================
 
@@ -583,6 +645,7 @@ class SurfaceHeader(Header):
 
 HEADER_CLASSES: dict[str, type[Header]] = {
     "trk": TRKHeader,
+    "trx": TRXHeader,
     "nifti": NIfTIHeader,
     "swc": SWCHeader,
     "las": LASHeader,

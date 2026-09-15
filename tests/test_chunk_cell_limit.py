@@ -19,12 +19,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from zarr_vectors_tools.ingest import _cell_limits
-from zarr_vectors_tools.ingest._cell_limits import (
+from zarr_vectors_tools.convert.ingest import _cell_limits
+from zarr_vectors_tools.convert.ingest._cell_limits import (
     VLEN_CELL_LIMIT_BYTES,
     check_vertex_cell_limit,
 )
-from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
 from .test_trk_registration import _streamlines_voxmm, _write_radiological_trk
 
@@ -107,6 +107,8 @@ def test_ingest_refuses_before_writing_level_zero(tmp_path, monkeypatch):
     assert not [p for p in cells if p.is_file()]
 
 
+# A full TRK ingest (the refusal above stops during binning, so it stays fast).
+@pytest.mark.slow
 def test_finer_grid_ingests_the_same_input(tmp_path, monkeypatch):
     """The advice works: the same input under the same lowered ceiling
     succeeds once the grid is fine enough."""
@@ -122,12 +124,13 @@ def test_finer_grid_ingests_the_same_input(tmp_path, monkeypatch):
     assert [p for p in cells if p.is_file()]
 
 
+@pytest.mark.slow
 def test_checked_counts_are_the_bytes_actually_written(tmp_path, monkeypatch):
     """The guard is only as good as its prediction: every count it inspects
     must equal the cell payload Phase B goes on to write, boundary-split
     duplicates included.  A refactor that drifts these apart would let a
     real overflow through."""
-    import zarr_vectors_tools.ingest.trk_parallel as tp
+    import zarr_vectors_tools.convert.ingest.trk_parallel as tp
 
     trk = tmp_path / "src.trk"
     _write_radiological_trk(trk, _streamlines_voxmm(n=60, npts=25))

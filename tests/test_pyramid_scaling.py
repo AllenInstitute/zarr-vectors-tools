@@ -304,7 +304,7 @@ class TestGroupingHelpers:
 class TestProcessPoolSharing:
 
     def test_shared_payload_reaches_the_worker(self) -> None:
-        from zarr_vectors_tools.ingest._parallel import (
+        from zarr_vectors_tools.convert.ingest._parallel import (
             _call_with_shared,
             _set_shared,
         )

@@ -35,19 +35,19 @@ equals parallel output.
 
 ## The two backends
 
-Both live in `zarr_vectors_tools/ingest/_parallel.py` and are context
+Both live in `zarr_vectors_tools/convert/ingest/_parallel.py` and are context
 managers. Both default to `max(1, cpu_count() - 1)` workers.
 
 | | `process_pool_executor` | `dask_executor` |
 | --- | --- | --- |
 | Backing | stdlib `concurrent.futures.ProcessPoolExecutor` | `dask.distributed.LocalCluster` |
 | Extra required | none | `parallel` |
-| `shared` handling | re-pickled into every task | `client.scatter(broadcast=True)` **once** |
+| `shared` handling | written to a temp file once per phase, loaded once per worker | `client.scatter(broadcast=True)` **once** |
 | Dashboard | — | `127.0.0.1:8787` |
 | Best for | most work; the default | dense levels with a large `shared` payload |
 
 ```python
-from zarr_vectors_tools.ingest._parallel import process_pool_executor
+from zarr_vectors_tools.convert.ingest._parallel import process_pool_executor
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
 # Stdlib backend — no extra dependency.
@@ -56,7 +56,7 @@ with process_pool_executor(8) as ex:
 ```
 
 ```python
-from zarr_vectors_tools.ingest._parallel import dask_executor
+from zarr_vectors_tools.convert.ingest._parallel import dask_executor
 
 # Dask backend — needs pip install 'zarr-vectors-tools[parallel]'
 with dask_executor(12) as ex:
@@ -66,8 +66,14 @@ with dask_executor(12) as ex:
 ### Why `shared` exists
 
 `shared` is the data common to every task — a source reader, or a
-pyramid level's plan. The stdlib backend re-pickles it into each task
-payload, so keep it lightweight there.
+pyramid level's plan. Neither backend re-pickles it into each task
+payload. The stdlib backend runs **one** process pool for the life of the
+context; each phase writes its `shared` to a temp file once and tags its
+tasks with a token, and a worker loads the file the first time it sees
+that token. The pool used to be opened afresh for every phase (three per
+pyramid level) and every pool was kept alive until the context closed, so
+a long run spawned the interpreter hundreds of times and held every idle
+worker's memory to the end.
 
 The dask backend scatters it once. That path is not a micro-optimisation:
 without it, levels with few tasks but bulky shared state were dominated
@@ -91,7 +97,7 @@ not GIL-bound, so threads are the correct tool. It is a **separate knob**
 from the pyramid's process workers:
 
 ```python
-from zarr_vectors_tools.ingest.precomputed_plain_skeletons import run_ingest_plain
+from zarr_vectors_tools.convert.ingest.precomputed_plain_skeletons import run_ingest_plain
 
 run_ingest_plain(
     source,
@@ -132,9 +138,16 @@ The protocol that avoids this has two halves:
 
 1. **Workers write with `record_presence=False`.** They touch only their
    own cell data and never update the shared manifest attribute.
-2. **A single-process coordinator rebuilds afterwards** —
-   `rebuild_nonempty_manifests` from `zarr_vectors_tools/_manifests.py`,
-   plus core's `finalize_links`.
+2. **A single-process coordinator rebuilds afterwards** — core's
+   `rebuild_presence` for the per-chunk arrays, plus `finalize_links` for
+   the link families.
+
+Everything a worker sends back to the coordinator travels inline in its
+result — object-index rows and cross-chunk anchor rows as compact `int64`
+arrays. Neither coarsener writes scratch files any more: the per-shard
+`.npy` spills the polyline and skeleton coarseners used to write (one per
+target chunk per shard, up to 4096 shards) were most of a level's serial
+time on NTFS and were left behind whenever a run was killed.
 
 `CROSS_LINK_TASK_SHARD_AXIS = 4` (in `multiresolution/constants.py`)
 bounds how many endpoint pairs a single cross-link task takes on. It is a

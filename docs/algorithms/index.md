@@ -1,10 +1,12 @@
 # Algorithms
 
-Eleven streaming algorithms across two domains: graphs (and skeletons,
-which are graphs with a tree convention) and triangle meshes. They all
-read directly from a chunked Zarr Vectors store — no full
-materialisation — and a subset can write their results back to the
-same store via `zarr_vectors_tools._attributes.write_vertex_attribute`.
+Streaming algorithms for graphs (and skeletons, which are graphs with a
+tree convention), triangle meshes, streamline bundles and cortical
+surfaces. They all read directly from a chunked Zarr Vectors store — no
+full materialisation — and a subset write their results back to the same
+store: per-vertex results via
+`zarr_vectors_tools._attributes.write_vertex_attribute`, bundle summaries
+as group attributes.
 
 ## Matrix
 
@@ -21,6 +23,13 @@ same store via `zarr_vectors_tools._attributes.write_vertex_attribute`.
 | `compute_mean_curvature` | mesh | curvature | ✓ → `attributes/mean_curvature/` | – | triangle meshes |
 | `closest_point` | mesh | hit position, chunk, face | – | – | triangle meshes |
 | `cast_ray` | mesh | hit t, position, chunk, face | – | – | triangle meshes |
+| `compute_skeleton_metrics` | skeleton | per-object cable length, node / leaf / branch / component counts, Strahler order, extent | ✓ → `object_attributes/*` | – | EM and SWC-style skeleton stores |
+| `select_streamlines` | streamlines | object ids through a NIfTI mask or box, or ending in it | – | – | reads only the chunks the region touches |
+| `bundle_summary` | streamlines | per-group table (count, length stats, tortuosity, endpoint centroids) | ✓ → `group_attributes/bundle_*` | – | object groups required |
+| `parcel_summary` | surface mesh | per-parcel vertex count, surface area, map mean / std | – | – | matches FreeSurfer `?h.aparc.stats` |
+| `parcel_at` | surface mesh | parcel of the vertex nearest each point | – | – | surface stores |
+| `read_hemisphere` | surface mesh | vertices in source order, faces, attributes, any kept surface | – | – | surface stores (GIFTI / FreeSurfer ingest) |
+| `SegmentLink` | any store with segment ids | each store's object id for a segment, the match for a picked object, each store's object attributes | – | – | `object_attributes/segment_id` (precomputed ingests, synapse join) |
 
 ## Calling convention
 

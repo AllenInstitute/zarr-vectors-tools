@@ -40,6 +40,9 @@ Nothing is inferred from arguments — the plan comes off disk.
 #                        mesh_decimate, skeleton, polyline)
 #   coarsen_mode      <- "decimate" when coarsening_method is
 #                        "polyline_decimate", else "rdp"
+#   rdp_tolerance     <- the level's zarr_vectors_tools.coarsening record,
+#                        when it says the tolerance was "explicit"; a
+#                        "derived" one is derived again from the bin
 #
 # then removes the level and re-runs coarsen_level with exactly those.
 ```

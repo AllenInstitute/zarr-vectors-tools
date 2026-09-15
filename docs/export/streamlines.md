@@ -13,19 +13,58 @@ pip install "zarr-vectors-tools[streamlines]"  # both
 The extras are split because `nibabel` is pure Python while `trx-python`
 ships compiled wheels. Only the `trk` half installs in a WebAssembly
 runtime such as Pyodide. Neither exporter imports the other's
-dependency: `from zarr_vectors_tools.export.trk import export_trk`
+dependency: `from zarr_vectors_tools.convert.export.trk import export_trk`
 succeeds with `trx-python` absent.
 :::
 
-Both exporters reassemble each object's stored segments into one
-contiguous vertex array before writing, and both raise `ExportError` if
-the filters leave nothing to export.
+Both exporters write back what the store kept, not just positions:
+
+| Store | TRK | TRX |
+| --- | --- | --- |
+| per-vertex attributes | scalars (`data_per_point`) | `dpv` |
+| per-object attributes | properties (`data_per_streamline`) | `dps` |
+| named object groups and their attributes | — | `groups` and `dpg` |
+| reference image from the TRK or TRX header | `vox_to_ras`, voxel size, dimensions, voxel order | `VOXEL_TO_RASMM`, `DIMENSIONS` |
+
+Each exporter reassembles an object's stored segments into one streamline,
+and raises `ExportError` if the filters leave nothing to export.
+
+## Which attributes are written
+
+`attribute_names` (per-vertex) and `object_attribute_names` (per-object)
+choose them:
+
+- `None`, the default, writes every numeric attribute. Text attributes,
+  such as labels stored as fixed-width bytes, cannot go in a streamline
+  file; they are skipped and listed under `attributes_skipped` in the
+  summary.
+- `[]` writes none.
+- A list writes exactly those. A name the level does not have, or one that
+  is not numeric, raises `ExportError` naming it.
+
+TRK holds at most ten scalar names and ten property names, each up to 20
+characters. An export that asks for more raises `ExportError` and suggests
+narrowing the selection.
+
+## Coordinate space
+
+A store keeps streamlines in one of two spaces, and its TRK header records
+which:
+
+- `voxmm`: TrackVis voxel millimetres, as the file had them. This is the
+  default for `zvtools convert x.trk` (the parallel ingest).
+- `rasmm`: RAS millimetres. This is what `--apply-affine`, the serial
+  `ingest_trk`, TRX and TCK produce.
+
+Both exporters convert from the stored space, so a file written from
+either kind of store loads in the same place. The summary's `space`
+reports which one the store was in. Stores written before the header
+recorded it fall back to the `crs` the parallel ingest stamps.
 
 ## TrackVis TRK — `export_trk`
 
 ```python
-import numpy as np
-from zarr_vectors_tools.export.trk import export_trk
+from zarr_vectors_tools.convert.export.trk import export_trk
 
 summary = export_trk(
     "tracts.zv",                # store_path
@@ -34,62 +73,55 @@ summary = export_trk(
     object_ids=[3, 5, 17],      # keep only these streamlines
     group_ids=None,             # keep only these groupings
     chunks=None,                # chunk whitelist — see the warning below
-    affine=np.eye(4),           # 4x4 vox->RAS; None also means identity
+    attribute_names=None,       # every numeric per-vertex attribute
+    object_attribute_names=["length"],
 )
-summary["streamline_count"]     # → int
-summary["vertex_count"]         # → int
+summary["streamline_count"]
+summary["attributes_carried"]         # e.g. ["fa", "rgb"]
+summary["object_attributes_carried"]  # ["length"]
 ```
 
-### Recovering the affine
-
-`affine=None` writes an **identity** matrix — it does not consult the
-store. Ingest saves the source file's voxel-to-RAS matrix in a
-`TRKHeader` under `/headers/trk/`, but the exporter never reads it, so
-you must pass it in yourself:
-
-```python
-from zarr_vectors_tools.headers import HeaderRegistry
-from zarr_vectors_tools.export.trk import export_trk
-
-reg = HeaderRegistry("tracts.zv")
-header = reg.get("trk")                 # KeyError if ingest did not preserve one
-export_trk("tracts.zv", "out.trk", affine=header.affine)
-```
-
-`TRKHeader.affine` unflattens the stored 16-float `vox_to_ras` list into
-a `(4, 4)` array, returning `None` when the source file carried no
-affine — in which case the identity default is the correct behaviour
-anyway.
-
-:::{warning}
-Exporting without the stored affine silently produces a geometrically
-valid but **misregistered** tractogram: the streamlines are in voxel
-space while the file claims RAS. Always pass `affine=` when the store
-has a `trk` header.
-:::
+The header comes from the store's `TRKHeader`. A store ingested from TRX
+takes its reference image from the `TRXHeader` instead, with the voxel
+order derived from the affine. `affine=` is for a store with neither: the
+positions are then treated as voxel coordinates of that affine, and with
+no affine at all the identity is used.
 
 ## TRX — `export_trx`
 
 ```python
-from zarr_vectors_tools.export.trx import export_trx
+from zarr_vectors_tools.convert.export.trx import export_trx
 
 summary = export_trx(
     "tracts.zv",
     "tracts.trx",
     level=0,
-    object_ids=[3, 5, 17],
-    group_ids=None,
+    object_ids=None,
+    group_ids=[2],              # also limits the groups written to these
     chunks=None,
 )
-summary["streamline_count"]
-summary["vertex_count"]
+summary["groups_carried"]       # e.g. ["CST_L"]
 ```
 
-`export_trx` takes no `affine` — TRX carries its own spatial metadata,
-which the exporter leaves at the `TrxFile` defaults. The writer populates
-the positions array and the per-streamline offsets only; per-vertex
-(`dpv`), per-streamline (`dps`), and per-group (`dpg`) fields are not
-written, so store attributes and groupings do not survive the trip.
+A group lists output streamlines, so each member object is mapped through
+the streamlines actually written, and a group with none is left out. Group
+names are the store's (`zvtools convert` of a TRX keeps the bundle names),
+or `group_<id>` for an unnamed row. Group attributes become that group's
+`dpg`. NaN values are skipped, because that is how the TRX ingest fills a
+key one group did not have.
+
+## From the command line
+
+```bash
+# Everything the store kept.
+zvtools convert tracts.zarrvectors out.trk
+
+# Only FA per point and length per streamline.
+zvtools convert tracts.zarrvectors out.trk --attribute fa --object-attribute length
+
+# One bundle to TRX, with its name and per-group data.
+zvtools convert atlas.zarrvectors cst.trx --group-id 2
+```
 
 ## The segment-level `chunks` caveat
 
@@ -113,11 +145,12 @@ by_chunk["streamline_count"] >= by_object["streamline_count"]   # possibly much 
 
 Use `object_ids` or `group_ids` whenever you need whole objects; reach
 for `chunks` only when you genuinely want a spatial slab and can tolerate
-cut streamlines.
+cut streamlines. Per-object attributes follow the object, so every run
+cut from one object carries that object's values.
 
 ## See also
 
 - [Export overview](index.md) — shared call shape and the `level=` parameter.
 - [Ingest → tractography](../ingest/tractography.md) — the symmetric direction.
 - [Tractography at scale](../ingest/tractography_at_scale.md) — the parallel TRK path.
-- [Headers](../headers.md) — `TRKHeader` fields and the `HeaderRegistry` API.
+- [Headers](../headers.md) — `TRKHeader`, `TRXHeader` and the `HeaderRegistry` API.

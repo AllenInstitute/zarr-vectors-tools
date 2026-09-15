@@ -6,16 +6,21 @@ entry points, and where to read more.
 
 | Subpackage | Owns | Narrative | API |
 | --- | --- | --- | --- |
-| `ingest` | file format → store | [Ingest](../ingest/index.md) | [`api/ingest`](../api/ingest.rst) |
+| `convert.ingest` | file format → store | [Ingest](../ingest/index.md) | [`api/ingest`](../api/ingest.rst) |
+| `convert.export` | store → file format | [Export](../export/index.md) | [`api/export`](../api/export.rst) |
+| `compose` | merge into, and split, an existing store | [Compose](../compose/index.md) | |
 | `multiresolution` | coarser levels, pyramids | [Multiresolution](../multiresolution/index.md) | [`api/multiresolution`](../api/multiresolution.rst) |
 | `algorithms` | streaming graph and mesh compute | [Algorithms](../algorithms/index.md) | [`api/algorithms`](../api/algorithms.rst) |
-| `export` | store → file format | [Export](../export/index.md) | [`api/export`](../api/export.rst) |
 | `headers` | format metadata preservation | [Headers](../headers.md) | [`api/headers`](../api/headers.rst) |
 | `cli` | the `zvtools` command line | [CLI](../getting_started/cli.md) | [`api/cli`](../api/cli.rst) |
 
+`convert` is the one subpackage with submodules: `ingest` and `export` are
+the two directions of the same operation, which is also how `zvtools
+convert` presents them.
+
 ---
 
-## `zarr_vectors_tools.ingest`
+## `zarr_vectors_tools.convert.ingest`
 
 Reads a source file and writes a store. Nineteen modules — one per
 format, plus shared enrichment helpers.
@@ -46,9 +51,9 @@ Supporting modules: `_parallel` (the two executor backends),
 `_point_enrichments`, `_polyline_enrichments`, `_tree_enrichments`.
 
 :::{warning}
-`ingest/__init__.py` is **empty** — there are no re-exports. Import from
-the concrete module: `from zarr_vectors_tools.ingest.csv_points import
-ingest_csv`.
+`convert/ingest/__init__.py` is **empty** — there are no re-exports. Import
+from the concrete module: `from zarr_vectors_tools.convert.ingest.csv_points
+import ingest_csv`.
 :::
 
 ---
@@ -118,7 +123,7 @@ Two internal modules matter to anyone writing their own algorithm:
 
 ---
 
-## `zarr_vectors_tools.export`
+## `zarr_vectors_tools.convert.export`
 
 Store → file. Six exporters, all sharing the signature shape
 `(store_path, output_path, *, level=0, ...)` and all returning a summary
@@ -138,7 +143,7 @@ gives you a decimated file — often the quickest way to get a previewable
 subset.
 
 :::{warning}
-`export/__init__.py` is also **empty**. And no exporter reads the
+`convert/export/__init__.py` is also **empty**. And no exporter reads the
 `headers/` group automatically — see [Export](../export/index.md).
 :::
 
