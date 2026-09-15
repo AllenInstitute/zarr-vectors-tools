@@ -1,9 +1,9 @@
-"""Frontier graph search over a chunked store: BFS + Dijkstra / A*.
+"""Graph search over a chunked store: BFS, Dijkstra and A*.
 
-Builds a tools-side adjacency map from the chunked storage (intra-chunk
-edges resolved via the public global-offset helper, cross-chunk edges
-merged in from the global cross array), then runs a standard frontier
-loop in memory. Memory cost: O(N + E).
+The level's links are read once as arrays into a compressed sparse row
+adjacency (:mod:`~zarr_vectors_tools.algorithms._graph_edges`).  BFS then
+expands a whole frontier per step with numpy; Dijkstra and A* keep a heap,
+but walk the adjacency's arrays, and stop at the target.  Memory: O(N + E).
 
 Cross-chunk edges are not a special case: connectivity is one family, so
 they take per-edge weights from the same ``link_attributes/<weight>/0/``
@@ -14,21 +14,13 @@ unit weights silently.
 from __future__ import annotations
 
 import heapq
-from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from zarr_vectors.building import (
-    chunk_local_to_global_offsets,
-    get_resolution_level,
-    open_store,
-    read_link_attributes,
-    read_links,
-)
+from zarr_vectors.building import get_resolution_level, open_store
 
-from zarr_vectors_tools.algorithms._links import link_prefetch_plan
+from zarr_vectors_tools.algorithms._graph_edges import bfs_levels, read_adjacency
 
 
 def build_adjacency(
@@ -38,13 +30,8 @@ def build_adjacency(
 ) -> tuple[list[list[tuple[int, float]]], int]:
     """Materialise an adjacency list keyed by global vertex index.
 
-    Public helper shared with ``graph_clustering``. The clustering
-    algorithms (LPA, Louvain) need the same in-memory adjacency that
-    ``shortest_path`` builds.
-
-    Cross-chunk edges are not a special case: connectivity is one family,
-    so they carry weights from the same ``link_attributes`` family as
-    intra-chunk edges and are read by the same call.
+    Kept for callers that want Python lists; the algorithms in this package
+    use the array form, :func:`~zarr_vectors_tools.algorithms._graph_edges.read_adjacency`.
 
     Args:
         level_group: Resolution level group.
@@ -55,45 +42,8 @@ def build_adjacency(
         ``(adj, n)`` where ``adj[v]`` is a list of ``(neighbour, weight)``
         pairs and ``n`` is the total vertex count.
     """
-    offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
-    adj: list[list[tuple[int, float]]] = [[] for _ in range(n_vertices)]
-
-    attrs = (weight_attr,) if weight_attr is not None else ()
-    with level_group.batched_reads(
-        link_prefetch_plan(level_group, chunk_keys, attrs=attrs)
-    ):
-        # One whole-family read: every record is already a tuple of
-        # (chunk_coords, local_index) endpoints, intra and cross alike.
-        # Adding a per-chunk read_chunk_links loop on top of this would
-        # union every intra edge twice and silently double its degree.
-        try:
-            records = read_links(level_group, delta=0)
-        except Exception:
-            records = []
-
-        weights: np.ndarray | None = None
-        if weight_attr is not None and records:
-            try:
-                weights = read_link_attributes(
-                    level_group, weight_attr, delta=0,
-                ).astype(np.float64, copy=False)
-            except Exception:
-                weights = None
-            # read_links and read_link_attributes enumerate in the same
-            # (segment, cell) order — that shared order is the only thing
-            # aligning row i to record i — so a length mismatch means a
-            # partial/stale write and the rows cannot be trusted.
-            if weights is not None and len(weights) != len(records):
-                weights = None
-
-    for i, ((chunk_a, vi_a), (chunk_b, vi_b)) in enumerate(records):
-        ai = offsets[chunk_a] + int(vi_a)
-        bi = offsets[chunk_b] + int(vi_b)
-        w = float(weights[i]) if weights is not None else 1.0
-        adj[ai].append((bi, w))
-        adj[bi].append((ai, w))
-
-    return adj, n_vertices
+    adjacency = read_adjacency(level_group, weight_attr=weight_attr)
+    return adjacency.to_lists(), adjacency.n
 
 
 def bfs_distances(
@@ -117,29 +67,14 @@ def bfs_distances(
         Dict with:
           - ``distances`` (np.ndarray int32, shape (N,)): -1 for unreached.
           - ``predecessors`` (np.ndarray int64, shape (N,)): parent node
-            on the shortest path; -1 for the source and for unreached nodes.
+            on a shortest path -- the lowest-numbered neighbour one hop
+            nearer the source; -1 for the source and for unreached nodes.
     """
-    root = open_store(str(store_path))
-    level_group = get_resolution_level(root, level)
-    adj, n = build_adjacency(level_group)
-    if not (0 <= source < n):
-        raise IndexError(f"source {source} out of range [0, {n})")
-
-    distances = np.full(n, -1, dtype=np.int32)
-    predecessors = np.full(n, -1, dtype=np.int64)
-    distances[source] = 0
-
-    q: deque[int] = deque([source])
-    while q:
-        u = q.popleft()
-        if max_distance is not None and distances[u] >= max_distance:
-            continue
-        for v, _w in adj[u]:
-            if distances[v] == -1:
-                distances[v] = distances[u] + 1
-                predecessors[v] = u
-                q.append(v)
-
+    level_group = get_resolution_level(open_store(str(store_path)), level)
+    adjacency = read_adjacency(level_group)
+    if not (0 <= source < adjacency.n):
+        raise IndexError(f"source {source} out of range [0, {adjacency.n})")
+    distances, predecessors = bfs_levels(adjacency, int(source), max_distance)
     return {"distances": distances, "predecessors": predecessors}
 
 
@@ -171,16 +106,23 @@ def shortest_path(
           - ``cost`` (float): total path cost; ``inf`` if unreachable.
           - ``visited`` (int): how many nodes were popped from the queue.
     """
-    root = open_store(str(store_path))
-    level_group = get_resolution_level(root, level)
-    adj, n = build_adjacency(level_group, weight_attr=weight)
+    level_group = get_resolution_level(open_store(str(store_path)), level)
+    adjacency = read_adjacency(level_group, weight_attr=weight)
+    n = adjacency.n
     if not (0 <= source < n):
         raise IndexError(f"source {source} out of range [0, {n})")
     if not (0 <= target < n):
         raise IndexError(f"target {target} out of range [0, {n})")
 
-    dist = np.full(n, np.inf, dtype=np.float64)
-    prev = np.full(n, -1, dtype=np.int64)
+    # Plain lists: the heap loop reads and writes them one element at a
+    # time, which numpy scalars make several times slower.
+    indptr = adjacency.indptr.tolist()
+    indices = adjacency.indices.tolist()
+    weights = adjacency.weights.tolist()
+
+    inf = float("inf")
+    dist = [inf] * n
+    prev = [-1] * n
     dist[source] = 0.0
     visited = 0
 
@@ -188,23 +130,29 @@ def shortest_path(
     heap: list[tuple[float, int]] = [(float(h(source)), source)]
 
     while heap:
-        _f, u = heapq.heappop(heap)
+        f, u = heapq.heappop(heap)
+        if f > dist[u] + float(h(u)):
+            # Stale: pushed before a shorter route to ``u`` was found.  A
+            # node is not closed once popped, so an admissible heuristic
+            # that is not consistent can still reopen it.
+            continue
         visited += 1
         if u == target:
             break
         u_dist = dist[u]
-        for v, w in adj[u]:
-            alt = u_dist + w
+        for i in range(indptr[u], indptr[u + 1]):
+            v = indices[i]
+            alt = u_dist + weights[i]
             if alt < dist[v]:
                 dist[v] = alt
                 prev[v] = u
                 heapq.heappush(heap, (alt + float(h(v)), v))
 
-    if not np.isfinite(dist[target]):
-        return {"path": [], "cost": float("inf"), "visited": visited}
+    if dist[target] == inf:
+        return {"path": [], "cost": inf, "visited": visited}
 
     path: list[int] = [target]
     while path[-1] != source:
-        path.append(int(prev[path[-1]]))
+        path.append(prev[path[-1]])
     path.reverse()
     return {"path": path, "cost": float(dist[target]), "visited": visited}

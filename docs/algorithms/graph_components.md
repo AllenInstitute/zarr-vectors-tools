@@ -27,22 +27,34 @@ result["component_sizes"]         # (n_components,) int64, indexed by label
 
 ## Algorithm notes
 
-**Union-find** with path compression and union-by-rank over a single
-whole-family `read_links(level_group, delta=0)` pass. At format 0.9.0
-connectivity is one family under `links/0/<offsets>/`, and an
-intra-chunk edge is just one whose endpoints share a chunk — so that
-single read replaces both the old per-chunk intra loop and the separate
-cross-chunk pass. Doing both would union every intra-chunk edge twice
-and silently double its degree; see the double-count warning on the
-[algorithms index](index.md). Reads are batched through
-`link_prefetch_plan`, which names one array per offsets segment rather
-than the `links/0` group. Memory scales with the **node count**, so the
-algorithm runs against stores larger than RAM. After every edge is
-unioned, the disjoint-set roots are compacted into contiguous 0-indexed
-labels via `np.unique(..., return_inverse=True)`.
+The level's links are read once, as arrays: `read_link_arrays(level_group,
+delta=0)` gives every record's endpoint chunks and chunk-local indices, and
+`link_endpoints_to_rows` turns them into global vertex numbers. At format
+0.9.0 connectivity is one family under `links/0/<offsets>/`, and an
+intra-chunk edge is just one whose endpoints share a chunk, so that single
+read covers intra- and cross-chunk edges alike. Reading the cross-chunk
+records a second time would double them; see the double-count warning on the
+[algorithms index](index.md).
+
+The components come from a **union-find over the whole edge list at once**.
+Each round points the larger root of every edge at the smaller one, then
+shortcuts every vertex to its root, and drops the edges whose ends now share
+one. Roots only decrease, so it stops when a round changes nothing. Every
+step is a numpy pass, with no Python call per edge or per vertex.
+
+- **Labels.** Components are numbered in order of their lowest vertex, so
+  vertex 0 is in component 0 and the numbering does not depend on the order
+  the edges are stored in.
+- **Memory.** Holds the edge list (two `int64` per edge) and one `int64` per
+  vertex, on top of the link reader's own arrays.
+- **Time.** Reading the links dominates. On a 300,000-vertex, 306,000-edge
+  store on a local Windows disk, the read took 197 s and the components
+  0.28 s. The edge-at-a-time implementation this replaced spent about the
+  same on the read. The read cost is mostly opening one file per chunk and
+  link array; a sharded store packs those into far fewer files.
 
 ## See also
 
 - [Algorithms index](index.md)
-- [Graph search](graph_search.md) — uses the same global-index mapping.
+- [Graph search](graph_search.md) — reads the same edge arrays.
 - Parent: [Links](https://zarr-vectors.readthedocs.io/en/latest/spec/object_model/links.html)

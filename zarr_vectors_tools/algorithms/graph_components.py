@@ -1,8 +1,11 @@
-"""Chunked connected components for graph stores.
+"""Connected components for graph stores.
 
-Per-chunk union-find on intra-chunk edges + a single global pass over
-the cross-chunk array. Scales beyond memory because per-chunk edge
-arrays are loaded one at a time.
+The level's link family is read once as arrays, and the components are
+found by a union-find over the whole edge list at a time (see
+:func:`~zarr_vectors_tools.algorithms._graph_edges.component_roots`), so
+the cost is a handful of numpy passes over the edges rather than a Python
+call per edge.  Memory holds the edge list: two ``int64`` per edge plus the
+reader's own arrays.
 
 ``write_back=True`` persists the component labels via
 :func:`~zarr_vectors_tools._attributes.write_vertex_attribute` under
@@ -11,52 +14,17 @@ arrays are loaded one at a time.
 
 from __future__ import annotations
 
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from zarr_vectors.building import (
-    chunk_local_to_global_offsets,
-    get_resolution_level,
-    open_store,
-    read_links,
-)
+from zarr_vectors.building import get_resolution_level, open_store
 
 from zarr_vectors_tools._attributes import write_vertex_attribute
-from zarr_vectors_tools.algorithms._links import link_prefetch_plan
-
-
-class _DSU:
-    """Simple disjoint-set with path compression + union by rank."""
-
-    __slots__ = ("parent", "rank")
-
-    def __init__(self, n: int) -> None:
-        self.parent = np.arange(n, dtype=np.int64)
-        self.rank = np.zeros(n, dtype=np.int32)
-
-    def find(self, x: int) -> int:
-        root = x
-        while self.parent[root] != root:
-            root = int(self.parent[root])
-        # Path compression.
-        cur = x
-        while self.parent[cur] != root:
-            nxt = int(self.parent[cur])
-            self.parent[cur] = root
-            cur = nxt
-        return root
-
-    def union(self, a: int, b: int) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra == rb:
-            return
-        if self.rank[ra] < self.rank[rb]:
-            ra, rb = rb, ra
-        self.parent[rb] = ra
-        if self.rank[ra] == self.rank[rb]:
-            self.rank[ra] += 1
+from zarr_vectors_tools.algorithms._graph_edges import (
+    compact_labels,
+    component_roots,
+    read_edges,
+)
 
 
 def compute_connected_components(
@@ -66,6 +34,10 @@ def compute_connected_components(
     write_back: bool = False,
 ) -> dict[str, Any]:
     """Compute 0-indexed connected-component labels for a graph store.
+
+    Components are numbered in order of their lowest vertex, so vertex 0 is
+    always in component 0 and the labels do not depend on the order edges
+    are stored in.
 
     Args:
         store_path: Path to a zarr-vectors graph (or skeleton) store.
@@ -83,48 +55,20 @@ def compute_connected_components(
           - ``component_sizes`` (np.ndarray): count of nodes per label,
             indexed by component id.
     """
-    root = open_store(str(store_path))
-    level_group = get_resolution_level(root, level)
-
-    offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
-
-    dsu = _DSU(n_vertices)
-
-    # Connectivity is one family: every record is a tuple of
-    # (chunk_coords, local_index) endpoints, and an intra-chunk edge is
-    # just one whose endpoints share a chunk.  So a single whole-family
-    # read replaces the old per-chunk intra loop PLUS the separate cross
-    # read — doing both against read_links would union every intra edge
-    # twice and silently double its degree.
-    with level_group.batched_reads(link_prefetch_plan(level_group, chunk_keys)):
-        try:
-            records = read_links(level_group, delta=0)
-        except Exception:
-            records = []
-    for (chunk_a, vi_a), (chunk_b, vi_b) in records:
-        dsu.union(offsets[chunk_a] + int(vi_a), offsets[chunk_b] + int(vi_b))
-
-    # Compact roots into 0-indexed labels.
-    roots = np.array([dsu.find(i) for i in range(n_vertices)], dtype=np.int64)
-    unique_roots, labels = np.unique(roots, return_inverse=True)
-    labels = labels.astype(np.uint32)
-
-    sizes = np.zeros(len(unique_roots), dtype=np.int64)
-    if n_vertices:
-        counts = Counter(int(label) for label in labels)
-        for k, v in counts.items():
-            sizes[k] = v
+    level_group = get_resolution_level(open_store(str(store_path)), level)
+    a, b, _weights, n_vertices = read_edges(level_group)
+    labels, sizes = compact_labels(component_roots(n_vertices, a, b))
 
     if write_back and n_vertices:
         # A second, writable handle: the read path above opens mode="r".
         write_vertex_attribute(
             get_resolution_level(open_store(str(store_path), mode="r+"), level),
-            "component_label", labels, dtype=np.uint32,
+            "component_label", labels, dtype=labels.dtype,
         )
 
     return {
         "labels": labels,
-        "n_components": int(len(unique_roots)),
+        "n_components": int(len(sizes)),
         "largest_component_size": int(sizes.max()) if len(sizes) else 0,
         "component_sizes": sizes,
     }

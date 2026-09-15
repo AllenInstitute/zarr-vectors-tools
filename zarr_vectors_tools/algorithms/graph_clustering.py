@@ -3,18 +3,20 @@
 Three algorithms covering the common "what are the modules in this
 network?" question:
 
-- :func:`compute_k_core` — Batagelj-Zaversnik degree-peeling. Returns
-  per-vertex coreness.
+- :func:`compute_k_core` — degree peeling. Returns per-vertex coreness.
 - :func:`compute_label_propagation` — synchronous LPA. Returns
   community labels.
 - :func:`compute_louvain` — greedy modularity optimisation with the
   classic two-phase Blondel et al. algorithm. Returns community labels
   + final modularity.
 
-All three materialise the in-memory adjacency once via
-``graph_search.build_adjacency``. For LPA and Louvain that's
-unavoidable (they touch every edge per iteration); for k-core it could
-also be streamed, but uniformity wins.
+All three read the level's links once as arrays into a compressed sparse
+row adjacency (:mod:`~zarr_vectors_tools.algorithms._graph_edges`).
+k-core peels every vertex at the current core number in one numpy step,
+and a label-propagation round is one sort over the edge ends.  Louvain's
+local moves are sequential by definition, so its inner loop still visits
+one vertex at a time, over plain lists; its modularity and contraction
+are array operations.
 
 Cross-chunk edges are not a special case: connectivity is one family, so
 they take per-edge weights from the same ``link_attributes/<weight>/0/``
@@ -24,15 +26,22 @@ unit weights silently.
 
 from __future__ import annotations
 
-import heapq
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from zarr_vectors.building import get_resolution_level, open_store
 
-from zarr_vectors_tools.algorithms.graph_search import build_adjacency
+from zarr_vectors_tools.algorithms._graph_edges import (
+    Adjacency,
+    compact_labels,
+    contract,
+    k_core,
+    label_propagation_round,
+    modularity,
+    read_adjacency,
+)
 
 # =====================================================================
 # k-core decomposition
@@ -43,7 +52,7 @@ def compute_k_core(
     *,
     level: int = 0,
 ) -> dict[str, Any]:
-    """Per-vertex k-coreness via Batagelj-Zaversnik degree-peeling.
+    """Per-vertex k-coreness by degree peeling.
 
     The k-coreness of vertex ``v`` is the largest ``k`` such that ``v``
     belongs to a subgraph where every vertex has degree ≥ k.
@@ -61,51 +70,22 @@ def compute_k_core(
           - ``core_sizes`` (``(max_core+1,) int64``): how many vertices
             have each coreness value.
     """
-    root = open_store(str(store_path))
-    level_group = get_resolution_level(root, level)
-    adj, n = build_adjacency(level_group)
+    level_group = get_resolution_level(open_store(str(store_path)), level)
+    adjacency = read_adjacency(level_group)
 
-    if n == 0:
+    if adjacency.n == 0:
         return {
             "coreness": np.zeros(0, dtype=np.uint32),
             "max_core": 0,
             "core_sizes": np.zeros(1, dtype=np.int64),
         }
 
-    # Working copy of degrees; mutated during peeling.
-    degree = np.array([len(nbrs) for nbrs in adj], dtype=np.int64)
-    # Track which neighbours are still alive (haven't been peeled yet).
-    alive = np.ones(n, dtype=bool)
-    coreness = np.zeros(n, dtype=np.int64)
-
-    # Min-heap keyed by (current_degree, vertex). Stale entries (whose
-    # degree has been decremented since the push) are filtered on pop.
-    heap: list[tuple[int, int]] = [(int(degree[v]), v) for v in range(n)]
-    heapq.heapify(heap)
-
-    current_core = 0
-    while heap:
-        d, v = heapq.heappop(heap)
-        if not alive[v] or d != degree[v]:
-            continue  # stale entry
-        if d > current_core:
-            current_core = d
-        coreness[v] = current_core
-        alive[v] = False
-        for u, _w in adj[v]:
-            if alive[u]:
-                degree[u] -= 1
-                heapq.heappush(heap, (int(degree[u]), u))
-
-    max_core = int(coreness.max()) if n else 0
-    sizes = np.zeros(max_core + 1, dtype=np.int64)
-    for c, count in Counter(coreness.tolist()).items():
-        sizes[int(c)] = count
-
+    coreness = k_core(adjacency)
+    max_core = int(coreness.max())
     return {
         "coreness": coreness.astype(np.uint32),
         "max_core": max_core,
-        "core_sizes": sizes,
+        "core_sizes": np.bincount(coreness, minlength=max_core + 1).astype(np.int64),
     }
 
 
@@ -134,16 +114,17 @@ def compute_label_propagation(
 
     Returns:
         Dict with:
-          - ``labels`` (``(N,) uint32``): 0-indexed community labels.
+          - ``labels`` (``(N,) uint32``): 0-indexed community labels,
+            numbered in order of each community's lowest vertex.
           - ``n_communities`` (int).
           - ``iterations`` (int): number of rounds actually executed.
           - ``converged`` (bool): True if labels stabilised before
             ``max_iter``.
           - ``community_sizes`` (``(n_communities,) int64``).
     """
-    root = open_store(str(store_path))
-    level_group = get_resolution_level(root, level)
-    adj, n = build_adjacency(level_group)
+    level_group = get_resolution_level(open_store(str(store_path)), level)
+    adjacency = read_adjacency(level_group)
+    n = adjacency.n
 
     if n == 0:
         return {
@@ -156,35 +137,22 @@ def compute_label_propagation(
 
     rng = np.random.default_rng(seed)
     labels = np.arange(n, dtype=np.int64)
+    sources = adjacency.sources()
 
     iterations = 0
     converged = False
     for it in range(max_iter):
         iterations = it + 1
-        new_labels = labels.copy()
-        for v in range(n):
-            if not adj[v]:
-                continue
-            counts: Counter[int] = Counter(labels[u] for u, _ in adj[v])
-            top = counts.most_common()
-            best = top[0][1]
-            tied = [lbl for lbl, c in top if c == best]
-            new_labels[v] = (
-                tied[0] if len(tied) == 1 else int(rng.choice(tied))
-            )
+        new_labels = label_propagation_round(adjacency, labels, sources, rng)
         if np.array_equal(new_labels, labels):
             converged = True
-            labels = new_labels
             break
         labels = new_labels
 
-    # Compact labels into 0..n_communities-1.
-    unique, compact = np.unique(labels, return_inverse=True)
-    sizes = np.bincount(compact).astype(np.int64)
-
+    compact, sizes = compact_labels(labels)
     return {
-        "labels": compact.astype(np.uint32),
-        "n_communities": int(len(unique)),
+        "labels": compact,
+        "n_communities": int(len(sizes)),
         "iterations": iterations,
         "converged": bool(converged),
         "community_sizes": sizes,
@@ -224,15 +192,16 @@ def compute_louvain(
         Dict with:
           - ``labels`` (``(N,) uint32``): 0-indexed level-0 community
             labels (the dendrogram from Phase-2 levels is collapsed
-            back to the original vertices).
+            back to the original vertices), numbered in order of each
+            community's lowest vertex.
           - ``modularity`` (float): final modularity Q.
           - ``n_communities`` (int).
           - ``iterations`` (int): outer rounds executed.
           - ``community_sizes`` (``(n_communities,) int64``).
     """
-    root = open_store(str(store_path))
-    level_group = get_resolution_level(root, level)
-    adj, n = build_adjacency(level_group, weight_attr=weight)
+    level_group = get_resolution_level(open_store(str(store_path)), level)
+    adjacency = read_adjacency(level_group, weight_attr=weight)
+    n = adjacency.n
 
     if n == 0:
         return {
@@ -245,109 +214,64 @@ def compute_louvain(
 
     rng = np.random.default_rng(seed)
 
-    # Current per-original-vertex community label. We update this after
-    # each Phase-1+2 round by remapping through the super-graph
-    # communities.
+    # Each original vertex's community, remapped through every round's
+    # super-graph communities.
     base_labels = np.arange(n, dtype=np.int64)
-
-    # The graph the current outer round operates on. We start with the
-    # original adjacency, then replace it with the contracted super-graph
-    # each round.
-    cur_adj = adj
-    cur_n = n
-
-    final_q = _modularity_from_adj(cur_adj, base_labels[:cur_n])
+    current = adjacency
+    final_q = modularity(current, base_labels)
     iterations = 0
 
     for outer in range(max_iter):
         iterations = outer + 1
-        labels = _louvain_phase1(cur_adj, rng)
-        # Re-label communities to 0..k-1.
+        labels = _louvain_phase1(current, rng)
         _, compact = np.unique(labels, return_inverse=True)
+        compact = compact.reshape(-1).astype(np.int64)
+        base_labels = compact if outer == 0 else compact[base_labels]
 
-        # Propagate this round's community assignment back to the
-        # original vertices.
-        if outer == 0:
-            base_labels = compact.astype(np.int64)
-        else:
-            base_labels = compact[base_labels].astype(np.int64)
-
-        # Contract into super-graph for next round.
-        new_n = int(compact.max()) + 1 if cur_n else 0
-        if new_n == cur_n:
-            break  # no contraction → converged
-        cur_adj = _contract(cur_adj, compact, new_n)
-        cur_n = new_n
-        new_q = _modularity_from_adj(cur_adj, np.arange(cur_n, dtype=np.int64))
+        new_n = int(compact.max()) + 1
+        if new_n == current.n:
+            break  # no contraction: converged
+        current = contract(current, compact, new_n)
+        new_q = modularity(current, np.arange(new_n, dtype=np.int64))
         if new_q - final_q < 1e-6:
             final_q = new_q
             break
         final_q = new_q
 
-    # Compact final labels into 0..k-1.
-    unique, compact = np.unique(base_labels, return_inverse=True)
-    sizes = np.bincount(compact).astype(np.int64)
-
+    labels_out, sizes = compact_labels(base_labels)
     return {
-        "labels": compact.astype(np.uint32),
+        "labels": labels_out,
         "modularity": float(final_q),
-        "n_communities": int(len(unique)),
+        "n_communities": int(len(sizes)),
         "iterations": iterations,
         "community_sizes": sizes,
     }
 
 
 # =====================================================================
-# Louvain helpers
+# Louvain local moves
 # =====================================================================
 
-def _modularity_from_adj(
-    adj: list[list[tuple[int, float]]],
-    labels: np.ndarray,
-) -> float:
-    """Modularity Q = (1/2m) Σ_ij [A_ij - k_i·k_j/(2m)] δ(c_i, c_j)."""
-    n = len(adj)
-    if n == 0:
-        return 0.0
-    k = np.array([sum(w for _, w in nbrs) for nbrs in adj], dtype=np.float64)
-    two_m = float(k.sum())
-    if two_m == 0:
-        return 0.0
-
-    intra = 0.0
-    for v in range(n):
-        cv = labels[v]
-        for u, w in adj[v]:
-            if labels[u] == cv:
-                intra += w
-    # intra counts each undirected edge twice (once for u→v, once for v→u).
-    # k_C^2 sum:
-    comm_k: dict[int, float] = defaultdict(float)
-    for v, c in enumerate(labels):
-        comm_k[int(c)] += k[v]
-    sum_kc_sq = sum(v * v for v in comm_k.values())
-
-    return intra / two_m - sum_kc_sq / (two_m * two_m)
-
-
-def _louvain_phase1(
-    adj: list[list[tuple[int, float]]],
-    rng: np.random.Generator,
-) -> np.ndarray:
+def _louvain_phase1(adjacency: Adjacency, rng: np.random.Generator) -> np.ndarray:
     """Greedy local-move phase. Returns per-vertex community labels."""
-    n = len(adj)
+    n = adjacency.n
     if n == 0:
         return np.zeros(0, dtype=np.int64)
 
-    # Per-vertex degree (sum of incident weights including self-loop ×2).
-    k = np.array([sum(w for _, w in nbrs) for nbrs in adj], dtype=np.float64)
-    two_m = float(k.sum())
+    # Per-vertex strength: the sum of incident weights, a self-loop's twice.
+    strength = np.bincount(adjacency.sources(), weights=adjacency.weights, minlength=n)
+    two_m = float(strength.sum())
     if two_m == 0:
         return np.arange(n, dtype=np.int64)
 
-    labels = np.arange(n, dtype=np.int64)
-    # Σ_tot[C] = sum of degrees of vertices in C.
-    sigma_tot = k.copy()
+    # Plain lists: the moves below read and write one vertex at a time.
+    indptr = adjacency.indptr.tolist()
+    indices = adjacency.indices.tolist()
+    weights = adjacency.weights.tolist()
+    k = strength.tolist()
+    labels = list(range(n))
+    # Σ_tot[C] = sum of strengths of the vertices in C.
+    sigma_tot = list(k)
 
     improved = True
     inner_iter = 0
@@ -355,55 +279,34 @@ def _louvain_phase1(
     while improved and inner_iter < max_inner:
         improved = False
         inner_iter += 1
-        order = rng.permutation(n)
-        for v in order:
+        for v in rng.permutation(n).tolist():
             cv = labels[v]
+            k_v = k[v]
             # Edge weights from v into each community (excluding self).
             k_iC: dict[int, float] = defaultdict(float)
-            for u, w in adj[v]:
-                if u == v:
-                    continue
-                k_iC[int(labels[u])] += w
+            for i in range(indptr[v], indptr[v + 1]):
+                u = indices[i]
+                if u != v:
+                    k_iC[labels[u]] += weights[i]
 
             # Remove v from its current community for evaluation.
-            sigma_tot[cv] -= k[v]
-            k_iC_cur = k_iC.get(int(cv), 0.0)
-
-            # Compute best community (including staying put).
+            sigma_tot[cv] -= k_v
             best_c = cv
             best_gain = 0.0
             for c, k_iC_c in k_iC.items():
-                # ΔQ for moving v into c (relative to isolated v):
-                # ΔQ(v → c) = (k_iC_c / m) - (Σ_tot[c] * k[v]) / (2 m^2)
-                gain = k_iC_c - sigma_tot[c] * k[v] / two_m
+                # ΔQ for moving v into c, up to a positive factor.
+                gain = k_iC_c - sigma_tot[c] * k_v / two_m
                 if gain > best_gain:
                     best_gain = gain
                     best_c = c
             # Compare against staying (which itself was removed from cv).
-            stay_gain = k_iC_cur - sigma_tot[cv] * k[v] / two_m
+            stay_gain = k_iC.get(cv, 0.0) - sigma_tot[cv] * k_v / two_m
             if stay_gain > best_gain:
-                best_gain = stay_gain
                 best_c = cv
 
-            sigma_tot[best_c] += k[v]
+            sigma_tot[best_c] += k_v
             if best_c != cv:
                 labels[v] = best_c
                 improved = True
 
-    return labels
-
-
-def _contract(
-    adj: list[list[tuple[int, float]]],
-    labels: np.ndarray,
-    new_n: int,
-) -> list[list[tuple[int, float]]]:
-    """Contract communities into super-nodes; sum inter-community edges."""
-    # Use a dict to sum weights per super-edge.
-    super_w: list[dict[int, float]] = [defaultdict(float) for _ in range(new_n)]
-    for v, nbrs in enumerate(adj):
-        cv = int(labels[v])
-        for u, w in nbrs:
-            cu = int(labels[u])
-            super_w[cv][cu] += w
-    return [list(d.items()) for d in super_w]
+    return np.asarray(labels, dtype=np.int64)
