@@ -94,9 +94,7 @@ def export_h5ad(
         output_path: Path for the output ``.h5ad`` file.
         level: Resolution level to export.
         bbox: Optional bounding box filter.
-        object_ids: Optional object ID filter. Note that core's
-            object-filtered read path does not carry vertex attributes, so
-            this may only be combined with ``attribute_names=[]``.
+        object_ids: Optional object ID filter.
         chunks: Optional whitelist of chunk coordinate tuples. AND-ed with
             ``bbox`` and ``object_ids``.
         attribute_names: Attributes to export. Default (None) exports every
@@ -117,7 +115,7 @@ def export_h5ad(
 
     Raises:
         ExportError: If ``anndata`` is missing, the store cannot be read,
-            or attributes were requested through a filter that drops them.
+            or a requested attribute is not stored at ``level``.
     """
     try:
         import anndata as ad
@@ -151,16 +149,6 @@ def export_h5ad(
     positions = np.asarray(result["positions"])
     attrs: dict[str, np.ndarray] = dict(result.get("vertex_attributes") or {})
     n_cells = positions.shape[0]
-
-    # Core's object-filtered read returns positions without attributes. Say
-    # so rather than writing an .h5ad whose obs is silently empty.
-    if requested and not attrs and object_ids is not None and n_cells:
-        raise ExportError(
-            "object_ids filtering drops vertex attributes in the core read "
-            f"path, so the {len(requested)} requested attribute(s) came back "
-            "empty. Re-run with attribute_names=[] to export positions only, "
-            "or select cells with bbox=/chunks= instead."
-        )
 
     missing = [name for name in requested if name not in attrs]
     if missing and n_cells:

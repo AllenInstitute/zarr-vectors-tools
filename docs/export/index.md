@@ -57,13 +57,6 @@ Filters AND together: `bbox=(...)` *and* `object_ids=[3, 5]` means
 "objects 3 and 5, intersected with the bounding box". Passing `None`
 (the default) disables that filter.
 
-:::{note}
-`export_h5ad` accepts `object_ids` only alongside `attribute_names=[]`.
-Core's object-filtered read path drops vertex attributes, which for an
-`.h5ad` would mean silently writing an empty `obs`; it raises instead.
-See [Single-cell and spatial omics](single_cell.md).
-:::
-
 ## Exporting from a coarser level
 
 `level=` picks which pyramid level the exporter reads. Level `0` is full
