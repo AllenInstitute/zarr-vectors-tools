@@ -1,6 +1,3 @@
-> [!WARNING]
-> **`APEX-hackathon` is an active hackathon branch.** Several people are working on it at once, so it moves fast and may be rewritten or broken at any time. Before you start, check what is already in flight and coordinate with the rest of the team so you do not duplicate or clobber someone else's work. Do not treat this branch as stable — use `main` for anything you depend on.
-
 > [!NOTE]
 > This package is under development and will change. It will also be migrated to another location once completed.
 
