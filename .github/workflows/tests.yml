@@ -45,8 +45,9 @@ concurrency:
 env:
   # This package needs an UNRELEASED core: the merged links/<delta>/<offsets>/
   # layout and the `zarr_vectors.building` surface (see the comment on the
-  # zarr-vectors dependency in pyproject.toml).  No version specifier can
-  # express that, so CI installs core from git at this one pinned commit.
+  # zarr-vectors dependency in pyproject.toml), which are on core's main but
+  # not yet in a release.  No version specifier can express that, so CI
+  # installs core from git at this one pinned commit.
   #
   # To bump: pick a commit that is pushed to the core repo (a local-only
   # commit will not clone), check this package's tests pass against it, and
@@ -56,8 +57,8 @@ env:
   #   git -C ../zarr-vectors-py log -1 --format=%H
   #   git -C ../zarr-vectors-py branch -r --contains <sha>   # must list a branch
   #
-  # Currently the tip of core's APEX-hackathon branch.
-  CORE_SHA: 34df387a0d66e28efba96d1ed4a4fbafabe7f465
+  # Currently core's main at the merge of core PR #35 (its APEX-hackathon).
+  CORE_SHA: 6794461a5f03e8defe936ca88a5536fce6ea4f49
   CORE_REPO: https://github.com/AllenInstitute/zarr-vectors-py
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
