@@ -69,7 +69,9 @@ def _tree(store: Path) -> dict[str, str]:
 def test_the_store_does_not_depend_on_the_batch_size(tmp_path: Path, strides) -> None:
     stores = {}
     for batch_size in (1, 5, 1000):
-        store = tmp_path / f"b{batch_size}.zv"
+        # One basename for all three: core names the root node after the
+        # store's directory, and that name is not what this test compares.
+        store = tmp_path / f"b{batch_size}" / "store.zv"
         summary = run_ingest_plain(
             _Reader(), store, chunk_shape_nm=CHUNK_NM, strides=strides,
             batch_size=batch_size, progress=False,
