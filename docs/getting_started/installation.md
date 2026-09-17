@@ -82,12 +82,29 @@ cd zarr-vectors-tools
 pip install -e ".[all,dev]"
 ```
 
-Run the tests and the linter:
+### Tests and lint
+
+The suite runs in two tiers. End-to-end TRK ingests and tests that start
+worker processes carry the `slow` marker; everything else is the fast
+tier:
 
 ```bash
-pytest
-ruff check .
+pytest -m "not slow"            # fast tier: what CI runs on every push
+pytest                          # full tier: everything, ~30 minutes
+ruff check zarr_vectors_tools   # lint the package (tests/ has known cosmetic violations)
 ```
+
+A new test that runs a full ingest or opens a process pool belongs in the
+slow tier: mark it `@pytest.mark.slow`.
+
+CI (`.github/workflows/tests.yml`) runs lint and the fast tier on every
+pull request and on pushes to the long-lived branches, on Ubuntu with
+Python 3.11 and 3.13 and on Windows with 3.13. The full tier runs nightly
+on Ubuntu and Windows, or on demand from the Actions tab. CI installs
+`zarr-vectors` from git at the commit pinned in that workflow's `CORE_SHA`
+(see the warning above for why); bump it there when this package starts
+to need a newer core. An optional reader that will not install on a runner
+is flagged in the run summary, and its tests skip.
 
 ## Verifying the install
 

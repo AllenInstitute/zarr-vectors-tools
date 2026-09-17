@@ -127,6 +127,7 @@ Where to start
    ingest/em_skeletons
    ingest/graphs
    ingest/meshes
+   ingest/surfaces
 
 .. toctree::
    :maxdepth: 1
@@ -172,6 +173,7 @@ Where to start
    export/streamlines
    export/skeletons
    export/meshes
+   export/surfaces
 
 .. toctree::
    :maxdepth: 1

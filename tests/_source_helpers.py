@@ -16,7 +16,6 @@ unchanged)::
 from __future__ import annotations
 
 import numpy as np
-
 from zarr_vectors.building import (
     create_fragment_attribute_array,
     get_resolution_level,
@@ -24,7 +23,10 @@ from zarr_vectors.building import (
     read_all_object_manifests,
     write_chunk_fragment_attributes,
 )
-from zarr_vectors.types.polylines import read_polylines, write_polylines  # noqa: F401  (read_polylines re-exported for tests)
+from zarr_vectors.types.polylines import (  # noqa: F401  (read_polylines re-exported for tests)
+    read_polylines,
+    write_polylines,
+)
 
 
 def stamp_segment_id_from_manifests(store_path, level: int = 0) -> None:

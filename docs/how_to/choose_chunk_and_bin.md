@@ -21,7 +21,7 @@ Every ingest function in this package takes `chunk_shape` explicitly and
 unchanged. There is no tools-specific interpretation of either value.
 
 ```python
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
 ingest_csv("cells.csv", "cells.zarrvectors", chunk_shape=(125.0, 125.0, 125.0))
 ```

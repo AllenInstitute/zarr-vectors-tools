@@ -4,7 +4,7 @@ The Zarr Vectors `meshes` geometry writes out to Wavefront OBJ via `export_obj`.
 No third-party dependency.
 
 ```python
-from zarr_vectors_tools.export.obj import export_obj
+from zarr_vectors_tools.convert.export.obj import export_obj
 
 summary = export_obj(
     "model.zv",                 # store_path
@@ -30,6 +30,30 @@ directives are not emitted, even when the store has an `OBJHeader`
 holding the original `mtllib` and object names — pull those from the
 [`HeaderRegistry`](../headers.md) if you need to reattach them.
 :::
+
+## Neuroglancer precomputed
+
+`export_precomputed` writes a mesh store as a `neuroglancer_legacy_mesh`
+layer: one fragment and one `<id>:0` manifest per object. Multi-resolution
+Draco and sharding are not written; export a coarser level to a second layer
+for a lighter version. `ingest_precomputed_meshes` reads the layer back, along
+with multi-resolution and sharded layers; see
+[Meshes](../ingest/meshes.md#neuroglancer-precomputed--ingest_precomputed_meshes).
+
+```python
+from zarr_vectors_tools.convert.export.precomputed import export_precomputed
+
+export_precomputed("cells.zv", "gs://bucket/cell_meshes", object_ids=[0, 1, 2])
+```
+
+:::{warning}
+Legacy mesh manifests are named `<id>:0`, which Windows cannot use as a
+file name. On Windows, write mesh layers to a bucket; a local directory is
+refused.
+:::
+
+See [Skeletons](skeletons.md#neuroglancer-precomputed) for segment ids,
+units and segment properties, which work the same way.
 
 ## Filtering with `chunks`
 

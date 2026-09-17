@@ -15,32 +15,17 @@ between objects, and per-object OIDs are preserved across levels.
 
 from __future__ import annotations
 
+import math
+import threading
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
-from zarr_vectors.constants import (
-    CAP_MULTISCALE_LINKS,
-    CAP_PRESERVED_OBJECT_IDS,
-    CAP_SHARED_FRAGMENTS,
-    COARSEN_PER_OBJECT,
-    DEFAULT_CROSS_LEVEL_DEPTH,
-    DEFAULT_CROSS_LEVEL_STORAGE,
-    GEOM_MESH,
-    LINKS_IMPLICIT_BRANCHES,
-    LINKS_IMPLICIT_SEQUENTIAL,
-    OBJECT_ATTRIBUTES,
-    VERTEX_FRAGMENTS,
-    VERTICES,
-    XLEVEL_EXPLICIT,
-    XLEVEL_NONE,
-    VALID_XLEVEL_STORAGE,
-)
 from zarr_vectors.building import (
-    rebuild_presence,
     LevelMetadata,
     assign_chunks,
     build_vertex_chunk_mapping,
@@ -53,16 +38,23 @@ from zarr_vectors.building import (
     finalize_links,
     get_level_chunk_shape,
     get_resolution_level,
+    intra_offsets,
+    is_intra,
+    link_endpoint_scales,
+    links_group_path,
+    links_path,
     list_chunk_keys,
+    list_link_offsets,
     list_resolution_levels,
     open_store,
-    partition_cross_level_edges,
     read_all_object_manifests,
     read_chunk_vertices,
     read_level_metadata,
     read_links,
     read_object_attributes,
     read_root_metadata,
+    read_vertex_fragment_index,
+    rebuild_presence,
     update_root_metadata,
     write_chunk_links,
     write_chunk_vertices,
@@ -70,20 +62,38 @@ from zarr_vectors.building import (
     write_object_attributes,
     write_object_index,
 )
-from zarr_vectors.exceptions import ArrayError, CoarseningError
+from zarr_vectors.constants import (
+    CAP_MULTISCALE_LINKS,
+    CAP_PRESERVED_OBJECT_IDS,
+    CAP_SHARED_FRAGMENTS,
+    COARSEN_PER_OBJECT,
+    DEFAULT_CROSS_LEVEL_DEPTH,
+    DEFAULT_CROSS_LEVEL_STORAGE,
+    GEOM_MESH,
+    LINKS_IMPLICIT_BRANCHES,
+    LINKS_IMPLICIT_SEQUENTIAL,
+    OBJECT_ATTRIBUTES,
+    VALID_XLEVEL_STORAGE,
+    VERTEX_FRAGMENTS,
+    VERTICES,
+    XLEVEL_EXPLICIT,
+    XLEVEL_NONE,
+)
+from zarr_vectors.exceptions import ArrayError, CoarseningError, StoreError
+from zarr_vectors.typing import ChunkCoords
+
+from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
 from zarr_vectors_tools.multiresolution.coarsen_implicit import (
     coarse_chunks_of,
     positions_in_run,
     segment_object_by_coarse_chunk,
 )
-from zarr_vectors_tools.algorithms._links import chunk_key_str, read_cross_links
 from zarr_vectors_tools.multiresolution.groupings import (
+    group_labels_for,
     propagate_groupings,
     surviving_oids_from,
 )
 from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-from zarr_vectors.typing import ChunkCoords
-
 
 # ===================================================================
 # Coarsener registry (pluggable per-geometry downsampling strategies)
@@ -146,6 +156,159 @@ def select_coarsener_key(root_meta: Any) -> str:
 
 
 # ===================================================================
+# Explicit RDP tolerance, and the level record that keeps it
+# ===================================================================
+
+#: Level-group attribute key under which this package records coarsening
+#: parameters that core's ``LevelMetadata`` has no field for.
+#:
+#: A sibling of core's ``zarr_vectors_level`` block rather than a key inside
+#: it.  ``create_resolution_level`` rewrites that block wholesale from
+#: ``LevelMetadata.to_dict()``, so an unknown key inside it is dropped the
+#: next time a writer restamps the level -- which the polyline coarsener
+#: itself does once Phase A knows the vertex count -- and
+#: ``update_level_metadata`` refuses fields the dataclass does not declare.
+#: A separate top-level key is left alone by both, and core's validation
+#: does not inspect it.
+TOOLS_LEVEL_ATTRS_KEY: str = "zarr_vectors_tools"
+
+#: Sub-key of :data:`TOOLS_LEVEL_ATTRS_KEY` holding the coarsening record.
+_COARSENING_RECORD: str = "coarsening"
+
+
+def read_coarsening_record(root: Any, level: int) -> dict[str, Any]:
+    """The tools-owned coarsening record of one level, or ``{}`` if it has none.
+
+    Polyline levels built in ``rdp`` mode carry:
+
+    * ``rdp_tolerance`` -- the Douglas-Peucker tolerance the level was
+      simplified at, in store coordinate units.  ``None`` when nothing was
+      simplified (a ``coarsen_factor <= 1`` with no explicit tolerance).
+    * ``rdp_tolerance_source`` -- ``"explicit"`` when the caller supplied
+      the tolerance, ``"derived"`` when it came from the level's bin.
+
+    Levels written by other strategies, and stores written before the record
+    existed, return ``{}``.
+    """
+    level_group = get_resolution_level(root, level)
+    block = level_group.attrs.get(TOOLS_LEVEL_ATTRS_KEY) or {}
+    record = block.get(_COARSENING_RECORD) if isinstance(block, dict) else None
+    return dict(record) if isinstance(record, dict) else {}
+
+
+def _write_coarsening_record(root: Any, level: int, **fields: Any) -> None:
+    """Merge ``fields`` into one level's tools-owned coarsening record.
+
+    Takes the root and re-opens the level rather than accepting a level
+    handle: a level group's attributes are written back whole from the
+    handle's in-memory copy, and a coarsener's own handle predates its
+    second ``create_resolution_level`` stamp, so writing through it would
+    put that handle's stale ``vertex_count`` back on disk.
+    """
+    level_group = get_resolution_level(root, level)
+    block = dict(level_group.attrs.get(TOOLS_LEVEL_ATTRS_KEY) or {})
+    record = dict(block.get(_COARSENING_RECORD) or {})
+    record.update(fields)
+    block[_COARSENING_RECORD] = record
+    level_group.attrs.update({TOOLS_LEVEL_ATTRS_KEY: block})
+
+
+def check_rdp_tolerance(value: Any, *, name: str = "rdp_tolerance") -> float:
+    """``value`` as a float, or raise naming ``name`` if it is no tolerance.
+
+    Zero and negative values are refused rather than read as "simplify
+    nothing".  The worker does treat a non-positive epsilon as a no-op, but
+    a caller who wants no simplification has ``coarsen_factor=1`` for that,
+    and a level recording a tolerance of 0 would read as though one applied.
+    """
+    try:
+        tolerance = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{name}={value!r} is not a number; give a distance in store "
+            f"coordinate units"
+        ) from None
+    if not math.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError(
+            f"{name}={value!r} must be a finite distance > 0, in store "
+            f"coordinate units"
+        )
+    return tolerance
+
+
+def validate_rdp_tolerances(
+    rdp_tolerances: Sequence[float] | None,
+    *,
+    n_levels: int,
+    coarsen_mode: str,
+    name: str = "rdp_tolerances",
+) -> list[float] | None:
+    """Check a per-level explicit RDP tolerance list, without touching a store.
+
+    What can be checked from the arguments alone: one entry per coarser
+    level, every entry a positive distance, and a coarsen mode that has a
+    tolerance at all.  Whether the store's geometry goes through the RDP
+    coarsener is checked by :func:`build_pyramid`, which has the store.
+    Ingesters that build the pyramid inline call this before their own
+    (expensive) level-0 write, so a bad list fails before any work is done.
+
+    Returns:
+        ``None`` for ``None``, else the tolerances as floats.
+
+    Raises:
+        ValueError: Naming ``name`` and what is wrong with it.
+    """
+    if rdp_tolerances is None:
+        return None
+    refusal = _rdp_mode_refusal(coarsen_mode)
+    if refusal is not None:
+        raise ValueError(f"{name} does not apply: {refusal}")
+    if isinstance(rdp_tolerances, (str, bytes, int, float)):
+        raise ValueError(
+            f"{name} must be a sequence with one tolerance per coarser level, "
+            f"got {rdp_tolerances!r}"
+        )
+    values = list(rdp_tolerances)
+    if len(values) != n_levels:
+        raise ValueError(
+            f"{name} has {len(values)} entries for {n_levels} coarser "
+            f"level(s); give exactly one tolerance per level"
+        )
+    return [
+        check_rdp_tolerance(value, name=f"{name}[{i}]")
+        for i, value in enumerate(values)
+    ]
+
+
+def _rdp_mode_refusal(coarsen_mode: str) -> str | None:
+    """Why an explicit RDP tolerance cannot apply in ``coarsen_mode``, or ``None``."""
+    if coarsen_mode != "decimate":
+        return None
+    return (
+        "coarsen_mode='decimate' thins each level by a stride (its coarsen "
+        "factor) and has no distance tolerance to set"
+    )
+
+
+def _rdp_tolerance_refusal(root_meta: Any, key: str) -> str | None:
+    """Why an explicit RDP tolerance cannot apply to a store, or ``None``.
+
+    Only the polyline coarsener runs Douglas-Peucker.  The skeleton coarsener
+    decimates by stride, the per-fragment one reads ``rdp`` as a stride as
+    well, and the point, mesh and graph coarseners bin -- so a tolerance
+    handed to any of them would be silently meaningless.
+    """
+    if key == "polyline":
+        return None
+    return (
+        f"only the RDP polyline coarsener has a distance tolerance, and this "
+        f"store is coarsened by {key!r} (geometry_types="
+        f"{list(root_meta.geometry_types or [])}, links_convention="
+        f"{root_meta.links_convention!r})"
+    )
+
+
+# ===================================================================
 # Single-level coarsening
 # ===================================================================
 
@@ -164,6 +327,7 @@ def coarsen_level(
     compressor: Any = None,
     executor: Any = None,
     method: str | None = None,
+    rdp_tolerance: float | None = None,
 ) -> dict[str, Any]:
     """Coarsen a single level and write it to the store.
 
@@ -215,6 +379,18 @@ def coarsen_level(
             chunk-local skeleton and polyline coarseners to parallelize
             per-target-chunk work.  ``None`` (default) runs serially
             in-process.  Ignored by the per-object coarsener.
+        rdp_tolerance: Explicit Douglas-Peucker tolerance for this level, in
+            store coordinate units: every SOURCE-level vertex lies within
+            this distance of the target level's simplified line.  ``None``
+            (default) derives it as half the smallest edge of the target
+            bin (``source_level.bin_shape * coarsen_factor``), or simplifies
+            nothing when ``coarsen_factor <= 1``.  Only the polyline
+            coarsener in ``rdp`` mode has a tolerance, so a value is refused
+            with ``coarsen_mode="decimate"`` and for any store routed to
+            another coarsener.  Forwarded to the coarsener only when set, so
+            coarseners registered without the keyword keep working.  The
+            tolerance used is recorded on the level; see
+            :func:`read_coarsening_record`.
 
     Returns:
         Summary dict.  Always includes ``method``,
@@ -237,7 +413,18 @@ def coarsen_level(
     # keeps ``select_coarsener_key``'s behaviour; "per_fragment" opts into the
     # reuse-preserving strategy, which no root metadata can imply because it is
     # a policy choice (structure over compression), not a property of the data.
-    coarsener = get_coarsener(method or select_coarsener_key(root_meta))
+    key = method or select_coarsener_key(root_meta)
+    coarsener = get_coarsener(key)
+    extra: dict[str, Any] = {}
+    if rdp_tolerance is not None:
+        # Checked before the coarsener runs so a refused tolerance leaves no
+        # half-written target level behind.
+        refusal = _rdp_mode_refusal(coarsen_mode) or _rdp_tolerance_refusal(
+            root_meta, key,
+        )
+        if refusal is not None:
+            raise ValueError(f"rdp_tolerance does not apply: {refusal}")
+        extra["rdp_tolerance"] = check_rdp_tolerance(rdp_tolerance)
     return coarsener(
         store_path,
         source_level,
@@ -251,7 +438,47 @@ def coarsen_level(
         coarsen_mode=coarsen_mode,
         compressor=compressor,
         executor=executor,
+        **extra,
     )
+
+
+def _per_object_signals(
+    src_manifests: list,
+    src_fragment_positions: dict,
+    n_objects: int,
+    ndim: int,
+    *,
+    needed: bool,
+) -> tuple[npt.NDArray[np.float64] | None, npt.NDArray[np.float64] | None]:
+    """Per-object ``(size, representative point)`` for the sparsity strategies.
+
+    ``size`` is the object's vertex count — the generalisation of "length" for
+    a geometry that has no path, and the same quantity the skeleton and
+    polyline coarseners fall back to.  The representative point is the
+    object's first stored vertex, which is what ``spatial_coverage`` and
+    ``point_thinning`` bin on.
+
+    Returns ``(None, None)`` when ``needed`` is False so the unconditional
+    path stays free of an O(fragments) walk.
+    """
+    if not needed:
+        return None, None
+    lengths = np.zeros(n_objects, dtype=np.float64)
+    points = np.zeros((n_objects, ndim), dtype=np.float64)
+    for oid in range(n_objects):
+        first: npt.NDArray | None = None
+        total = 0
+        for cc, fragment_idx in src_manifests[oid]:
+            fragment = src_fragment_positions.get((cc, fragment_idx))
+            if fragment is None or len(fragment) == 0:
+                continue
+            if first is None:
+                first = fragment[0]
+            total += len(fragment)
+        lengths[oid] = float(total)
+        if first is not None:
+            points[oid] = first
+    return lengths, points
 
 
 def _per_object_coarsen(
@@ -396,10 +623,27 @@ def _per_object_coarsen(
             [len(src_manifests[oid]) > 0 for oid in range(n_src_objects)],
             dtype=bool,
         )
+        # Every strategy the CLI offers needs a per-object signal, and this
+        # coarsener used to pass none: ``--sparsity-strategy length`` — which
+        # the docs recommend for large pyramids — raised "'length' strategy
+        # requires 'lengths' array" on any store that routes here, i.e. every
+        # point cloud, mesh and graph.  All three signals come from fragments
+        # Step 0 already read, so supplying them costs one pass over the
+        # manifests and only when sparsity is actually active.
+        lengths, representative_points = _per_object_signals(
+            src_manifests, src_fragment_positions, n_src_objects, ndim,
+            needed=sparsity_strategy in ("length", "spatial_coverage", "point_thinning"),
+        )
+        group_labels = (
+            group_labels_for(src_group, n_src_objects)
+            if sparsity_strategy == "group" else None
+        )
         kept = apply_sparsity(
             n_src_objects, keep_frac, sparsity_strategy,
             seed=sparsity_seed,
-            representative_points=None,
+            lengths=lengths,
+            representative_points=representative_points,
+            group_labels=group_labels,
             bin_shape=base_bin,
             alive_mask=alive_mask,
             # Cumulative per level: fraction of the surviving pool, not of
@@ -409,7 +653,6 @@ def _per_object_coarsen(
         keep_oids = sorted(int(o) for o in kept)
     else:
         keep_oids = list(range(n_src_objects))
-    keep_set = set(keep_oids)
 
     # --- Step 2-3: build (source vertex → bin → metavertex) map ---------
     # Per-object ordered source-vertex positions (with their global index
@@ -913,12 +1156,12 @@ def _emit_inline_cross_level_links(
 ) -> None:
     """Emit the ``±1`` links family for one coarsen step.
 
-    Re-walks the source level in chunk-major order, re-bins each
+    Re-walks the source level once in chunk-major order, re-bins each
     vertex against ``bin_shape_arr``, and looks up the matching
     metavertex via the ``bin_key`` ↔ ``mv_idx`` map implicit in
     ``np.unique(bin_keys, return_inverse=inverse)``.  Translates
     metavertex IDs to chunk-major-flat coarse indices via the
-    just-written coarse-level chunks, then dispatches to
+    just-written coarse level's fragment index, then dispatches to
     :func:`_write_cross_level_edges`.
 
     Two modes for the metavertex → coarse-row lookup:
@@ -933,57 +1176,58 @@ def _emit_inline_cross_level_links(
     """
     # bin_key → mv_idx.  ``np.unique`` output is sorted, so a metavertex id is
     # ``searchsorted`` on it — which lets the per-vertex lookup below run as
-    # one vectorised call per fragment instead of a dict probe (and a fresh
+    # one vectorised call per chunk instead of a dict probe (and a fresh
     # ``bytes`` object) for every source vertex in the level.
     unique_keys = np.unique(bin_keys)
+    # n_mv >= 1: callers gate this function on ``n_metavertices > 0`` and
+    # unique_keys is the same set of bins.
+    n_mv = int(unique_keys.shape[0])
 
-    # mv_idx → chunk-major-flat coarse index.
+    # mv_idx → chunk-major-flat coarse index.  The coarse level was written a
+    # moment ago, so its row counts come from the fragment index alone rather
+    # than from decoding every vertex again.
     coarse_chunk_assignments, n_coarse = _reconstruct_chunk_assignments(
         level_group, ndim,
     )
-    mv_to_coarse_global: dict[int, int] = {}
+    # mv_idx → coarse row, as an array so the per-vertex translation below is a
+    # gather rather than a dict probe.  -1 marks a metavertex with no coarse
+    # row, which reads back as the same "leave parent at -1" outcome.
+    mv_to_coarse_arr = np.full(max(n_mv, 1), -1, dtype=np.int64)
     if mv_first_row_chunk is not None and mv_first_row_local is not None:
         for mv_idx, cc in mv_first_row_chunk.items():
             local_row = mv_first_row_local[mv_idx]
             chunk_rows = coarse_chunk_assignments.get(cc)
             if chunk_rows is None or local_row >= len(chunk_rows):
                 continue
-            mv_to_coarse_global[int(mv_idx)] = int(chunk_rows[local_row])
+            if 0 <= mv_idx < n_mv:
+                mv_to_coarse_arr[mv_idx] = chunk_rows[local_row]
     elif coarse_chunk_assignments_mv is not None:
         for cc, mv_indices_for_chunk in sorted(coarse_chunk_assignments_mv.items()):
-            for local_vg, mv_idx in enumerate(mv_indices_for_chunk.tolist()):
-                mv_to_coarse_global[int(mv_idx)] = int(
-                    coarse_chunk_assignments[cc][local_vg]
+            mv_idx = np.asarray(mv_indices_for_chunk, dtype=np.int64)
+            rows = coarse_chunk_assignments[cc][:mv_idx.shape[0]]
+            if rows.shape[0] != mv_idx.shape[0]:
+                raise IndexError(
+                    f"coarse chunk {cc} holds {rows.shape[0]} rows but "
+                    f"{mv_idx.shape[0]} metavertices were assigned to it"
                 )
+            in_range = (mv_idx >= 0) & (mv_idx < n_mv)
+            mv_to_coarse_arr[mv_idx[in_range]] = rows[in_range]
     else:
         raise ValueError(
             "Either coarse_chunk_assignments_mv or "
             "(mv_first_row_chunk, mv_first_row_local) must be supplied",
         )
 
-    # Build fine→coarse parent[] by re-walking source in chunk-major order.
-    fine_chunk_assignments, n_fine = _reconstruct_chunk_assignments(
-        src_group, ndim,
-    )
-    parent = np.full(n_fine, -1, dtype=np.int64)
-    cursor = 0
+    # Build fine→coarse parent[] by walking the source in chunk-major order.
+    # One walk yields both the source's chunk assignments (the row count of
+    # each chunk as ``read_chunk_vertices`` sees it) and the parents, where
+    # this used to be two full reads of the level.
     key_dtype = np.dtype((
         np.void, int(bin_shape_arr.shape[0]) * np.dtype(np.int64).itemsize,
     ))
-    # mv_idx → coarse row, as an array so the per-vertex translation below is a
-    # gather rather than a dict probe.  -1 marks a metavertex with no coarse
-    # row, which reads back as the same "leave parent at -1" outcome.
-    # n_mv >= 1: callers gate this function on ``n_metavertices > 0`` and
-    # unique_keys is the same set of bins.
-    n_mv = int(unique_keys.shape[0])
-    mv_to_coarse_arr = np.full(max(n_mv, 1), -1, dtype=np.int64)
-    for mv_idx, coarse_idx in mv_to_coarse_global.items():
-        if 0 <= mv_idx < n_mv:
-            mv_to_coarse_arr[mv_idx] = coarse_idx
-
-    # Same one-gather-per-level prefetch as the coarsener's own source read:
-    # this is a second full walk of the source level, and unbatched it paid a
-    # round-trip per chunk.
+    fine_chunk_assignments: dict[ChunkCoords, npt.NDArray[np.int64]] = {}
+    parent_parts: list[npt.NDArray[np.int64]] = []
+    n_fine = 0
     src_chunk_keys = list(list_chunk_keys(src_group, VERTICES))
     _src_key_strs = [chunk_key_str(cc) for cc in src_chunk_keys]
     with src_group.batched_reads([
@@ -997,26 +1241,33 @@ def _emit_inline_cross_level_links(
                 )
             except ArrayError:
                 continue
-            for fragment in fragments:
-                n_local = int(fragment.shape[0])
-                if n_local == 0:
-                    continue
-                local_bins = np.floor(
-                    np.asarray(fragment, dtype=np.float32) / bin_shape_arr,
-                ).astype(np.int64)
-                local_keys = np.ascontiguousarray(local_bins).view(
-                    key_dtype,
-                ).ravel()
-                # searchsorted gives the insertion point, which is the mv id
-                # only where the key is actually present — hence the equality
-                # check, standing in for the dict's ``.get(...) is None``.
-                idx = np.searchsorted(unique_keys, local_keys)
-                np.clip(idx, 0, n_mv - 1, out=idx)
-                hit = unique_keys[idx] == local_keys
-                parent[cursor:cursor + n_local] = np.where(
-                    hit, mv_to_coarse_arr[idx], -1,
-                )
-                cursor += n_local
+            fragments = [f for f in fragments if int(f.shape[0]) > 0]
+            if not fragments:
+                continue
+            positions = (
+                fragments[0] if len(fragments) == 1
+                else np.concatenate(fragments, axis=0)
+            )
+            n_local = int(positions.shape[0])
+            local_bins = np.floor(
+                np.asarray(positions, dtype=np.float32) / bin_shape_arr,
+            ).astype(np.int64)
+            local_keys = np.ascontiguousarray(local_bins).view(key_dtype).ravel()
+            # searchsorted gives the insertion point, which is the mv id only
+            # where the key is actually present — hence the equality check,
+            # standing in for the dict's ``.get(...) is None``.
+            idx = np.searchsorted(unique_keys, local_keys)
+            np.clip(idx, 0, n_mv - 1, out=idx)
+            hit = unique_keys[idx] == local_keys
+            parent_parts.append(np.where(hit, mv_to_coarse_arr[idx], -1))
+            fine_chunk_assignments[cc] = np.arange(
+                n_fine, n_fine + n_local, dtype=np.int64,
+            )
+            n_fine += n_local
+    parent = (
+        np.concatenate(parent_parts).astype(np.int64, copy=False)
+        if parent_parts else np.empty(0, dtype=np.int64)
+    )
 
     _write_cross_level_edges(
         root,
@@ -1102,7 +1353,7 @@ def _stamp_root_cross_level(
 def _reconstruct_chunk_assignments(
     level_group, ndim: int,
 ) -> tuple[dict[ChunkCoords, npt.NDArray[np.int64]], int]:
-    """Rebuild ``{chunk_coords: vertex_indices}`` from on-disk vertex chunks.
+    """Rebuild ``{chunk_coords: vertex_indices}`` for a level's vertex chunks.
 
     The "vertex index" assigned to each vertex is the position it would
     occupy in a flat enumeration that walks chunks in
@@ -1110,31 +1361,53 @@ def _reconstruct_chunk_assignments(
     groups in order.  This matches the convention used by
     ``build_vertex_chunk_mapping`` for in-memory edge partitioning.
 
+    Only row *counts* are needed, and a chunk's fragment index already
+    carries them — the rows ``read_chunk_vertices`` would return are exactly
+    the rows its fragments reference — so the vertex buffers themselves are
+    never fetched or decoded.  ``ndim`` is kept for signature compatibility.
+
     Returns the assignments dict and the total vertex count.
     """
+    del ndim
     chunk_keys = list_chunk_keys(level_group, VERTICES)
     assignments: dict[ChunkCoords, npt.NDArray[np.int64]] = {}
     cursor = 0
     key_strs = [chunk_key_str(cc) for cc in chunk_keys]
-    # One prefetch for the level rather than one round-trip per chunk; this
-    # runs twice per coarsen step (once per level of the pair).
-    with level_group.batched_reads([
-        (VERTICES, key_strs),
-        (VERTEX_FRAGMENTS, key_strs),
-    ]):
+    # One prefetch of the (small) fragment-index cells for the whole level.
+    with level_group.batched_reads([(VERTEX_FRAGMENTS, key_strs)]):
         for cc in chunk_keys:
             try:
-                fragments = read_chunk_vertices(
-                    level_group, cc, dtype=np.float32, ndim=ndim,
-                )
-            except ArrayError:
+                n = _fragment_row_count(read_vertex_fragment_index(level_group, cc))
+            except (ArrayError, StoreError):
                 continue
-            n = sum(int(fragment.shape[0]) for fragment in fragments)
             if n == 0:
                 continue
             assignments[cc] = np.arange(cursor, cursor + n, dtype=np.int64)
             cursor += n
     return assignments, cursor
+
+
+def _fragment_row_count(fi: Any) -> int:
+    """Total rows a chunk's fragments reference (``sum`` of fragment sizes).
+
+    The same number ``sum(len(f) for f in read_chunk_vertices(...))`` gives.
+    The common layout — range fragments tiling ``[0, N)`` — is decided by
+    two whole-array checks; anything else is summed fragment by fragment.
+    """
+    n_frag = int(fi.num_fragments)
+    if n_frag == 0:
+        return 0
+    if fi.num_explicit_fragments == 0:
+        extent = int(fi.vertex_extent)
+        if fi.tiles(extent):
+            return extent
+    total = 0
+    for f in range(n_frag):
+        if fi.is_range(f):
+            total += int(fi.range(f)[1])
+        else:
+            total += int(fi.indices_view(f).shape[0])
+    return total
 
 
 def _decode_parent_from_plus_one(
@@ -1152,22 +1425,41 @@ def _decode_parent_from_plus_one(
     family holds nothing.
     """
     parent = np.full(n_fine, -1, dtype=np.int64)
-    found_any = False
 
     # One family read covers both the chunk-aligned records (endpoints in
     # the same chunk on both grids — all-zero offsets) and the ones that
     # span chunks.  A cross-level record's endpoints are distinguished by
     # level, so endpoint 0 is always the fine source and endpoint 1 the
     # coarse target, in input order.
+    #
+    # Every cell of the family is prefetched in one gather first; read_links
+    # otherwise issues one synchronous read per cell.
+    family = links_group_path(1)
+    plan = [
+        (f"{family}/{seg}", fine_lg.list_chunks(f"{family}/{seg}"))
+        for seg in list_link_offsets(fine_lg, 1)
+    ]
     try:
-        records = read_links(fine_lg, delta=1)
+        with fine_lg.batched_reads([p for p in plan if p[1]]):
+            records = read_links(fine_lg, delta=1)
     except (ArrayError, KeyError):
         records = []
-    for (cc_s, vi_s), (cc_t, vi_t) in records:
-        parent[int(fine_assn[cc_s][vi_s])] = int(coarse_assn[cc_t][vi_t])
-        found_any = True
+    if not records:
+        return None
 
-    return parent if found_any else None
+    # Chunk-local → global is ``start + local`` since every assignment is an
+    # arange; later records overwrite earlier ones, as the per-record loop did.
+    fine_start = {cc: int(rows[0]) for cc, rows in fine_assn.items()}
+    coarse_start = {cc: int(rows[0]) for cc, rows in coarse_assn.items()}
+    n = len(records)
+    src = np.fromiter(
+        (fine_start[cc] + vi for (cc, vi), _ in records), dtype=np.int64, count=n,
+    )
+    trg = np.fromiter(
+        (coarse_start[cc] + vi for _, (cc, vi) in records), dtype=np.int64, count=n,
+    )
+    parent[src] = trg
+    return parent
 
 
 def _finalize_cross_level_for_store(
@@ -1188,16 +1480,39 @@ def _finalize_cross_level_for_store(
     ``cross_level_depth=-1`` means "walk all available level pairs".
     """
     root = open_store(str(store_path), mode="r+")
+    if cross_level_storage == XLEVEL_NONE or cross_level_depth == 0:
+        _stamp_root_cross_level(
+            root, depth=cross_level_depth, storage=cross_level_storage,
+        )
+        return
+    # Stamped only once we know arrays can exist: a strategy that emits no
+    # inline ±1 links (polyline, skeleton, mesh, per-fragment) would
+    # otherwise leave the store advertising a cross-level depth it has no
+    # arrays for, which a reader then goes looking for.
     _stamp_root_cross_level(
         root, depth=cross_level_depth, storage=cross_level_storage,
     )
-    if cross_level_storage == XLEVEL_NONE or cross_level_depth == 0:
-        return
 
     meta = read_root_metadata(root)
     ndim = meta.sid_ndim
     levels = sorted(list_resolution_levels(root))
     if len(levels) < 2:
+        return
+
+    # Decide whether there is anything to compose BEFORE reading anything.
+    #
+    # ``±1`` is emitted inline during coarsening, so this pass exists only
+    # for ``±N`` with N >= 2.  At the default depth of 1 there is nothing to
+    # do -- but the work below ran first and cost a full re-read of every
+    # level plus one int64 per vertex per level, which on a whole-brain
+    # tractogram is the largest allocation in the whole build and the most
+    # likely thing to have been killed as "the pyramid OOM".
+    max_delta = (
+        max(levels) - min(levels)
+        if cross_level_depth == -1
+        else int(cross_level_depth)
+    )
+    if max_delta < 2:
         return
 
     # No capability stamp here.  The token marks the presence of delta != 0
@@ -1209,19 +1524,12 @@ def _finalize_cross_level_for_store(
     # once it knows.  Stamping optimistically here claimed cross-LEVEL links
     # on stores that had none.
 
-    # Build per-level chunk_assignments + total counts once.
+    # Build per-level chunk_assignments + total counts once.  This is the
+    # expensive part the early return above protects.
     per_level: dict[int, tuple[dict[ChunkCoords, npt.NDArray[np.int64]], int]] = {}
     for lvl in levels:
         lg = get_resolution_level(root, lvl)
         per_level[lvl] = _reconstruct_chunk_assignments(lg, ndim)
-
-    max_delta = (
-        max(levels) - min(levels)
-        if cross_level_depth == -1
-        else int(cross_level_depth)
-    )
-    if max_delta < 2:
-        return  # +1/-1 was already emitted inline
 
     # Cache each adjacent (fine_level, fine_level+1) parent array.
     adjacent_parent: dict[int, npt.NDArray[np.int64]] = {}
@@ -1316,81 +1624,246 @@ def _write_cross_level_edges(
     fine_global = np.flatnonzero(valid_mask).astype(np.int64)
     parent_valid = parent[valid_mask].astype(np.int64)
 
-    # Build chunk-mapping tables for both levels.
-    fine_chunk_list = sorted(fine_chunk_assignments.keys())
-    fine_vchunks, fine_vlocal, fine_chunk_list = build_vertex_chunk_mapping(
-        fine_chunk_assignments, n_fine, fine_chunk_list,
+    # Per-edge chunk coords and chunk-local rows for both endpoints.
+    fine_cc, fine_local = _endpoint_chunk_rows(
+        fine_chunk_assignments, n_fine, fine_global,
     )
-    coarse_chunk_list = sorted(coarse_chunk_assignments.keys())
-    coarse_vchunks, coarse_vlocal, coarse_chunk_list = build_vertex_chunk_mapping(
-        coarse_chunk_assignments, n_coarse, coarse_chunk_list,
+    coarse_cc, coarse_local = _endpoint_chunk_rows(
+        coarse_chunk_assignments, n_coarse, parent_valid,
     )
 
-    # Trivial fine→parent edge list.
-    edges = np.stack([fine_global, parent_valid], axis=1)
-    aligned, cross = partition_cross_level_edges(
-        edges,
-        fine_vchunks, fine_vlocal, fine_chunk_list,
-        coarse_vchunks, coarse_vlocal, coarse_chunk_list,
-    )
-
-    fine_lg = get_resolution_level(root_group, fine_level)
-    # Stamp the family policy once, up front: the aligned and spanning
-    # records land in different offsets arrays under the same <delta>
-    # group, and every array under it must agree on link_width / sid_ndim.
-    if aligned or cross:
-        create_links_family(fine_lg, delta=delta, link_width=2, sid_ndim=sid_ndim)
+    _write_cross_level_family(
+        root_group, fine_level, delta=delta, sid_ndim=sid_ndim,
+        src_cc=fine_cc, src_vi=fine_local, trg_cc=coarse_cc, trg_vi=coarse_local,
         # delta != 0 by construction here, which is what the token marks.
-        _stamp_root_capability(root_group, CAP_MULTISCALE_LINKS)
-    if aligned:
-        create_links_array(
-            fine_lg, link_width=2, delta=delta, sid_ndim=sid_ndim,
-        )
-        # Batched: one cell per chunk of the fine level, and finalize_links
-        # below reads the arrays back, so the block must close before it.
-        with fine_lg.batched_writes():
-            for cc, rows in aligned.items():
-                write_chunk_links(fine_lg, cc, [rows], delta=delta)
-    if cross:
-        # Scopes its delete to the offsets segments these records land in,
-        # so the aligned (all-zero-offsets) array written above survives.
-        write_links(fine_lg, cross, sid_ndim=sid_ndim, delta=delta)
-    if aligned or cross:
-        # write_chunk_links is a per-cell writer and maintains no
-        # family-wide counts, so a delta whose records are ALL chunk-aligned
-        # would otherwise carry no num_links at all.  Reconcile last, once
-        # both writers are done.
-        finalize_links(fine_lg, delta=delta)
+        stamp_capability=True,
+    )
 
     if storage == XLEVEL_EXPLICIT:
         # Mirror at the coarse level under -delta: swap endpoint roles.
-        coarse_lg = get_resolution_level(root_group, coarse_level)
-        # Re-partition from the coarse side so chunk-alignment is
-        # evaluated against the coarse chunk grid (intra/cross split
-        # may differ from the fine-side view when grids don't align).
-        rev_edges = np.stack([parent_valid, fine_global], axis=1)
-        rev_aligned, rev_cross = partition_cross_level_edges(
-            rev_edges,
-            coarse_vchunks, coarse_vlocal, coarse_chunk_list,
-            fine_vchunks, fine_vlocal, fine_chunk_list,
+        # Chunk alignment is re-evaluated from the coarse side, and records
+        # keep the fine-vertex order the forward family was written in.
+        _write_cross_level_family(
+            root_group, coarse_level, delta=-delta, sid_ndim=sid_ndim,
+            src_cc=coarse_cc, src_vi=coarse_local,
+            trg_cc=fine_cc, trg_vi=fine_local,
         )
-        if rev_aligned or rev_cross:
-            create_links_family(
-                coarse_lg, delta=-delta, link_width=2, sid_ndim=sid_ndim,
+
+
+def _endpoint_chunk_rows(
+    chunk_assignments: dict[ChunkCoords, npt.NDArray[np.int64]],
+    n_vertices: int,
+    global_idx: npt.NDArray[np.int64],
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """``(M, sid_ndim)`` chunk coords and ``(M,)`` chunk-local rows of vertices.
+
+    The array form of the per-edge lookup ``partition_cross_level_edges``
+    made through ``build_vertex_chunk_mapping``'s tables.
+    """
+    chunk_list = sorted(chunk_assignments.keys())
+    vchunks, vlocal, chunk_list = build_vertex_chunk_mapping(
+        chunk_assignments, n_vertices, chunk_list,
+    )
+    chunk_arr = np.asarray(chunk_list, dtype=np.int64).reshape(len(chunk_list), -1)
+    return chunk_arr[vchunks[global_idx]], vlocal[global_idx]
+
+
+def _group_rows_by_key(
+    key: npt.NDArray[np.int64],
+) -> tuple[npt.NDArray[np.intp], list[tuple[int, int]]]:
+    """Stable grouping of rows by an ``(M, K)`` integer key.
+
+    Returns the permutation that sorts ``key`` (stable, so rows keep their
+    input order within a group) and the ``[start, end)`` span of each group
+    in that permutation.
+    """
+    order = np.lexsort(key.T[::-1])
+    key_sorted = key[order]
+    starts = np.flatnonzero(np.concatenate((
+        [True], np.any(key_sorted[1:] != key_sorted[:-1], axis=1),
+    )))
+    ends = np.append(starts[1:], key.shape[0])
+    return order, list(zip(starts.tolist(), ends.tolist()))
+
+
+#: Threads writing one cross-level family's offsets arrays.
+_XLEVEL_ARRAY_WORKERS = 8
+
+
+def _write_cross_level_arrays(
+    root_group,
+    level: int,
+    cells_by_offsets: dict[Any, list[tuple[ChunkCoords, npt.NDArray[np.int64]]]],
+    *,
+    delta: int,
+    sid_ndim: int,
+) -> None:
+    """Allocate each offsets array of one family and write its cells.
+
+    A family has one array per distinct offset -- dozens to hundreds -- and
+    each costs a chain of synchronous store round-trips: the allocation
+    (existence probes, the family policy read, the array's ``zarr.json``),
+    the first node lookup of the write block, and the block's flush.  The
+    arrays are independent objects under a family group that already exists,
+    and none of these steps writes the group (``create_links_array`` stamps
+    it only when absent), so the arrays are handled concurrently.  Each
+    worker thread uses its own level handle, since a ``batched_writes``
+    block is state on the handle; within an array the cells still go out as
+    one flush per ``_WRITE_BATCH_CHUNKS``.
+    """
+    if not cells_by_offsets:
+        return
+    local = threading.local()
+
+    def _one(offsets: Any) -> None:
+        lg = getattr(local, "lg", None)
+        if lg is None:
+            lg = local.lg = get_resolution_level(root_group, level)
+        cells = cells_by_offsets[offsets]
+        for i in range(0, len(cells), _WRITE_BATCH_CHUNKS):
+            with lg.batched_writes():
+                if i == 0:
+                    # Allocated inside the block so the handle it returns
+                    # seeds the block's node cache; the block's default
+                    # codec selection resolves to the same empty compressor
+                    # list an unbatched allocation uses.
+                    create_links_array(
+                        lg, link_width=2, delta=delta, sid_ndim=sid_ndim,
+                        offsets=offsets,
+                    )
+                for cc, cell_rows in cells[i:i + _WRITE_BATCH_CHUNKS]:
+                    write_chunk_links(
+                        lg, cc, [cell_rows], delta=delta, offsets=offsets,
+                    )
+
+    items = list(cells_by_offsets)
+    if len(items) == 1:
+        _one(items[0])
+        return
+    with ThreadPoolExecutor(
+        max_workers=min(_XLEVEL_ARRAY_WORKERS, len(items)),
+    ) as pool:
+        for future in [pool.submit(_one, off) for off in items]:
+            # Re-raise the first failure, after every worker settles.
+            future.result()
+
+
+def _write_cross_level_family(
+    root_group,
+    level: int,
+    *,
+    delta: int,
+    sid_ndim: int,
+    src_cc: npt.NDArray[np.int64],
+    src_vi: npt.NDArray[np.int64],
+    trg_cc: npt.NDArray[np.int64],
+    trg_vi: npt.NDArray[np.int64],
+    stamp_capability: bool = False,
+) -> None:
+    """Write the ``links/<delta>/`` cross-level family owned by ``level``:
+    record ``k`` is ``((src_cc[k], src_vi[k]), (trg_cc[k], trg_vi[k]))``.
+
+    Produces the store the three-writer sequence did -- the chunk-aligned
+    rows via ``write_chunk_links``, the rest via ``write_links`` (a scoped
+    replace), then ``finalize_links`` -- without its per-record Python
+    objects or its per-cell synchronous writes:
+
+    * **Placement** is the arithmetic ``write_links`` applies to a
+      cross-level record (``links_has_perm`` is False at ``delta != 0``, so
+      the placement is the identity): a record is *aligned* when both chunk
+      coords are equal, and goes to the all-zero-offsets array; otherwise
+      its offsets are ``trg - floor(src * scale_src / scale_trg)``.  Rows
+      keep input order within a cell.
+    * **The replace** deletes exactly the offsets arrays the spanning records
+      target.  When that set includes the all-zero array -- possible whenever
+      the two grids differ, since re-anchoring maps a coarser chunk onto a
+      finer one -- the aligned rows written into it first did not survive.
+      That outcome is reproduced here by not writing them.
+    * **Cells** are written in batched blocks, one array per worker thread:
+      a flush per array instead of a write plus a ``nonempty_chunks``
+      read-modify-write per cell.
+    * **Counts** are known exactly when the family held nothing beforehand,
+      so the finalize pass that decodes every cell to count rows only runs
+      when earlier arrays may survive under the family.
+    """
+    n_records = int(src_vi.shape[0])
+    if n_records == 0:
+        return
+    if src_cc.shape[1] != sid_ndim or trg_cc.shape[1] != sid_ndim:
+        raise ArrayError(
+            f"chunk coords arity mismatch in links/{delta}: sid_ndim="
+            f"{sid_ndim}, got {src_cc.shape[1]}/{trg_cc.shape[1]}"
+        )
+    lg = get_resolution_level(root_group, level)
+    create_links_family(lg, delta=delta, link_width=2, sid_ndim=sid_ndim)
+    if stamp_capability:
+        _stamp_root_capability(root_group, CAP_MULTISCALE_LINKS)
+    family = links_group_path(delta)
+    pre_existing = bool(list_link_offsets(lg, delta))
+
+    rows = np.stack([
+        np.asarray(src_vi, dtype=np.int64), np.asarray(trg_vi, dtype=np.int64),
+    ], axis=1)
+    aligned = np.all(src_cc == trg_cc, axis=1)
+
+    # offsets -> [(source chunk, rows), ...]; one entry per cell.
+    cross_cells: dict[Any, list[tuple[ChunkCoords, npt.NDArray[np.int64]]]] = {}
+    cross_idx = np.flatnonzero(~aligned)
+    if cross_idx.size:
+        scale_src, scale_trg = link_endpoint_scales(lg, delta, sid_ndim)
+        c_src = src_cc[cross_idx]
+        offs = trg_cc[cross_idx] - (
+            (c_src * np.asarray(scale_src, dtype=np.int64))
+            // np.asarray(scale_trg, dtype=np.int64)
+        )
+        key = np.concatenate([c_src, offs], axis=1)
+        order, spans = _group_rows_by_key(key)
+        key_sorted = key[order]
+        block = rows[cross_idx[order]]
+        for start, end in spans:
+            head = key_sorted[start].tolist()
+            cross_cells.setdefault((tuple(head[sid_ndim:]),), []).append(
+                (tuple(head[:sid_ndim]), block[start:end]),
             )
-        if rev_aligned:
-            create_links_array(
-                coarse_lg, link_width=2, delta=-delta, sid_ndim=sid_ndim,
-            )
-            with coarse_lg.batched_writes():
-                for cc, rows in rev_aligned.items():
-                    write_chunk_links(coarse_lg, cc, [rows], delta=-delta)
-        if rev_cross:
-            write_links(
-                coarse_lg, rev_cross, sid_ndim=sid_ndim, delta=-delta,
-            )
-        if rev_aligned or rev_cross:
-            finalize_links(coarse_lg, delta=-delta)
+    intra = intra_offsets(sid_ndim, 2)
+    intra_targeted = any(is_intra(off) for off in cross_cells)
+
+    cells_by_offsets = dict(cross_cells)
+    aligned_idx = np.flatnonzero(aligned)
+    if aligned_idx.size and not intra_targeted:
+        order, spans = _group_rows_by_key(src_cc[aligned_idx])
+        a_sorted = aligned_idx[order]
+        cells_by_offsets[intra] = [
+            (tuple(src_cc[a_sorted[start]].tolist()), rows[a_sorted[start:end]])
+            for start, end in spans
+        ]
+
+    if pre_existing:
+        # The replace: only arrays the spanning records target are dropped.
+        for off in cross_cells:
+            path = links_path(delta, off)
+            if lg.array_exists(path):
+                lg.delete_subtree(path)
+
+    _write_cross_level_arrays(
+        root_group, level, cells_by_offsets, delta=delta, sid_ndim=sid_ndim,
+    )
+
+    if pre_existing:
+        # Arrays from before this call may survive under the family, so the
+        # totals have to be recounted from the store.
+        finalize_links(lg, delta=delta)
+    else:
+        # Canonical family, one row per record: logical == physical.
+        physical = sum(
+            int(cell_rows.shape[0])
+            for cells in cells_by_offsets.values() for _cc, cell_rows in cells
+        )
+        lg.write_array_meta(family, {
+            "num_links": physical, "num_physical_records": physical,
+        })
+
+
 
 
 # ===================================================================
@@ -1410,6 +1883,9 @@ def build_pyramid(
     compressor: Any = None,
     executor: Any = None,
     method: str | None = None,
+    rdp_tolerances: Sequence[float] | None = None,
+    start_level: int = 0,
+    on_level_done: Callable[[int, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Build a multi-resolution pyramid for an existing store.
 
@@ -1452,10 +1928,35 @@ def build_pyramid(
             list[result]`` callable forwarded to every level's
             :func:`coarsen_level` call, parallelizing the chunk-local
             skeleton/polyline coarseners.  ``None`` (default) runs serially.
+        rdp_tolerances: Explicit Douglas-Peucker tolerance per coarser level,
+            aligned with ``factors`` (same length), in store coordinate
+            units -- millimetres for a tractogram in RAS mm.  Level ``i+1``
+            is simplified so that no vertex of level ``i`` lies further than
+            ``rdp_tolerances[i]`` from it; deviation from level 0 is
+            therefore bounded by the sum of the tolerances up to that level.
+            ``None`` (default) keeps the derived tolerance, half the
+            smallest edge of each level's bin, which compounds with the
+            factors.  With explicit tolerances the coarsen factors still set
+            each level's ``bin_shape`` (its NGFF scale) but no longer decide
+            how much is simplified.  Refused
+            with ``coarsen_mode="decimate"`` and for stores not coarsened by
+            the polyline coarsener -- points, meshes, skeletons, graphs --
+            before any level is written.
+        start_level: How many of the levels ``factors`` describes already
+            exist and are complete; building starts at level
+            ``start_level + 1``.  For resuming a pyramid that stopped
+            partway -- the caller removes any half-written level first.
+        on_level_done: Called as ``on_level_done(level, summary)`` after
+            each level is written, so a caller can record progress.
 
     Returns:
         Summary dict.
     """
+    if not 0 <= int(start_level) <= len(factors):
+        raise ValueError(
+            f"start_level must be between 0 and {len(factors)} (the number of "
+            f"levels factors describes), got {start_level}"
+        )
     if cross_level_storage not in VALID_XLEVEL_STORAGE:
         raise ValueError(
             f"cross_level_storage={cross_level_storage!r} not in "
@@ -1470,9 +1971,24 @@ def build_pyramid(
             f"chunk_scale_factors length {len(chunk_scale_factors)} != "
             f"factors length {len(factors)}",
         )
+    tolerances = validate_rdp_tolerances(
+        rdp_tolerances, n_levels=len(factors), coarsen_mode=coarsen_mode,
+    )
+    if tolerances is not None:
+        # The geometry does not change between levels, so one check here
+        # refuses a store the tolerance cannot apply to before level 1 is
+        # written, rather than after.
+        root_meta = read_root_metadata(open_store(str(store_path), mode="r"))
+        refusal = _rdp_tolerance_refusal(
+            root_meta, method or select_coarsener_key(root_meta),
+        )
+        if refusal is not None:
+            raise ValueError(f"rdp_tolerances does not apply: {refusal}")
 
     summaries: list[dict[str, Any]] = []
     for i, fac in enumerate(factors):
+        if i < int(start_level):
+            continue
         if isinstance(fac, (tuple, list)) and len(fac) == 2:
             cf, sf = float(fac[0]), float(fac[1])
         else:
@@ -1507,7 +2023,10 @@ def build_pyramid(
             # Explicit strategy override, or None to keep the automatic
             # geometry routing for every level.
             method=method,
+            rdp_tolerance=None if tolerances is None else tolerances[i],
         ))
+        if on_level_done is not None:
+            on_level_done(i + 1, summaries[-1])
 
     # Compose deeper-delta cross-level links from the inline-emitted +1
     # arrays.  Also stamps root cross-level metadata + the multiscale
@@ -1547,14 +2066,20 @@ def _skeleton_coarsener(
     executor: Any = None,
 ) -> dict[str, Any]:
     """Skeleton stores: route to the skeleton-aware decimator.  ``coarsen_factor``
-    is the decimation stride, ``chunk_scale_factor`` defaults to 2, and the
+    is the decimation stride (1 being the identity, as elsewhere), and the
     random sparsity strategy degrades to deterministic ``"length"``.
     ``coarsen_mode`` is accepted for signature parity with other coarseners
     but has no effect here — this coarsener always decimates."""
     from zarr_vectors_tools.multiresolution.strategies.skeletons import (
         coarsen_skeleton_level,
     )
-    csf = chunk_scale_factor if chunk_scale_factor != 1 else 2
+    # ``chunk_scale_factor`` is honoured as given.  It used to be silently
+    # replaced by 2 whenever the caller asked for 1, so a pyramid built with
+    # an explicit "keep the chunk grid" got a doubled grid at every level and
+    # the store's own metadata was the only place that said so.  The default
+    # of 2 now lives in ``coarsen_skeleton_level``'s signature, where a
+    # caller can see it.
+    csf = chunk_scale_factor
     return coarsen_skeleton_level(
         store_path, source_level, target_level,
         stride=max(1, int(round(coarsen_factor))),
@@ -1615,6 +2140,7 @@ def _polyline_coarsener(
     coarsen_mode: str = "rdp",
     compressor: Any = None,
     executor: Any = None,
+    rdp_tolerance: float | None = None,
 ) -> dict[str, Any]:
     """Geometry-preserving polyline/streamline coarsener (RDP simplification
     or uniform stride decimation, selected by ``coarsen_mode``).
@@ -1622,7 +2148,8 @@ def _polyline_coarsener(
     Chunk-local and executor-parallel — see
     :func:`zarr_vectors_tools.multiresolution.strategies.polylines.coarsen_polyline_level`
     for the implementation (peak memory O(one target chunk), not O(the whole
-    source level))."""
+    source level)).  ``rdp_tolerance`` is that function's
+    ``simplify_epsilon``; ``None`` leaves it to derive one from the bin."""
     from zarr_vectors_tools.multiresolution.strategies.polylines import (
         coarsen_polyline_level,
     )
@@ -1636,6 +2163,7 @@ def _polyline_coarsener(
         sparsity_strategy=sparsity_strategy,
         sparsity_seed=sparsity_seed,
         coarsen_mode=coarsen_mode,
+        simplify_epsilon=rdp_tolerance,
         compressor=compressor,
         executor=executor,
     )

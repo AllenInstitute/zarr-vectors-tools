@@ -16,16 +16,10 @@ Covers the four invariants from the plan:
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
-from zarr_vectors.constants import (
-    CAP_PRESERVED_OBJECT_IDS,
-    CAP_SHARED_FRAGMENTS,
-    COARSEN_PER_OBJECT,
-)
 from zarr_vectors.building import (
     get_resolution_level,
     list_resolution_levels,
+    neighbouring_chunk_keys,
     open_store,
     read_all_object_manifests,
     read_chunk_vertices,
@@ -34,10 +28,14 @@ from zarr_vectors.building import (
     read_object_attributes,
     read_root_metadata,
 )
-from zarr_vectors.building import neighbouring_chunk_keys
-from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
-from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+from zarr_vectors.constants import (
+    CAP_PRESERVED_OBJECT_IDS,
+    CAP_SHARED_FRAGMENTS,
+    COARSEN_PER_OBJECT,
+)
 
+from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+from zarr_vectors_tools.multiresolution.coarsen import build_pyramid, coarsen_level
 
 # ===================================================================
 # Fixture helpers

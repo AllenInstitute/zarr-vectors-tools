@@ -1,0 +1,28 @@
+# Whole-brain tractogram to a viewable, sharded store, keeping the file's
+# scalars and properties.  Run with:  zvtools run tractography.yaml
+name: tractography
+steps:
+  # TRK ingests in parallel and builds the pyramid inline: two coarser levels,
+  # simplified to 0.5 mm and 1 mm, the second keeping a quarter of the
+  # streamlines (longest first).
+  - convert:
+      input: data/sub-01_tracts.trk
+      output: out/sub-01_tracts.zarrvectors
+      num_chunks: 5000
+      workers: 8
+      compressor: zstd
+      compute_length: true
+      coarsen: [8, 8]
+      sparsity: [1, 4]
+      rdp_tolerance: [0.5, 1.0]
+      sparsity_strategy: length
+  - validate:
+      store: out/sub-01_tracts.zarrvectors
+  - shard:
+      store: out/sub-01_tracts.zarrvectors
+      shape: 8
+  # Back out to TRK from the coarsest level, for tools that want a file.
+  - convert:
+      input: out/sub-01_tracts.zarrvectors
+      output: out/sub-01_tracts_level2.trk
+      level: 2

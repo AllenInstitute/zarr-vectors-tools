@@ -9,7 +9,7 @@ is turned back into a single analysable file.
 Needs the `h5ad` extra: `pip install "zarr-vectors-tools[h5ad]"`.
 
 ```python
-from zarr_vectors_tools.export.h5ad import export_h5ad
+from zarr_vectors_tools.convert.export.h5ad import export_h5ad
 
 summary = export_h5ad(
     "xenium.zv",                # store_path
@@ -59,24 +59,18 @@ becomes a numeric `obs` column under its stored name, `order_restored` is
 
 ## Filters
 
-`bbox` and `chunks` behave as they do everywhere else in the export API.
-
-:::{warning}
-`object_ids` is the exception. Core's object-filtered read path does not
-carry vertex attributes, so combining `object_ids=[...]` with attributes
-would silently produce an `.h5ad` with an empty `obs`. `export_h5ad`
-raises `ExportError` instead:
+`bbox`, `chunks` and `object_ids` behave as they do everywhere else in the
+export API, and every filtered cell keeps its `obs` row and expression. On a
+store ingested with `object_id_column=`, `object_ids` selects cells by that
+column:
 
 ```python
-# Refused — the attributes would come back empty
+# Every cell of object 0, with its obs and X
 export_h5ad("cells.zv", "out.h5ad", object_ids=[0])
 
-# Fine — positions only, filtered by object
+# The same cells, positions only
 export_h5ad("cells.zv", "out.h5ad", object_ids=[0], attribute_names=[])
 ```
-
-Use `bbox=` or `chunks=` when you need attributes alongside a subset.
-:::
 
 ## Exporting from a coarser level
 

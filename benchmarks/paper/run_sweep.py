@@ -73,13 +73,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _formats as F  # noqa: E402
 import _harness as H  # noqa: E402
-from zarr_vectors.building import open_store  # noqa: E402
+from zarr_vectors.building import open_store, read_object_manifests  # noqa: E402
 from zarr_vectors.ops import EditSession, FragmentRef, VertexRef  # noqa: E402
 from zarr_vectors.types.graphs import read_graph, write_graph  # noqa: E402
 from zarr_vectors.types.meshes import read_mesh, write_mesh  # noqa: E402
 from zarr_vectors.types.points import read_points, write_points  # noqa: E402
 from zarr_vectors.types.polylines import (  # noqa: E402
-    read_object_manifest,
     read_polylines,
     write_polylines,
 )
@@ -275,7 +274,7 @@ def zv_replace_streamline(path, oid):
     """
     frags = read_polylines(str(path), object_ids=[int(oid)])["polylines"][0]
     root = open_store(str(path), mode="r+")
-    manifest = read_object_manifest(root["0"], int(oid))
+    manifest = read_object_manifests(root["0"], ids=[int(oid)])[int(oid)]
     with EditSession(root, atomic=True, refresh_pyramid=False) as ed:
         for (chunk, frag_idx), frag in zip(manifest, frags):
             new = np.clip(np.asarray(frag, dtype=np.float32) + np.float32(0.25),

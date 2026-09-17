@@ -64,7 +64,8 @@ def split_components(
     adj: dict[int, list[int]] = defaultdict(list)
     e = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
     for a, b in e:
-        a = int(a); b = int(b)
+        a = int(a)
+        b = int(b)
         if a == b:
             continue
         adj[a].append(b)

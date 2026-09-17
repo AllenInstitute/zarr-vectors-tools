@@ -35,12 +35,30 @@ clean one-line form rather than a traceback.
 zvtools convert INPUT OUTPUT [options]
 ```
 
-Ingest `INPUT` into a new store at `OUTPUT`, optionally building coarser
-levels in the same run.
+Moves data between a file and a store, in whichever direction `INPUT`
+implies:
+
+| `INPUT` | `OUTPUT` | What happens |
+| --- | --- | --- |
+| a file | a store path | **ingest**, optionally building coarser levels in the same run |
+| a store | a file | **export**, reading the level you name |
+
+A directory carrying a `zarr.json` is a store; anything else is a file to
+read. That is the same test `--overwrite` uses, so the two cannot disagree
+about what a store is.
+
+```bash
+# In.
+zvtools convert tracts.trk tracts.zarrvectors --num-chunks 5000
+
+# Out, from the coarsest level, one bundle only.
+zvtools convert tracts.zarrvectors cst.trk --level 2 --group-id 4
+```
 
 ### Format selection
 
-`--format` defaults to `auto`, which resolves from the file extension:
+`--format` defaults to `auto`, which resolves from the file extension — of
+`INPUT` when ingesting, of `OUTPUT` when exporting:
 
 | `--format` | Extensions | Ingest function | Geometry | Extra |
 | --- | --- | --- | --- | --- |
@@ -56,6 +74,9 @@ levels in the same run.
 | `lines` | *(none)* | `lines.ingest_lines_csv` | lines | — |
 | `edgelist` | *(none)* | `edgelist.ingest_edgelist` | graph | `graph` |
 | `graphml` | `.graphml` | `graphml.ingest_graphml` | graph | `graph` |
+| `gifti` | `.gii`, or a directory of them | `gifti.ingest_gifti` | mesh | `surfaces` |
+| `freesurfer` | a subject directory | `freesurfer.ingest_freesurfer` | mesh | `surfaces` |
+| `precomputed` | a URL, or a directory with an `info` file | `precomputed.ingest_precomputed` | skeleton or mesh | `precomputed` |
 
 :::{note}
 `lines` and `edgelist` register **no extensions**, because a `.csv` file
@@ -78,7 +99,7 @@ value. If the format's extra is missing, the error carries the exact
 | Flag | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `--format` | choice | `auto` | see the table above |
-| `--chunk-shape X,Y,Z` | shape | — | **required for every format except `trk`** |
+| `--chunk-shape X,Y,Z` | shape | — | **required for every format except `trk`** and a spatially indexed `precomputed` skeleton layer |
 | `--num-chunks N｜X,Y,Z` | int or triple | — | **`trk` only**; target total chunk count, or per-axis counts |
 | `--bin-shape X,Y,Z` | shape | — | optional intra-chunk sub-binning |
 | `--dtype` | str | `float32` | stored position dtype |
@@ -91,8 +112,91 @@ value. If the format's extra is missing, the error carries the exact
 | `--compute-endpoints` | flag | off | streamlines: store per-object endpoints |
 | `--nodes` | path | — | **required for `edgelist`**: the node CSV |
 | `--knn-distance-k` | int | — | points: *k* for the kNN-distance enrichment (needs `points-enrichment`) |
+| `--geometry NAME` | str | `midthickness` | `gifti`, `freesurfer`: the surface to chunk |
+| `--hemisphere` | `left｜right｜lh｜rh` | both | `freesurfer`: hemispheres to read (repeatable); `gifti`: hemisphere of files that name none |
+| `--space` | `auto｜scanner｜surface` | `auto` | `freesurfer`: add `c_ras` to reach scanner RAS |
+| `--surface`, `--morph`, `--annot` | str, repeatable | present defaults | `freesurfer`: alternate surfaces, morphometry maps, parcellations |
+| `--anchor X,Y,Z` | ints | — | `precomputed` with a spatial index: voxel corner of one `.frags` chunk; ingest the block from there instead of listing the layer |
+| `--counts NX,NY,NZ` | ints | `1,1,1` | `precomputed`: `.frags` chunks per axis from `--anchor` |
+| `--frags-dir DIR` | str | layer root | `precomputed`: subdirectory holding the `.frags` files |
+| `--segment-id ID` | int, repeatable | every ID | `precomputed` mesh layers, and skeleton layers without a spatial index: ingest only these segments |
+| `--lod N` | int | `0` | `precomputed` multi-resolution mesh layer: the level of detail to read; 0 is the finest |
+| `--drop-interior-below N` | int | `0` | `precomputed`: at each coarser level, drop objects of at most *N* vertices that touch no chunk boundary |
 
 Plus every [pyramid option](#pyramid-options) below.
+
+### Precomputed skeleton and mesh layers
+
+A Neuroglancer precomputed layer is a directory or a bucket prefix, not a
+file. `auto` recognises a URL (`gs://`, `s3://`, `https://`, `file://`,
+with or without `precomputed://`) and a local directory holding an `info`
+file. The layer's `info` then picks the ingester:
+
+| Layer is | Level-0 chunks | `--chunk-shape` |
+| --- | --- | --- |
+| skeletons with a `spatial_index` | the index's own, one per `.frags` file | leave out |
+| skeletons with no spatial index | a grid you choose | **required**, in nm |
+| meshes, legacy or multi-resolution | a grid you choose | **required**, in nm |
+
+Point it at the skeleton or mesh directory itself. A segmentation layer's
+`info` is refused, with the directories it names.
+
+A mesh layer is read one object per segment, with fragment seams welded,
+and its pyramid is built after the ingest, as for OBJ input. `--anchor`,
+`--counts`, `--frags-dir`, `--drop-interior-below`, `--compressor`,
+`--dtype` and `--bin-shape` are refused for it. See
+[Meshes](../ingest/meshes.md#neuroglancer-precomputed--ingest_precomputed_meshes).
+
+For a skeleton layer:
+
+Without `--anchor`, every `.frags` file in the layer is listed and
+ingested. On a production EM layer that is a large job; pass `--anchor`
+and `--counts` to take a block. The pyramid is built inside the ingest:
+`--coarsen` gives each level's decimation stride, `--chunk-scale`
+defaults to `2` per level, and `--sparsity-strategy random` becomes
+`length`, as it does for `zvtools pyramid` on a skeleton store.
+`--compressor`, `--dtype` and `--bin-shape` are refused. See
+[Skeletons in EM](../ingest/em_skeletons.md).
+
+### Export options
+
+These apply when `INPUT` is a store. Every one of them is refused by name
+if it does not apply to the format being written, rather than ignored.
+
+| Flag | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `--level N` | int | `0` | resolution level to export; `0` is the finest |
+| `--object-id ID` | int, repeatable | all | export only these objects |
+| `--group-id ID` | int, repeatable | all | streamlines: export only these bundles |
+| `--bbox X0,Y0,Z0,X1,Y1,Z1` | floats | — | export only what falls in the box |
+| `--object-id ID` with `--format swc` | int, repeatable | — | one `.swc` per object, into the directory `OUTPUT` names |
+| `--attribute NAME` | str, repeatable | `csv`/`ply`/`h5ad`: none; `trk`/`trx`: every numeric one | per-vertex attributes to include |
+| `--object-attribute NAME` | str, repeatable | every numeric one | `trk`/`trx`: per-streamline attributes to include |
+| `--hemisphere`, `--surface` | str, repeatable | all | `gifti`: which hemispheres and surfaces to write |
+| `--prefix TEXT` | str | — | `gifti`: leading file-name part, `sub-01` gives `sub-01_hemi-L_pial.surf.gii` |
+| `--segment-id ID` | int, repeatable | all | `precomputed`: export only these segments |
+| `--unit UNIT` | str | from the store, else nm | `precomputed`: the store's coordinate unit when it records none |
+| `--delimiter` | str | `,` | `csv` export column delimiter |
+
+| `--format` | Extensions | Export function | Reads | Extra |
+| --- | --- | --- | --- | --- |
+| `trk` | `.trk` | `trk.export_trk` | streamlines | `trk` |
+| `trx` | `.trx` | `trx.export_trx` | streamlines | `trx` |
+| `swc` | `.swc` | `swc.export_swc` | skeleton | — |
+| `obj` | `.obj` | `obj.export_obj` | mesh | — |
+| `ply` | `.ply` | `ply.export_ply` | points | `ply` |
+| `csv` | `.csv`, `.xyz` | `csv_points.export_csv` | points | — |
+| `h5ad` | `.h5ad` | `h5ad.export_h5ad` | points | `h5ad` |
+| `gifti` | a directory: `--format gifti`, or any extensionless `OUTPUT` for a surface store | `gifti.export_gifti` | surface | `surfaces` |
+| `precomputed` | a URL, or a directory with `--format precomputed` | `precomputed.export_precomputed` | skeleton, graph or mesh | `precomputed` |
+
+TRK and TRX exports write back the store's attributes, TRX its named
+groups, and both the reference image from the store's header. See
+[Export → streamlines](../export/streamlines.md).
+
+More formats can be ingested than exported: `las`, `stl`, `lines`,
+`edgelist`, `graphml` and `table` have no writer, and asking for one names
+the formats that do.
 
 :::{warning}
 `--overwrite` deliberately refuses to remove a directory that does not
@@ -111,9 +215,28 @@ zvtools convert tracts.trk tracts.zarrvectors \
     --num-chunks 5000 --workers 12 --workers-backend dask \
     --compressor zstd --coarsen 8,8 --sparsity 2,4
 
+# Back out again: the whole store as CSV, with one attribute.
+zvtools convert cells.zarrvectors cells.csv --attribute cell_type
+
 # Neuron morphology from SWC.
 zvtools convert neuron.swc neuron.zarrvectors --chunk-shape 50,50,50
+
+# A FreeSurfer subject, then CIFTI myelin maps onto it.
+zvtools convert subjects/bert bert.zarrvectors --chunk-shape 20,20,20
+zvtools attach bert.zarrvectors bert.MyelinMap_BC.164k_fs_LR.dscalar.nii
+
+# A FlyWire cutout from the spatial index, with a three-level pyramid.
+zvtools convert gs://flywire_v141_m783/skeletons_mip_1 flywire_cutout.zv \
+    --anchor 17398,10448,3088 --counts 8,8,4 \
+    --coarsen 8,8,8 --sparsity 1,1,4 --drop-interior-below 3 --workers 8
+
+# Mouselight has no spatial index, so choose a grid: 1 mm chunks.
+zvtools convert precomputed://gs://allen_neuroglancer_ccf/Mouselight mouselight.zv \
+    --chunk-shape 1000000,1000000,1000000 --coarsen 8,8 --sparsity 1,4
 ```
+
+See [Cortical surfaces](../ingest/surfaces.md) and
+[Skeletons in EM](../ingest/em_skeletons.md).
 
 ---
 
@@ -159,6 +282,7 @@ These appear on both `convert` and `pyramid`.
 | `--chunk-scale K1,K2,...` | int list | — | per-level chunk-size multiplier |
 | `--sparsity-strategy` | choice | `random` | `random｜length｜spatial_coverage｜attribute｜point_thinning` |
 | `--coarsen-mode` | choice | `rdp` | `rdp｜decimate` — polyline vertex reduction |
+| `--rdp-tolerance T1,T2,...` | float list | derived | streamlines in `rdp` mode: per-level Douglas-Peucker tolerance in store units, one per `--coarsen` entry |
 
 `--coarsen` and `--sparsity` must have **equal length**, one entry per
 coarser level; a mismatch exits with an error naming both counts. Giving
@@ -172,6 +296,39 @@ ranks by. The CLI prints a `note:` when it does this for you.
 
 The two axes are explained in
 [Coarsening versus sparsity](../multiresolution/concepts.md).
+
+### Setting the simplification as a distance
+
+By default an `rdp` level's tolerance is derived from its bin, half the
+smallest bin edge, so it grows with `--coarsen`. `--rdp-tolerance` sets
+it directly instead, in the store's own coordinate units — millimetres
+for a tractogram in RAS mm:
+
+```bash
+# Level 1 may move a tract by at most 0.5 mm from level 0, level 2 by at
+# most 1 mm from level 1, level 3 by at most 2 mm from level 2.
+zvtools pyramid tracts.zarrvectors \
+    --coarsen 2,2,2 --sparsity 1,2,4 --rdp-tolerance 0.5,1,2
+```
+
+Each tolerance bounds the deviation from the level **below**, so the
+deviation from level 0 is at most their running sum. `--coarsen` still
+sets each level's bin (its scale); with `--rdp-tolerance` it no longer
+decides how much is simplified.
+
+The tolerance each level was built with is recorded on the level, and a
+pyramid refresh rebuilds it at the same value; see
+[Strategies](../multiresolution/strategies.md#the-rdp-tolerance).
+
+`--rdp-tolerance` is refused, before anything is ingested or written:
+
+- without `--coarsen`, or with a different number of entries;
+- with `--coarsen-mode decimate`, which has no tolerance;
+- for a value that is not a distance above zero;
+- on `convert` for any input but `trk`, `trx` and `tck`, and on `pyramid`
+  for any store not coarsened by the streamline coarsener (points,
+  meshes, graphs, skeletons);
+- when `convert` is exporting.
 
 ---
 
@@ -207,13 +364,63 @@ the inputs to that decision.
 
 ---
 
-## The other CLI
-
-`precomputed_skeletons` carries its own separate argparse entry point for
-EM skeleton ingest, which is not exposed through `zvtools`:
+## `zvtools run`
 
 ```bash
-python -m zarr_vectors_tools.ingest.precomputed_skeletons \
+zvtools run RECIPE [--dry-run] [--force] [--from N]
+```
+
+Runs a recipe: the steps that take raw files to a validated, sharded,
+multi-level store, in one command. Each step is a subcommand (`convert`,
+`pyramid`, `attach`, `merge`, `split`, `validate`, `info`, `shard`, `bundles`) with
+its options written as a mapping:
+
+```yaml
+name: tractography
+steps:
+  - convert:
+      input: data/sub-01_tracts.trk
+      output: out/sub-01_tracts.zarrvectors
+      num_chunks: 5000
+      coarsen: [8, 8]
+      sparsity: [1, 4]
+  - validate: {store: out/sub-01_tracts.zarrvectors}
+  - shard: {store: out/sub-01_tracts.zarrvectors, shape: 8}
+```
+
+- **Keys** are the subcommand's long options with underscores for dashes
+  (`chunk_shape` is `--chunk-shape`), plus its positional arguments by name
+  (`input`, `output`, `store`, `target`, `sources`).
+- **Lists** become comma-separated values for options that take a list
+  (`coarsen: [8, 8]` is `--coarsen 8,8`), and repeated flags for options
+  that repeat (`attribute: [fa, md]` is `--attribute fa --attribute md`).
+  `true` switches a flag on.
+- **Paths** resolve against the recipe's directory, or `workdir:` when the
+  recipe sets one. URLs are left alone.
+- **Checked the same way.** Each step becomes the argument list its command
+  already parses, so an option it does not have is refused, naming the step.
+
+Progress is kept in `<recipe>.run.json` beside the recipe. A rerun skips a
+step that finished, has the same options, and whose output still exists.
+Once a step reruns, every step after it reruns too. The run stops at the
+first step that fails, and running again resumes there. `--from N` reruns
+from step `N`, `--force` reruns everything, and `--dry-run` prints and
+checks each step's command without running it.
+
+Recipes can be `.yaml` (needs the `recipes` extra), `.toml` or `.json`.
+`examples/recipes/` has one per track: tractography, EM skeletons,
+cortical surfaces, and cells. The test suite dry-runs each one, so they
+stay valid.
+
+---
+
+## The other CLI
+
+`precomputed_skeletons` also keeps its own argparse entry point, which
+predates `zvtools convert` and exposes `--no-align`:
+
+```bash
+python -m zarr_vectors_tools.convert.ingest.precomputed_skeletons \
     SOURCE OUT_STORE --anchor X Y Z [--counts ...] [--frags-dir ...] \
     [--strides ...] [--chunk-scales ...] [--sparsity ...] \
     [--workers N] [--drop-interior-below N]

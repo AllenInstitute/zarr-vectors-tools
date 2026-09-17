@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.types.graphs import write_graph
+
 from zarr_vectors_tools.algorithms import (
     compute_k_core,
     compute_label_propagation,

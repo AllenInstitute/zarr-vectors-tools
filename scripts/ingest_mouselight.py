@@ -23,7 +23,8 @@ Customisation:
                          before committing to the full dataset
 """
 import numpy as np
-from zarr_vectors_tools.ingest.precomputed_plain_skeletons import (
+
+from zarr_vectors_tools.convert.ingest.precomputed_plain_skeletons import (
     PlainPrecomputedReader,
     run_ingest_plain,
 )

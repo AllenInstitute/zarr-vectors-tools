@@ -56,16 +56,17 @@ From the terminal:
 ```bash
 zvtools convert cells.csv cells.zarrvectors --chunk-shape 100,100,100
 zvtools pyramid cells.zarrvectors --coarsen 8,8 --sparsity 2,2
+zvtools convert cells.zarrvectors cells.ply --level 1   # and back out again
 zvtools merge cells.zarrvectors more_cells.csv       # append, don't replace
 zvtools split cells.zarrvectors parts/ --by groups
 zvtools info cells.zarrvectors
 zvtools validate cells.zarrvectors --level 3
 ```
 
-From Python — note that `ingest` and `export` have no re-exports, so import from the concrete module:
+From Python — note that `convert.ingest` and `convert.export` have no re-exports, so import from the concrete module:
 
 ```python
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.algorithms import compute_connected_components
 
@@ -77,8 +78,8 @@ build_pyramid("cells.zarrvectors", factors=[(8.0, 2.0), (8.0, 2.0)])
 
 | Subpackage | Purpose |
 | --- | --- |
-| `ingest` | CSV/XYZ, LAS/LAZ, PLY, line CSV, TCK, TRK, TRX, SWC, precomputed skeletons, OBJ, STL, edge-list CSV, GraphML |
-| `export` | CSV, PLY, TRK, TRX, SWC, OBJ |
+| `convert.ingest` | CSV/XYZ, LAS/LAZ, PLY, line CSV, TCK, TRK, TRX, SWC, precomputed skeletons, OBJ, STL, edge-list CSV, GraphML, GIFTI, FreeSurfer |
+| `convert.export` | CSV, PLY, TRK, TRX, SWC, OBJ, h5ad |
 | `compose` | merge a file or another store into an existing one; split a store by group, label or merged source |
 | `multiresolution` | pyramid building: skeleton/polyline/point/mesh/graph coarsening, five object-selection strategies, cross-level links |
 | `algorithms` | streaming graph search, connected components, clustering; mesh summary, attributes, spatial queries |

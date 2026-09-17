@@ -10,15 +10,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zarr_vectors.exceptions import ExportError, IngestError
+from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import read_points
 
 anndata = pytest.importorskip("anndata", reason="anndata not installed")
 
 import pandas as pd  # noqa: E402  (after the importorskip guard)
 
-from zarr_vectors_tools.export.h5ad import export_h5ad  # noqa: E402
-from zarr_vectors_tools.ingest.h5ad import ingest_h5ad  # noqa: E402
+from zarr_vectors_tools.convert.export.h5ad import export_h5ad  # noqa: E402
+from zarr_vectors_tools.convert.ingest.h5ad import ingest_h5ad  # noqa: E402
 
 
 def make_adata(
@@ -244,6 +244,44 @@ class TestH5ADSelection:
         assert "cell_type" in back.obs.columns
         assert (back.obsm["spatial"] <= 500).all()
 
+    def test_object_filter_keeps_attributes(self, tmp_path: Path, h5ad_file) -> None:
+        """An object subset exports that object's cells with their own obs.
+
+        Core's by-object read used to return positions without attributes,
+        and this export refused rather than write an empty obs. It carries
+        them now, so check they are the right cells' values, not just present.
+        """
+        src, adata = h5ad_file
+        store = tmp_path / "obj.zarr"
+        ingest_h5ad(
+            src, store, (250.0, 250.0, 250.0),
+            object_id_column="cell_type", genes=["GENE0", "GENE3"],
+        )
+
+        out = tmp_path / "obj.h5ad"
+        result = export_h5ad(store, out, object_ids=[0])
+        back = anndata.read_h5ad(out)
+        (cell_type,) = set(back.obs["cell_type"].astype(str))
+        assert result["vertex_count"] == (adata.obs["cell_type"] == cell_type).sum()
+        assert back.n_obs == result["vertex_count"]
+
+        # Barcodes are restored, so each row can be checked against its source.
+        source = adata[back.obs_names]
+        np.testing.assert_allclose(back.obsm["spatial"], source.obsm["spatial"])
+        np.testing.assert_allclose(back.obs["total_counts"], source.obs["total_counts"])
+        assert (back.obs["n_genes"] == source.obs["n_genes"]).all()
+        assert (back.obs["is_doublet"] == source.obs["is_doublet"]).all()
+        np.testing.assert_allclose(
+            np.asarray(back.X), source[:, ["GENE0", "GENE3"]].X, atol=1e-6
+        )
+
+        # Positions only, through the same filter.
+        bare = export_h5ad(
+            store, tmp_path / "bare.h5ad", object_ids=[0], attribute_names=[]
+        )
+        assert bare["vertex_count"] == result["vertex_count"]
+        assert len(anndata.read_h5ad(tmp_path / "bare.h5ad").obs.columns) == 0
+
 
 class TestH5ADErrors:
 
@@ -277,27 +315,6 @@ class TestH5ADErrors:
         adata.write_h5ad(src)
         with pytest.raises(IngestError, match="2-dimensional"):
             ingest_h5ad(src, tmp_path / "o.zarr", (10.0, 10.0, 10.0))
-
-    def test_object_filter_with_attributes_is_refused(
-        self, tmp_path: Path, h5ad_file
-    ) -> None:
-        """Core drops attributes on object-filtered reads — say so, don't
-        silently write an .h5ad with an empty obs."""
-        src, _ = h5ad_file
-        store = tmp_path / "obj.zarr"
-        ingest_h5ad(
-            src, store, (250.0, 250.0, 250.0), object_id_column="cell_type"
-        )
-
-        with pytest.raises(ExportError, match="object_ids filtering"):
-            export_h5ad(store, tmp_path / "bad.h5ad", object_ids=[0])
-
-        # Positions-only export through the same filter is fine.
-        result = export_h5ad(
-            store, tmp_path / "ok.h5ad", object_ids=[0], attribute_names=[]
-        )
-        assert result["vertex_count"] > 0
-        assert anndata.read_h5ad(tmp_path / "ok.h5ad").n_obs == result["vertex_count"]
 
     def test_drop_na_removes_bad_coordinates(self, tmp_path: Path) -> None:
         adata = make_adata(n=50)

@@ -20,7 +20,6 @@ import numpy.typing as npt
 
 from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
 
-
 # ===================================================================
 # Vertex clustering
 # ===================================================================
@@ -341,6 +340,7 @@ def coarsen_mesh_level(
 
     from zarr_vectors.building import (
         LevelMetadata,
+        create_attribute_array,
         create_links_array,
         create_links_family,
         create_object_index_array,
@@ -354,20 +354,23 @@ def coarsen_mesh_level(
         list_chunk_keys,
         open_store,
         read_all_object_manifests,
+        read_chunk_attributes,
         read_chunk_vertices,
         read_level_metadata,
         read_root_metadata,
         read_vertex_fragment_index,
+        write_chunk_attributes,
         write_chunk_links,
         write_chunk_vertices,
         write_links,
         write_object_index,
     )
-    from zarr_vectors.constants import VERTICES
+    from zarr_vectors.constants import VERTEX_ATTRIBUTES, VERTICES
     from zarr_vectors.exceptions import ArrayError
 
     from ..groupings import propagate_groupings, surviving_oids_from
     from ..object_selection import apply_sparsity
+    from .skeleton_bins import default_attr_agg
 
     root = open_store(str(store_path), mode="r+")
     root_meta = read_root_metadata(root)
@@ -437,6 +440,32 @@ def coarsen_mesh_level(
         for cc, f in src_manifests[oid]:
             owner.setdefault((tuple(int(x) for x in cc), int(f)), oid)
 
+    # ---- per-vertex attributes to carry --------------------------------
+    # Without this a mesh pyramid keeps geometry and drops every scalar on
+    # it: thickness, curvature, myelin and parcel labels all vanish above
+    # level 0, which makes a coarse surface unshadeable and a coarse EM mesh
+    # unlabellable.  ``.children()``, not iteration -- each attribute is a
+    # flat array node and iterating the group yields sub-groups only.
+    vattr_names: list[str] = []
+    vattr_dtypes: dict[str, Any] = {}
+    vattr_ncols: dict[str, int] = {}
+    vattr_channels: dict[str, list[str] | None] = {}
+    if VERTEX_ATTRIBUTES in src_group:
+        for _name in src_group[VERTEX_ATTRIBUTES].children():
+            try:
+                _meta = src_group.read_array_meta(f"{VERTEX_ATTRIBUTES}/{_name}")
+            except ArrayError:
+                continue
+            _cn = _meta.get("channel_names")
+            vattr_names.append(_name)
+            vattr_dtypes[_name] = np.dtype(_meta.get("dtype", "float32"))
+            vattr_ncols[_name] = len(_cn) if _cn else 1
+            vattr_channels[_name] = _cn
+    # A continuous quantity averages over the cluster; a categorical code
+    # takes the value of the member nearest the centroid, so a parcel label
+    # is always one that genuinely occurred rather than the mean of two.
+    vattr_modes = default_attr_agg(vattr_dtypes)
+
     # ---- pass 1: cluster each TARGET chunk's vertices ------------------
     # Source chunks are grouped by target chunk first, so a bin that several
     # source chunks contribute to still collapses to ONE metavertex.
@@ -456,9 +485,12 @@ def coarsen_mesh_level(
     out_frag_members: dict[tuple, list[list[int]]] = {}
     n_src_verts = 0
 
+    out_attributes: dict[tuple, dict[str, npt.NDArray]] = {}
+
     for cc_t, members in sorted(by_target.items()):
         chunk_pos: list[npt.NDArray] = []
         chunk_owner: list[npt.NDArray] = []
+        chunk_attrs: dict[str, list[npt.NDArray]] = {n: [] for n in vattr_names}
         spans: list[tuple[tuple, int, int]] = []
         cursor = 0
         for cc in members:
@@ -474,6 +506,25 @@ def coarsen_mesh_level(
             n_rows = sum(int(np.asarray(g).shape[0]) for g in groups)
             pos = np.zeros((n_rows, ndim), dtype=np.float32)
             own = np.full(n_rows, -1, dtype=np.int64)
+            # Attribute cells are per fragment and 1:1 with the vertices, so
+            # they scatter to the same rows the positions do.
+            attr_cells: dict[str, list] = {}
+            for name in vattr_names:
+                try:
+                    attr_cells[name] = read_chunk_attributes(
+                        src_group, name, cc, dtype=vattr_dtypes[name],
+                        ncols=vattr_ncols[name],
+                    )
+                except ArrayError:
+                    attr_cells[name] = []
+            attr_rows = {
+                name: np.zeros(
+                    (n_rows,) if vattr_ncols[name] == 1
+                    else (n_rows, vattr_ncols[name]),
+                    dtype=vattr_dtypes[name],
+                )
+                for name in vattr_names
+            }
             at = 0
             for f, g in enumerate(groups):
                 g = np.asarray(g, dtype=np.float32)
@@ -487,6 +538,12 @@ def coarsen_mesh_level(
                 if idx.size != g.shape[0]:
                     idx = np.arange(at, at + g.shape[0], dtype=np.int64)
                 pos[idx] = g
+                for name in vattr_names:
+                    cells = attr_cells[name]
+                    if f < len(cells):
+                        block = np.asarray(cells[f], dtype=vattr_dtypes[name])
+                        if block.shape[0] == idx.size:
+                            attr_rows[name][idx] = block
                 o = owner.get((cc, f))
                 if o is not None and o in keep_set:
                     own[idx] = o
@@ -494,6 +551,8 @@ def coarsen_mesh_level(
             n_src_verts += n_rows
             chunk_pos.append(pos)
             chunk_owner.append(own)
+            for name in vattr_names:
+                chunk_attrs[name].append(attr_rows[name])
             spans.append((cc, cursor, cursor + n_rows))
             cursor += n_rows
 
@@ -533,6 +592,44 @@ def coarsen_mesh_level(
         cent /= np.maximum(counts, 1)[:, None]
         out_vertices[cc_t] = cent.astype(np.float32)
 
+        if vattr_names:
+            alive_positions = pos_all[alive_mask].astype(np.float64)
+            # Rank each member by distance to its cluster centroid, ties
+            # broken on source order, so "nearest" is deterministic across
+            # workers.  The first member of each group is the representative.
+            d2 = np.sum((alive_positions - cent[inverse]) ** 2, axis=1)
+            n_alive = int(alive_positions.shape[0])
+            order = np.lexsort(
+                (np.arange(n_alive, dtype=np.int64), d2, inverse),
+            )
+            group_starts = np.concatenate(
+                [[0], np.cumsum(counts.astype(np.int64))[:-1]],
+            ).astype(np.int64)
+            representative = order[group_starts] if n_meta else order[:0]
+            chunk_out: dict[str, npt.NDArray] = {}
+            for name in vattr_names:
+                values = np.concatenate(chunk_attrs[name], axis=0)[alive_mask]
+                ncols = vattr_ncols[name]
+                flat = values.reshape(n_alive, -1)
+                if vattr_modes.get(name) == "mean":
+                    acc = np.zeros((n_meta, flat.shape[1]), dtype=np.float64)
+                    for c in range(flat.shape[1]):
+                        acc[:, c] = np.bincount(
+                            inverse, weights=flat[:, c].astype(np.float64),
+                            minlength=n_meta,
+                        )
+                    acc /= np.maximum(counts, 1)[:, None]
+                    if np.issubdtype(vattr_dtypes[name], np.integer):
+                        acc = np.rint(acc)
+                    agg = acc.astype(vattr_dtypes[name])
+                else:
+                    agg = flat[representative].astype(vattr_dtypes[name])
+                chunk_out[name] = (
+                    agg.reshape(n_meta) if ncols == 1
+                    else agg.reshape(n_meta, ncols)
+                )
+            out_attributes[cc_t] = chunk_out
+
         # np.unique sorted by object first, so each object's metavertices are
         # one contiguous run: fragment f is [start, stop) of the centroid array.
         meta_owner = uniq["o"]
@@ -566,7 +663,10 @@ def coarsen_mesh_level(
     level_meta = LevelMetadata(
         level=target_level,
         vertex_count=total_vertices,
-        arrays_present=[VERTICES, "links", "object_index"],
+        arrays_present=(
+            [VERTICES, "links", "object_index"]
+            + (["vertex_attributes"] if vattr_names else [])
+        ),
         bin_shape=target_bin,
         bin_ratio=tuple(
             max(1, int(round(float(t) / float(r))))
@@ -588,6 +688,11 @@ def coarsen_mesh_level(
         create_vertices_array(level_group, dtype="float32")
         if has_objects:
             create_object_index_array(level_group)
+        for name in vattr_names:
+            create_attribute_array(
+                level_group, name, dtype=str(vattr_dtypes[name]),
+                channel_names=vattr_channels[name],
+            )
 
     for cc_t in sorted(out_vertices):
         cent = out_vertices[cc_t]
@@ -597,6 +702,19 @@ def coarsen_mesh_level(
         # indices computed against it stay valid.
         blocks = ([cent[a:b] for a, b in spans] if spans else [cent])
         write_chunk_vertices(level_group, cc_t, blocks, dtype=np.float32)
+        # Attributes are cut on exactly the same spans, so a fragment's
+        # values stay paired with its vertices.
+        for name in vattr_names:
+            column = out_attributes.get(cc_t, {}).get(name)
+            if column is None:
+                continue
+            attr_blocks = (
+                [column[a:b] for a, b in spans] if spans else [column]
+            )
+            write_chunk_attributes(
+                level_group, name, cc_t, attr_blocks,
+                dtype=vattr_dtypes[name],
+            )
 
     # ---- pass 2: remap faces, streaming cell by cell -------------------
     # Grouped by (base target chunk, per-endpoint chunk offsets) so each write
@@ -742,6 +860,7 @@ def coarsen_mesh_level(
         "faces_out": int(faces_out),
         "degenerate_faces_removed": int(degenerate),
         "cluster_bin": float(cluster_bin),
+        "attributes_carried": list(vattr_names),
     }
 
 

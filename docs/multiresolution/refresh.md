@@ -2,8 +2,13 @@
 
 Editing level 0 leaves every coarser level stale.
 `rebuild_pyramid_from_level` re-coarsens every level *above* a given one,
-reusing each level's own stored settings so the result is byte-for-byte
-equivalent to a from-scratch `build_pyramid`.
+reusing each level's own stored settings — including the strategy and, for
+polylines, the reduction mode that produced it — so the result matches a
+from-scratch `build_pyramid` rather than approximating it.
+
+Where the store does not record a parameter, the refresh **refuses** rather
+than guessing. Today that is the skeleton stride; pass it explicitly with
+`coarsen_factors={level: stride}`.
 
 ```python
 from zarr_vectors.building import open_store
@@ -29,8 +34,15 @@ Nothing is inferred from arguments — the plan comes off disk.
 #
 #   coarsen_factor    <- bin_ratio[0], or compute_bin_ratio(base_bin, bin_shape)
 #   sparsity_factor   <- 1.0 / object_sparsity
-#   chunk_scale_factor<- round(chunk_shape / root chunk_shape) per axis
+#   chunk_scale_factor<- round(chunk_shape / parent chunk_shape) per axis
 #   parent_level      <- parent_level, or level - 1
+#   method            <- coarsening_method  (per_object, per_fragment, mesh,
+#                        mesh_decimate, skeleton, polyline)
+#   coarsen_mode      <- "decimate" when coarsening_method is
+#                        "polyline_decimate", else "rdp"
+#   rdp_tolerance     <- the level's zarr_vectors_tools.coarsening record,
+#                        when it says the tolerance was "explicit"; a
+#                        "derived" one is derived again from the bin
 #
 # then removes the level and re-runs coarsen_level with exactly those.
 ```
@@ -92,12 +104,23 @@ rich strategies.
 :::
 
 :::{note}
-`rebuild_pyramid_from_level` calls `coarsen_level` with only the four
-snapshotted parameters. It does not thread `sparsity_strategy`,
-`sparsity_seed`, `compressor`, `executor`, or `cross_level_storage` — so
-a refreshed level is re-coarsened with the defaults for those, and a
-pyramid that needs cross-level links rebuilt wants a full `build_pyramid`
-instead.
+The store records *what* each level is, not *how* it was asked for. So
+`sparsity_strategy`, `sparsity_seed`, `compressor` and `executor` are
+parameters of `rebuild_pyramid_from_level` — pass the ones the pyramid was
+built with, or the refresh uses the defaults (`random` selection, no
+compression, serial):
+
+```python
+rebuild_pyramid_from_level(
+    root, source_level=0,
+    sparsity_strategy="length",   # what build_pyramid was given
+    compressor="zstd",            # level codecs are fixed at creation
+    coarsen_factors={1: 8},       # required for skeleton levels
+)
+```
+
+Cross-level links are still not rebuilt; a pyramid that needs them wants a
+full `build_pyramid`.
 :::
 
 ## See also

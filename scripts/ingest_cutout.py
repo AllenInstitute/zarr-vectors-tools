@@ -10,7 +10,7 @@ Subcommands:
 
 The ingest entry points are imported import-location-agnostically, so the
 exact same script runs against the pre-migration (zarr_vectors.ingest) and
-post-migration (zarr_vectors_tools.ingest) module locations.
+post-migration (zarr_vectors_tools.convert.ingest) module locations.
 """
 from __future__ import annotations
 
@@ -24,15 +24,21 @@ import sys
 def _imports():
     """Import the ingest API from whichever location currently provides it."""
     try:
-        from zarr_vectors_tools.ingest.precomputed_skeletons import (  # type: ignore
-            InMemoryFragsReader, PrecomputedFragsReader, SkeletonInfo,
-            enumerate_frag_keys, run_ingest,
+        from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (  # type: ignore
+            InMemoryFragsReader,
+            PrecomputedFragsReader,
+            SkeletonInfo,
+            enumerate_frag_keys,
+            run_ingest,
         )
-        src = "zarr_vectors_tools.ingest"
+        src = "zarr_vectors_tools.convert.ingest"
     except ImportError:
         from zarr_vectors.ingest.precomputed_skeletons import (  # type: ignore
-            InMemoryFragsReader, PrecomputedFragsReader, SkeletonInfo,
-            enumerate_frag_keys, run_ingest,
+            InMemoryFragsReader,
+            PrecomputedFragsReader,
+            SkeletonInfo,
+            enumerate_frag_keys,
+            run_ingest,
         )
         src = "zarr_vectors.ingest"
     return dict(

@@ -15,12 +15,12 @@ import pytest
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import read_points
 
-from zarr_vectors_tools.ingest.attach import (
+from zarr_vectors_tools.convert.ingest.attach import (
     DEFAULT_KEY_ATTRIBUTE,
     attach_attributes,
     hash_keys,
 )
-from zarr_vectors_tools.ingest.cell_table import attach_table, ingest_table
+from zarr_vectors_tools.convert.ingest.cell_table import attach_table, ingest_table
 
 
 def B_open(store):
@@ -237,7 +237,7 @@ class TestAttachTable:
         self, tmp_path: Path, keyed_store
     ) -> None:
         anndata = pytest.importorskip("anndata")
-        from zarr_vectors_tools.export.h5ad import export_h5ad
+        from zarr_vectors_tools.convert.export.h5ad import export_h5ad
 
         store, labels, _ = keyed_store
         sexes = np.where(np.arange(60) % 2 == 0, "M", "F")
@@ -375,8 +375,8 @@ class TestAttachH5AD:
 
     def test_stages_genes_and_obs(self, tmp_path: Path, keyed_store) -> None:
         anndata = pytest.importorskip("anndata")
-        from zarr_vectors_tools.export.h5ad import export_h5ad
-        from zarr_vectors_tools.ingest.h5ad import attach_h5ad
+        from zarr_vectors_tools.convert.export.h5ad import export_h5ad
+        from zarr_vectors_tools.convert.ingest.h5ad import attach_h5ad
 
         store, labels, _ = keyed_store
         rng = np.random.default_rng(11)
@@ -434,7 +434,7 @@ class TestAttachH5AD:
     def test_sparse_expression(self, tmp_path: Path, keyed_store) -> None:
         anndata = pytest.importorskip("anndata")
         sparse = pytest.importorskip("scipy.sparse")
-        from zarr_vectors_tools.ingest.h5ad import attach_h5ad
+        from zarr_vectors_tools.convert.ingest.h5ad import attach_h5ad
 
         store, labels, _ = keyed_store
         rng = np.random.default_rng(2)
@@ -460,7 +460,7 @@ class TestAttachH5AD:
 
     def test_requires_something_to_attach(self, tmp_path: Path, keyed_store) -> None:
         pytest.importorskip("anndata")
-        from zarr_vectors_tools.ingest.h5ad import attach_h5ad
+        from zarr_vectors_tools.convert.ingest.h5ad import attach_h5ad
 
         store, _, _ = keyed_store
         source = tmp_path / "missing.h5ad"
@@ -470,7 +470,7 @@ class TestAttachH5AD:
     def test_h5ad_ingest_stores_a_join_key(self, tmp_path: Path) -> None:
         """A store built from an .h5ad can itself be attached onto."""
         anndata = pytest.importorskip("anndata")
-        from zarr_vectors_tools.ingest.h5ad import ingest_h5ad
+        from zarr_vectors_tools.convert.ingest.h5ad import ingest_h5ad
 
         labels = labels_for(30)
         adata = anndata.AnnData(

@@ -5,10 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.types.meshes import write_mesh
-from zarr_vectors_tools.algorithms import compute_mesh_summary
 
+from zarr_vectors_tools.algorithms import compute_mesh_summary
 
 # ---------------------------------------------------------------------
 # Hand-built reference shapes
@@ -162,3 +161,48 @@ class TestPerObject:
         assert per_obj[0]["vertex_count"] == result["vertex_count"]
         assert abs(per_obj[0]["surface_area"] - result["surface_area"]) < 1e-5
         assert abs(per_obj[0]["volume"] - result["volume"]) < 1e-5
+
+
+class TestPerObjectSharedChunk:
+    """Two objects in ONE chunk — the case that used to be unrepresentable.
+
+    A face's stored corner indices address the chunk's whole vertex buffer,
+    not one fragment's slice of it, and the per-fragment link groups do not
+    line up with the vertex fragments either.  Reading them as if both held
+    meant the second object in a chunk reported nothing while the first was
+    credited with the entire chunk's surface.  A store whose objects each
+    own a chunk (the case above) hides both mistakes.
+    """
+
+    def _two_tetrahedra_in_one_chunk(self):
+        v_a, f_a = _tetrahedron()
+        v_b = v_a + np.array([2.0, 0.0, 0.0], dtype=np.float32)
+        v = np.concatenate([v_a, v_b], axis=0)
+        f = np.concatenate([f_a, f_a + 4], axis=0)
+        object_ids = np.array([0, 0, 0, 0, 1, 1, 1, 1], dtype=np.int64)
+        return v, f, object_ids
+
+    def test_each_object_gets_its_own_geometry(self, tmp_path: Path) -> None:
+        v, f, oids = self._two_tetrahedra_in_one_chunk()
+        store = tmp_path / "shared_chunk.zv"
+        write_mesh(
+            str(store), v, f, chunk_shape=(10.0, 10.0, 10.0), object_ids=oids,
+        )
+        result = compute_mesh_summary(store, per_object=True)
+        per_obj = result["per_object"]
+
+        assert len(per_obj) == 2
+        for entry in per_obj:
+            assert entry["face_count"] == 4, (
+                "each tetrahedron owns four faces; a zero here means the "
+                "chunk's faces were all credited to one object"
+            )
+            assert entry["vertex_count"] == 4
+            assert entry["surface_area"] > 0.0
+
+        assert abs(
+            sum(e["surface_area"] for e in per_obj) - result["surface_area"]
+        ) < 1e-6
+        assert (
+            sum(e["face_count"] for e in per_obj) == result["face_count"]
+        )

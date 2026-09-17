@@ -13,12 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.building import chunk_local_to_global_offsets, get_resolution_level, open_store
 from zarr_vectors.types.points import write_points
+
 from zarr_vectors_tools.algorithms._chunk_neighbours import neighbouring_chunk_keys
 from zarr_vectors_tools.algorithms._links import read_cross_links
-
 
 # ---------------------------------------------------------------------
 # _chunk_neighbours

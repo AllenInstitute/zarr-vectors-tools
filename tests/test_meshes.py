@@ -6,11 +6,11 @@ import struct
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.exceptions import IngestError
-from zarr_vectors_tools.ingest.obj import ingest_obj
-from zarr_vectors_tools.ingest.stl import ingest_stl
-from zarr_vectors_tools.export.obj import export_obj
+
+from zarr_vectors_tools.convert.export.obj import export_obj
+from zarr_vectors_tools.convert.ingest.obj import ingest_obj
+from zarr_vectors_tools.convert.ingest.stl import ingest_stl
 
 
 class TestOBJIngest:

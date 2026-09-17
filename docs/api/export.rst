@@ -7,7 +7,7 @@ writes a single file in the target format.
 CSV / XYZ point clouds
 ----------------------
 
-.. automodule:: zarr_vectors_tools.export.csv_points
+.. automodule:: zarr_vectors_tools.convert.export.csv_points
    :members:
    :undoc-members:
    :show-inheritance:
@@ -15,7 +15,7 @@ CSV / XYZ point clouds
 PLY (points)
 ------------
 
-.. automodule:: zarr_vectors_tools.export.ply
+.. automodule:: zarr_vectors_tools.convert.export.ply
    :members:
    :undoc-members:
    :show-inheritance:
@@ -23,7 +23,7 @@ PLY (points)
 TrackVis TRK
 ------------
 
-.. automodule:: zarr_vectors_tools.export.trk
+.. automodule:: zarr_vectors_tools.convert.export.trk
    :members:
    :undoc-members:
    :show-inheritance:
@@ -31,7 +31,7 @@ TrackVis TRK
 TRX
 ---
 
-.. automodule:: zarr_vectors_tools.export.trx
+.. automodule:: zarr_vectors_tools.convert.export.trx
    :members:
    :undoc-members:
    :show-inheritance:
@@ -39,7 +39,7 @@ TRX
 SWC
 ---
 
-.. automodule:: zarr_vectors_tools.export.swc
+.. automodule:: zarr_vectors_tools.convert.export.swc
    :members:
    :undoc-members:
    :show-inheritance:
@@ -47,7 +47,23 @@ SWC
 Wavefront OBJ
 -------------
 
-.. automodule:: zarr_vectors_tools.export.obj
+.. automodule:: zarr_vectors_tools.convert.export.obj
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+GIFTI (cortical surfaces)
+-------------------------
+
+.. automodule:: zarr_vectors_tools.convert.export.gifti
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Neuroglancer precomputed (skeletons, meshes)
+--------------------------------------------
+
+.. automodule:: zarr_vectors_tools.convert.export.precomputed
    :members:
    :undoc-members:
    :show-inheritance:

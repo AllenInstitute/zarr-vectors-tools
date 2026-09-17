@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from zarr_vectors_tools.convert.ingest.obj import ingest_obj
 from zarr_vectors_tools.headers.registry import HeaderRegistry
-from zarr_vectors_tools.ingest.obj import ingest_obj
 
 
 class TestOBJAutoObjectID:

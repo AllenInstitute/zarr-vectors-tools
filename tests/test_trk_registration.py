@@ -28,7 +28,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -36,7 +35,10 @@ from zarr_vectors.building import (
     read_chunk_vertices,
 )
 
-from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
+
+# Each test ingests a real TRK end to end.
+pytestmark = pytest.mark.slow
 
 
 def _write_radiological_trk(path, streamlines_voxmm, dim=100, vs=1.0):

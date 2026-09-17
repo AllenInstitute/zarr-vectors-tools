@@ -15,59 +15,14 @@ Both can be composed: simplify first, then subsample.
 
 from __future__ import annotations
 
-from zarr_vectors.building import rebuild_presence
-
 import pickle
-import shutil
-import tempfile
-from contextlib import nullcontext
 from collections import defaultdict
-from pathlib import Path
+from contextlib import nullcontext
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
-
-def _group_labels_for(src_group, n_objects: int) -> npt.NDArray[np.int64]:
-    """One group id per object, for the ``"group"`` sparsity strategy.
-
-    Objects in no group get ``-1`` and form their own stratum — thinned
-    at the same rate as everything else, which is what a store holding a
-    whole-brain tractogram *and* a labelled atlas wants: the unlabelled
-    bulk coarsens normally while every named bundle survives.
-
-    An object in more than one group is assigned to the highest-numbered
-    one.  Stratification needs a partition and groups are not one; picking
-    a rule and saying so beats sampling the same object twice.
-    """
-    from zarr_vectors.building import read_all_groupings
-
-    labels = np.full(int(n_objects), -1, dtype=np.int64)
-    try:
-        groupings = list(read_all_groupings(src_group))
-    except Exception:  # noqa: BLE001 - a level with no taxonomy at all
-        groupings = []
-    if not groupings:
-        raise ValueError(
-            "sparsity_strategy='group' needs the source level to have object "
-            "groups, and this one has none. Build the taxonomy first (see "
-            "zarr_vectors_tools.compose.derive_groups), or use a different "
-            "strategy."
-        )
-    for gid, members in enumerate(groupings):
-        # A contiguous group arrives as a range and can be a billion long;
-        # slice it rather than materialising it.
-        if isinstance(members, range):
-            lo = max(0, int(members.start))
-            hi = min(int(n_objects), int(members.stop))
-            if hi > lo:
-                labels[lo:hi] = gid
-            continue
-        ids = np.fromiter((int(o) for o in members), dtype=np.int64)
-        if len(ids):
-            labels[ids[(ids >= 0) & (ids < n_objects)]] = gid
-    return labels
+from zarr_vectors.building import rebuild_presence
 
 
 def simplify_polyline(
@@ -372,7 +327,6 @@ def coarsen_polylines(
         - ``simplification_ratio``: vertex reduction from DP
         - ``subsampling_ratio``: polyline reduction from subsampling
     """
-    n_input = len(polylines)
     v_input = sum(len(p) for p in polylines)
     current = polylines
 
@@ -439,6 +393,123 @@ def coarsen_polylines(
 #   alone cannot supply) is read straight off the source link.
 
 
+def _read_polyline_children(
+    src,
+    child_ccs: list[tuple[int, ...]],
+    *,
+    ndim: int,
+    attr_names: list[str],
+    attr_dtypes: dict[str, Any],
+    attr_ncols: dict[str, int],
+    ccl_cells: list,
+    ccl_segments: list | None = None,
+    link_spec: dict | None = None,
+) -> tuple[list[tuple], list[list]]:
+    """One prefetch for everything a target chunk's plan reads from the source.
+
+    Returns ``(children, cell_records)``: ``children`` holds ``(scc, vgroups,
+    segs, attr_cells)`` for every child chunk with vertices -- ``segs`` is the
+    per-fragment ``segment_id`` column or None, ``attr_cells`` maps each
+    per-vertex attribute to its per-fragment groups or None -- and
+    ``cell_records`` holds the decoded records of each entry of ``ccl_cells``,
+    in order, ``[]`` where the cell could not be read.
+
+    Every read here used to resolve its array node -- a ``zarr.json`` read --
+    afresh, and a link-cell read did so several times over: on a 100k-
+    streamline store the 21k cell reads of one pyramid level opened 400k
+    files and took 300 of the level's 500 seconds.  ``cached_nodes`` resolves
+    each node once per task and ``batched_reads`` fetches every cell the plan
+    names in one pass.  The plan covers the children's vertices, fragment
+    index, segment ids and per-vertex attributes, plus exactly the link
+    cells handed to this task.
+
+    Those cells arrive with the index of their offsets array
+    (``ccl_segments``, into ``link_spec`` from
+    :func:`zarr_vectors_tools.algorithms._links.link_cell_reads`), so they
+    are fetched and decoded with no per-task segment enumeration and no
+    per-cell metadata lookup.  ``read_links_for_tuple`` re-resolved the
+    family policy, the level scales (re-opening the root group each time)
+    and the presence manifest for every cell, and the plan used to read
+    every offsets array's metadata to prefetch cells that were mostly never
+    decoded -- on a 20k-streamline pyramid that was most of its ``open()``
+    calls.  Without ``link_spec`` each cell falls back to
+    ``read_links_for_tuple``.
+    """
+    from zarr_vectors.building import (
+        read_chunk_attributes,
+        read_chunk_fragment_attributes,
+        read_chunk_vertices,
+        read_links_for_tuple,
+    )
+    from zarr_vectors.constants import (
+        FRAGMENT_ATTRIBUTES,
+        VERTEX_ATTRIBUTES,
+        VERTEX_FRAGMENTS,
+        VERTICES,
+    )
+    from zarr_vectors.exceptions import ArrayError
+
+    from zarr_vectors_tools.algorithms._links import (
+        chunk_key_str,
+        link_cell_prefetch_plan,
+        prune_prefetch_plan,
+        read_link_cell_records,
+    )
+
+    child_keys = [chunk_key_str(c) for c in child_ccs]
+    plan: list[tuple[str, list[str]]] = [
+        (VERTICES, child_keys),
+        (VERTEX_FRAGMENTS, child_keys),
+        (f"{FRAGMENT_ATTRIBUTES}/segment_id", child_keys),
+        *((f"{VERTEX_ATTRIBUTES}/{name}", child_keys) for name in attr_names),
+    ]
+    use_spec = link_spec is not None and ccl_segments is not None
+    children: list[tuple] = []
+    cell_records: list[list] = []
+    with src.cached_nodes():
+        # Only child cells that exist: on a local filesystem each absent cell
+        # would cost a failed open().  The link cells need no pruning -- the
+        # coordinator listed them.
+        plan = prune_prefetch_plan(src, plan)
+        if use_spec:
+            plan.extend(link_cell_prefetch_plan(ccl_cells, ccl_segments, link_spec))
+        with src.batched_reads(plan):
+            for scc in child_ccs:
+                try:
+                    vgroups = read_chunk_vertices(src, scc, dtype=np.float32, ndim=ndim)
+                except ArrayError:
+                    continue
+                if not vgroups:
+                    continue
+                try:
+                    segs = read_chunk_fragment_attributes(
+                        src, "segment_id", scc, dtype=np.uint64,
+                    )
+                except ArrayError:
+                    segs = None
+                attr_cells: dict[str, Any] = {}
+                for name in attr_names:
+                    try:
+                        attr_cells[name] = read_chunk_attributes(
+                            src, name, scc,
+                            dtype=attr_dtypes.get(name, np.float32),
+                            ncols=int(attr_ncols.get(name, 1)),
+                        )
+                    except ArrayError:
+                        attr_cells[name] = None
+                children.append((scc, vgroups, segs, attr_cells))
+            for i, cell in enumerate(ccl_cells):
+                try:
+                    if use_spec:
+                        recs = read_link_cell_records(src, cell, ccl_segments[i], link_spec)
+                    else:
+                        recs = read_links_for_tuple(src, cell, delta=0)
+                except Exception:
+                    recs = []
+                cell_records.append(recs)
+    return children, cell_records
+
+
 def _build_local_polyline_plan(
     src,
     tcc: tuple[int, ...],
@@ -450,6 +521,8 @@ def _build_local_polyline_plan(
     attr_names: list[str] | None = None,
     attr_dtypes: dict[str, Any] | None = None,
     attr_ncols: dict[str, int] | None = None,
+    ccl_segments: list | None = None,
+    link_spec: dict | None = None,
 ) -> tuple[list[dict], dict, dict]:
     """Build ONE target chunk's coarsen plan by reading only its source children.
 
@@ -475,14 +548,6 @@ def _build_local_polyline_plan(
     """
     from itertools import product
 
-    from zarr_vectors.building import (
-        read_chunk_attributes,
-        read_chunk_fragment_attributes,
-        read_chunk_vertices,
-        read_links_for_tuple,
-    )
-    from zarr_vectors.exceptions import ArrayError
-
     attr_names = list(attr_names or [])
     attr_dtypes = attr_dtypes or {}
     attr_ncols = attr_ncols or {}
@@ -493,22 +558,17 @@ def _build_local_polyline_plan(
         for d in product(*[range(scale[a]) for a in range(ndim)])
     ]
 
+    children, cell_records = _read_polyline_children(
+        src, child_ccs, ndim=ndim, attr_names=attr_names, attr_dtypes=attr_dtypes,
+        attr_ncols=attr_ncols, ccl_cells=list(ccl_cells or ()),
+        ccl_segments=ccl_segments, link_spec=link_spec,
+    )
+
     vcache: dict = {}
     acache: dict = {name: {} for name in attr_names}
     fragoid: dict = {}
     child_ranges: dict = {}  # scc -> (starts, ends, fidxs) for local->fragment resolve
-    for scc in child_ccs:
-        try:
-            vgroups = read_chunk_vertices(src, scc, dtype=np.float32, ndim=ndim)
-        except ArrayError:
-            continue
-        if not vgroups:
-            continue
-        try:
-            segs = read_chunk_fragment_attributes(src, "segment_id", scc, dtype=np.uint64)
-        except ArrayError:
-            segs = None
-
+    for scc, vgroups, segs, attr_cells in children:
         starts = []
         st = 0
         kept_fidx: list[int] = []
@@ -529,14 +589,7 @@ def _build_local_polyline_plan(
         # fragment index the vertices use (read_chunk_attributes aligns 1:1).
         if kept_fidx and attr_names:
             for name in attr_names:
-                try:
-                    ag = read_chunk_attributes(
-                        src, name, scc,
-                        dtype=attr_dtypes.get(name, np.float32),
-                        ncols=int(attr_ncols.get(name, 1)),
-                    )
-                except ArrayError:
-                    ag = None
+                ag = attr_cells.get(name)
                 if ag is not None:
                     for fidx in kept_fidx:
                         if fidx < len(ag):
@@ -581,12 +634,9 @@ def _build_local_polyline_plan(
     cross_out: dict = {}  # member -> (partner tcc, link_key) its LAST vertex exits via
     cross_in: dict = {}   # member -> (partner tcc, link_key) its FIRST vertex entered via
     # ``ccl_cells`` are the source cross-chunk-link cells touching this target's
-    # children (enumerated once by the coordinator and bucketed per target).
-    for cell in (ccl_cells or ()):
-        try:
-            recs = read_links_for_tuple(src, cell, delta=0)
-        except Exception:
-            continue
+    # children (enumerated once by the coordinator and bucketed per target);
+    # their records were read above, one list per cell.
+    for recs in cell_records:
         for rec in recs:
             if len(rec) != 2:
                 continue
@@ -713,12 +763,19 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         src, tcc, scale=scale, ndim=ndim, keep_mask=keep_mask,
         ccl_cells=payload.get("ccl_cells"),
         attr_names=attr_names, attr_dtypes=attr_dtypes, attr_ncols=attr_ncols,
+        ccl_segments=payload.get("ccl_segments"),
+        link_spec=shared.get("link_spec"),
     )
     input_fragments = int(len(vcache))
     input_vertices = int(sum(len(v) for v in vcache.values()))
     input_objects = int(len({g["oid"] for g in groups}))
 
-    pieces: list[tuple[int, npt.NDArray]] = []
+    # (oid, positions, head source chunk, head source fragment index).  The
+    # head member is the run's earliest fragment in WALK order (the chain is
+    # built predecessor -> successor), so its position in the object's source
+    # manifest is what orders the runs along the streamline -- see
+    # ``_reduce_polyline_object_index_shard``.
+    pieces: list[tuple[int, npt.NDArray, tuple[int, ...], int]] = []
     # Per-vertex attribute pieces, aligned 1:1 with ``pieces`` (one array per
     # surviving run, reduced by the same keep-mask as the positions).
     attr_pieces: dict[str, list[npt.NDArray]] = {name: [] for name in attr_names}
@@ -759,7 +816,11 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
             sc_rows.append((*ccA, viA, *ccB, viB, 0, local_last))
             partners.add(g["tail_partner"])
 
-        pieces.append((g["oid"], rpos))
+        _head_cc, _head_fidx = g["members"][0]
+        pieces.append((
+            g["oid"], rpos,
+            tuple(int(x) for x in _head_cc), int(_head_fidx),
+        ))
         # Reduce each attribute with the identical keep-mask.  A member missing
         # a cell (unreadable attr chunk) falls back to zeros so attr_pieces stays
         # 1:1 with pieces — the write path requires that alignment.
@@ -777,7 +838,7 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         chunk_offset += len(rpos)
         total_out_vertices += len(rpos)
 
-    recs: list[tuple[int, int]] = []
+    recs: list[tuple[int, int, tuple[int, ...], int]] = []
     if pieces:
         # record_presence=False: these run in parallel worker PROCESSES, and
         # nonempty_chunks is an array-wide attribute, so stamping it here would
@@ -800,23 +861,27 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
                 level_group, name, tcc, attr_pieces[name],
                 dtype=attr_dtypes.get(name, np.float32), record_presence=False,
             )
-        recs = [(int(p[0]), fidx) for fidx, p in enumerate(pieces)]
+        recs = [
+            (int(p[0]), fidx, p[2], p[3]) for fidx, p in enumerate(pieces)
+        ]
 
-    # Spill object-index refs partitioned by OID shard (Phase C reduces these
-    # without ever gathering a whole-level {oid: manifest} structure).
-    oid_shards = int(shared.get("oid_reduce_shards", 1) or 1)
-    oid_tmp_dir = str(shared.get("oid_reduce_tmp_dir", ""))
-    shard_rows: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for oid, fidx in recs:
-        shard_rows[oid % oid_shards].append((oid, fidx))
-    shard_files: list[tuple[int, str]] = []
-    if oid_tmp_dir and shard_rows:
-        tcc_tag = ".".join(str(int(x)) for x in tcc)
-        for shard, rows in shard_rows.items():
-            arr = np.asarray(rows, dtype=np.int64).reshape(-1, 2)
-            path = Path(oid_tmp_dir) / f"{tcc_tag}.s{int(shard)}.npy"
-            np.save(path, arr, allow_pickle=False)
-            shard_files.append((int(shard), str(path)))
+    # Object-index rows travel back inline, one compact int64 array per
+    # target chunk: (oid, fragment_idx, *head source chunk, head fragment_idx).
+    # They used to be spilled to one .npy per (target chunk, oid shard) -- 64
+    # to 4096 shards -- and read back file by file in Phase C, so a
+    # 5000-chunk level put a million tiny files through the filesystem on
+    # its way to the object index (measured: the spill and its rmtree were
+    # most of a level's serial time on NTFS).  The rows are O(fragments),
+    # the same order as the anchor rows below -- a streamline has one more
+    # fragment than it has crossings -- and at 48 bytes each they are a
+    # rounding error next to the vertices.
+    oid_rows = (
+        np.asarray(
+            [(oid, fidx, *head_cc, head_fidx) for oid, fidx, head_cc, head_fidx in recs],
+            dtype=np.int64,
+        ).reshape(-1, 3 + ndim)
+        if recs else None
+    )
 
     # Cross-target anchor rows travel back inline in the result dict rather
     # than through a per-chunk .npy sidecar: the coordinator forwards them
@@ -835,10 +900,96 @@ def _coarsen_polyline_target_chunk(payload: dict, shared: dict | None = None) ->
         "input_vertices": input_vertices,
         "input_objects": input_objects,
         "fragment_count": int(len(recs)),
-        "oid_shards": shard_files,
+        "oid_rows": oid_rows,
         "anchors": anchors,
         "partners": [list(p) for p in partners],
         "vertex_count": int(total_out_vertices),
+    }
+
+
+def _reduce_polyline_object_index_shard(
+    payload: dict, shared: dict | None = None,
+) -> dict:
+    """Reduce one OID shard's chunk spills into manifest blobs, in WALK ORDER.
+
+    The skeleton reducer this replaces
+    (:func:`...strategies.skeletons._reduce_object_index_shard`) sorts each
+    object's fragments by ``(chunk, fragment_index)``.  For a skeleton that is
+    only a deterministic tie-break -- its pieces are independently rooted trees
+    joined by explicit links, so their order carries nothing.  For a polyline
+    the manifest order **is** the path: every reader concatenates the fragments
+    in manifest order, so a chunk-sorted manifest hands back a streamline whose
+    segments are shuffled into chunk-coordinate order.  A tract running from
+    high x to low x came back reversed in pieces (measured: level 0 walked
+    25 -> 5 while level 1 walked 9 -> 5, 19 -> 10, 25 -> 20), which silently
+    corrupts every tangent, length and endpoint computed above level 0.
+
+    Each row carries the run's head SOURCE fragment.  Its position in the
+    object's source manifest is the run's position along the path, so the
+    correct order is recovered by reading only this shard's objects' manifests
+    -- ``read_object_manifests(ids=...)`` is one coordinate selection, never
+    the whole level's O(objects) decode.
+
+    ``payload["rows"]`` is one int64 array for the whole shard, ``(oid,
+    fragment_idx, *target chunk, *head source chunk, head fragment_idx)``,
+    cut from the Phase A results by the coordinator so every row of an object
+    is in the same shard -- see
+    :func:`zarr_vectors_tools.multiresolution.object_index.shard_rows_by_object`.
+    """
+    from zarr_vectors.building import (
+        encode_object_manifest_blocks,
+        get_resolution_level,
+        open_store,
+        read_object_manifests,
+    )
+
+    shared = shared or {}
+    sid_ndim = int(shared["sid_ndim"])
+    width = 3 + 2 * sid_ndim
+
+    rows = np.asarray(
+        payload.get("rows", np.zeros((0, width), np.int64)), dtype=np.int64,
+    ).reshape(-1, width)
+    rows_by_oid: dict[int, list[tuple[tuple[int, ...], int, tuple[int, ...], int]]]
+    rows_by_oid = defaultdict(list)
+    for row in rows.tolist():
+        rows_by_oid[row[0]].append((
+            tuple(row[2:2 + sid_ndim]),
+            row[1],
+            tuple(row[2 + sid_ndim:2 + 2 * sid_ndim]),
+            row[2 + 2 * sid_ndim],
+        ))
+
+    oids = np.asarray(sorted(rows_by_oid), dtype=np.int64)
+    walk_pos: dict[int, dict[tuple[tuple[int, ...], int], int]] = {}
+    if len(oids):
+        src = get_resolution_level(
+            open_store(str(shared["store_path"]), mode="r"),
+            int(shared["source_level"]),
+        )
+        for oid, manifest in read_object_manifests(src, ids=oids.tolist()).items():
+            walk_pos[int(oid)] = {
+                (tuple(int(c) for c in cc), int(f)): i
+                for i, (cc, f) in enumerate(manifest)
+            }
+
+    blobs: list[bytes] = []
+    for oid in oids.tolist():
+        positions = walk_pos.get(int(oid), {})
+        entries = rows_by_oid[int(oid)]
+        # Runs whose head is missing from the source manifest (which cannot
+        # happen for a store this coarsener accepts) sort last rather than
+        # first, and stay deterministic via the chunk/fragment tie-break.
+        entries.sort(
+            key=lambda r: (positions.get((r[2], r[3]), len(positions)), r[0], r[1])
+        )
+        blobs.append(encode_object_manifest_blocks(
+            [(cc, fidx) for cc, fidx, _h, _hf in entries], sid_ndim=sid_ndim,
+        ))
+
+    return {
+        "oid": oids,
+        "blobs": pickle.dumps(blobs, protocol=pickle.HIGHEST_PROTOCOL),
     }
 
 
@@ -977,47 +1128,69 @@ def coarsen_polyline_level(
     correct after coarsening.
 
     Args: see :func:`zarr_vectors_tools.multiresolution.coarsen.coarsen_level`
-    for the shared parameter semantics.
+    for the shared parameter semantics.  ``simplify_epsilon`` is the explicit
+    Douglas-Peucker tolerance in store coordinate units (``coarsen_level``'s
+    ``rdp_tolerance``); ``None`` derives ``0.5 * min(target_bin_shape)`` when
+    ``coarsen_factor > 1`` and simplifies nothing otherwise.  It is refused
+    in ``decimate`` mode, which has no tolerance.  In ``rdp`` mode the value
+    used, and whether it was explicit or derived, is recorded on the target
+    level (see
+    :func:`zarr_vectors_tools.multiresolution.coarsen.read_coarsening_record`).
     """
-    from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS
     from zarr_vectors.building import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
         VERTEX_ATTRIBUTES,
         VERTICES,
+        LevelMetadata,
         create_attribute_array,
         create_fragment_attribute_array,
-        create_object_attributes_array,
-        create_object_index_array,
-        create_vertices_array,
-        list_chunk_keys,
-        read_all_object_manifests,
-        read_chunk_fragment_attributes,
-        read_object_attributes,
-        write_object_attributes,
-        write_object_manifests,
-    )
-    from zarr_vectors.exceptions import ArrayError
-    from zarr_vectors.building import (
-        LevelMetadata,
         create_links_array,
         create_links_family,
+        create_object_attributes_array,
+        create_object_index_array,
         create_resolution_level,
+        create_vertices_array,
         finalize_links,
         get_level_chunk_shape,
         get_resolution_level,
+        list_chunk_keys,
         open_store,
+        read_all_object_manifests,
+        read_chunk_fragment_attributes,
         read_level_metadata,
+        read_object_attributes,
         read_root_metadata,
+        write_object_attributes,
+        write_object_manifests,
+    )
+    from zarr_vectors.constants import CAP_PRESERVED_OBJECT_IDS
+    from zarr_vectors.exceptions import ArrayError
+
+    from zarr_vectors_tools.multiresolution.coarsen import (
+        _rdp_mode_refusal,
+        _stamp_root_capability,
+        _write_coarsening_record,
+        check_rdp_tolerance,
     )
     from zarr_vectors_tools.multiresolution.constants import (
         CROSS_LINK_TASK_SHARD_AXIS,
     )
-    from zarr_vectors_tools.multiresolution.coarsen import _stamp_root_capability
+    from zarr_vectors_tools.multiresolution.groupings import group_labels_for
+    from zarr_vectors_tools.multiresolution.object_index import shard_rows_by_object
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-    from zarr_vectors_tools.multiresolution.strategies.skeletons import (
-        _reduce_object_index_shard,
-    )
+
+    # An explicit tolerance is checked before the store is opened.  Decimate
+    # mode used to ignore it without a word, which let a caller believe a
+    # stride pyramid had been simplified to a distance.
+    if simplify_epsilon is not None:
+        refusal = _rdp_mode_refusal(coarsen_mode)
+        if refusal is not None:
+            raise ValueError(f"simplify_epsilon does not apply: {refusal}")
+        simplify_epsilon = check_rdp_tolerance(
+            simplify_epsilon, name="simplify_epsilon",
+        )
+    tolerance_source = "explicit" if simplify_epsilon is not None else "derived"
 
     # Per-target-chunk work is dispatched through ``executor``; the default
     # runs serially in-process (mirrors coarsen_skeleton_level's contract).
@@ -1082,8 +1255,20 @@ def coarsen_polyline_level(
     # rather than simplify at a chunk-derived epsilon, so leave the epsilon
     # unset (the worker treats an unset/non-positive epsilon as a no-op) and
     # only derive one when the factor genuinely asks for reduction.
+    #
+    # The tolerance scales with the TARGET BIN, which is the source level's
+    # bin times the factor and therefore compounds down the pyramid, exactly
+    # as ``coarsen_factor`` is documented to.  It used to scale with the
+    # source level's CHUNK, which only grows when chunk_scale_factor does:
+    # with the default scaling every level got the same tolerance, so the
+    # second application removed nothing and ``--coarsen 8,8`` produced a
+    # level 2 that was a copy of level 1 (measured 360 -> 42 -> 42 vertices).
+    #
+    # An explicit tolerance replaces the derivation outright, including at a
+    # factor of 1: the caller asked for a distance, and the factor is then
+    # only the level's bin (its NGFF scale).
     if coarsen_mode == "rdp" and simplify_epsilon is None and coarsen_factor > 1.0:
-        simplify_epsilon = min(src_chunk_shape) * 0.5 * float(coarsen_factor)
+        simplify_epsilon = 0.5 * float(min(target_bin_shape))
     stride = max(1, int(round(coarsen_factor)))
 
     coarsening_method = "polyline_decimate" if coarsen_mode == "decimate" else "polyline_rdp"
@@ -1144,7 +1329,7 @@ def coarsen_polyline_level(
             lengths = manifest_lens if sparsity_strategy == "length" else None
 
         group_labels = (
-            _group_labels_for(src, n_src)
+            group_labels_for(src, n_src)
             if sparsity_strategy == "group" else None
         )
         kept = apply_sparsity(
@@ -1251,16 +1436,6 @@ def coarsen_polyline_level(
         level_group, delta=0, link_width=2, sid_ndim=ndim, directed=True,
     )
 
-    # Scale shard count with the dense OID space instead of a fixed 64: a
-    # level with millions of surviving objects (e.g. a low-sparsity level
-    # right after a high-sparsity one keeps most of its huge parent
-    # population) needs more, smaller shards to keep each
-    # _reduce_object_index_shard call's working set bounded — ~20k
-    # objects/shard, capped so trivially small levels don't pay excess
-    # file-handle overhead for no benefit.
-    oid_reduce_shards = max(64, min(4096, -(-n_src // 20_000)))
-    oid_reduce_tmp_dir = tempfile.mkdtemp(prefix=f"polyline_oid_reduce_l{target_level}_")
-
     sharedA = {
         "store_path": str(store_path),
         "source_level": int(source_level),
@@ -1271,8 +1446,6 @@ def coarsen_polyline_level(
         "coarsen_mode": coarsen_mode,
         "stride": int(stride),
         "simplify_epsilon": simplify_epsilon,
-        "oid_reduce_shards": int(oid_reduce_shards),
-        "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
         "attr_names": vattr_names,
         "attr_dtypes": vattr_dtypes,
         "attr_ncols": vattr_ncols,
@@ -1281,10 +1454,17 @@ def coarsen_polyline_level(
     # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
     # a per-target-per-child cell scan (O(target_chunks × children × cells))
     # with a single O(cells) pass; workers then read only their bucket's cells.
-    from zarr_vectors_tools.algorithms._links import list_link_cells
+    #
+    # The same pass records which offsets array each cell lives in; the
+    # arrays' decode parameters travel once in ``sharedA``, so a worker reads
+    # its cells without re-deriving any of that per task or per cell.
+    from zarr_vectors_tools.algorithms._links import link_cell_reads
 
+    link_cells, link_segments, link_spec = link_cell_reads(src, delta=0)
+    sharedA["link_spec"] = link_spec
     cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
-    for cell in list_link_cells(src, delta=0):
+    segs_by_target: dict[tuple[int, ...], list] = defaultdict(list)
+    for cell, seg in zip(link_cells, link_segments):
         seen_t: set = set()
         for c in cell:
             t = tuple(int(c[a]) // scale[a] for a in range(ndim))
@@ -1292,67 +1472,87 @@ def coarsen_polyline_level(
                 continue
             seen_t.add(t)
             cells_by_target[t].append(cell)
+            segs_by_target[t].append(seg)
     payloadsA = [
-        {"tcc": list(tcc), "ccl_cells": cells_by_target.get(tuple(tcc), [])}
+        {
+            "tcc": list(tcc),
+            "ccl_cells": cells_by_target.get(tuple(tcc), []),
+            "ccl_segments": segs_by_target.get(tuple(tcc), []),
+        }
         for tcc in target_chunks
     ]
 
-    manifest_blobs: list[bytes] = []
     empty_blob = b"\x00\x00\x00\x00"
-    try:
-        resultsA = list(executor(_coarsen_polyline_target_chunk, payloadsA, sharedA))
+    resultsA = list(executor(_coarsen_polyline_target_chunk, payloadsA, sharedA))
 
-        total_out_vertices = 0
-        total_fragments = 0
-        sidecar_arrays: dict[tuple[int, ...], np.ndarray] = {}
-        shard_entries: dict[int, list[dict[str, Any]]] = defaultdict(list)
-        cross_target_pairs: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
-        for res in resultsA:
-            total_fragments += int(res["fragment_count"])
-            total_out_vertices += int(res["vertex_count"])
-            tcc = tuple(int(x) for x in res["tcc"])
-            anchors = res.get("anchors")
-            if anchors is not None and len(anchors):
-                sidecar_arrays[tcc] = anchors
-            for shard, path in res.get("oid_shards", []):
-                shard_entries[int(shard)].append({"tcc": list(tcc), "path": str(path)})
-            # Cross-target anchors report their OTHER target chunk directly —
-            # a source-level transition can land in ANY other chunk, not just
-            # a face neighbor (split_polyline_at_boundaries does not
-            # decompose multi-axis crossings into single-axis hops) — so
-            # Phase B's shard pairs come from what Phase A actually observed,
-            # not a grid-adjacency scan.
-            for p in res.get("partners", []):
-                partner = tuple(int(x) for x in p)
-                cross_target_pairs.add(tuple(sorted((tcc, partner))))
-        resultsA = []
+    total_out_vertices = 0
+    total_fragments = 0
+    sidecar_arrays: dict[tuple[int, ...], np.ndarray] = {}
+    # Object-index rows from every target chunk, each block prefixed with
+    # the chunk it came from so the reducer can name the fragment.  Gathered
+    # inline like the anchors: the whole level's rows are the same order of
+    # magnitude as the anchor arrays collected alongside them.
+    row_blocks: list[np.ndarray] = []
+    cross_target_pairs: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
+    for res in resultsA:
+        total_fragments += int(res["fragment_count"])
+        total_out_vertices += int(res["vertex_count"])
+        tcc = tuple(int(x) for x in res["tcc"])
+        anchors = res.get("anchors")
+        if anchors is not None and len(anchors):
+            sidecar_arrays[tcc] = anchors
+        rows = res.get("oid_rows")
+        if rows is not None and len(rows):
+            tcc_cols = np.broadcast_to(np.asarray(tcc, dtype=np.int64), (len(rows), ndim))
+            row_blocks.append(
+                np.concatenate([rows[:, :2], tcc_cols, rows[:, 2:]], axis=1),
+            )
+        # Cross-target anchors report their OTHER target chunk directly —
+        # a source-level transition can land in ANY other chunk, not just
+        # a face neighbor (split_polyline_at_boundaries does not
+        # decompose multi-axis crossings into single-axis hops) — so
+        # Phase B's shard pairs come from what Phase A actually observed,
+        # not a grid-adjacency scan.
+        for p in res.get("partners", []):
+            partner = tuple(int(x) for x in p)
+            cross_target_pairs.add(tuple(sorted((tcc, partner))))
+    resultsA = []
 
-        level_meta.vertex_count = int(total_out_vertices)
-        create_resolution_level(root, target_level, level_meta)
+    level_meta.vertex_count = int(total_out_vertices)
+    create_resolution_level(root, target_level, level_meta)
 
-        # --- Phase C: shard-parallel object-index reduce + one-shot commit ---
-        manifest_blobs = [empty_blob] * int(n_src)
-        payloadsC = [
-            {"shard": int(s), "entries": es}
-            for s, es in sorted(shard_entries.items()) if es
-        ]
-        sharedC = {"sid_ndim": int(ndim)}
-        if payloadsC:
-            for rc in executor(_reduce_object_index_shard, payloadsC, sharedC):
-                oids = np.asarray(rc.get("oid", np.zeros((0,), np.int64)), np.int64)
-                blobs = pickle.loads(rc.get("blobs", b"")) if len(oids) else []
-                for i, oid in enumerate(oids.tolist()):
-                    if 0 <= int(oid) < int(n_src):
-                        manifest_blobs[int(oid)] = blobs[i]
-        write_object_manifests(level_group, manifest_blobs)
-        level_group.write_array_meta(OBJECT_INDEX, {
-            "zv_array": "object_index",
-            "num_objects": int(n_src),
-            "sid_ndim": int(ndim),
-            "layout": OBJECT_INDEX_LAYOUT_V1,
-        })
-    finally:
-        shutil.rmtree(oid_reduce_tmp_dir, ignore_errors=True)
+    # --- Phase C: shard-parallel object-index reduce + one-shot commit ---
+    # Shards are contiguous object-id ranges cut from the gathered rows, so
+    # each task owns whole objects and there is no spill directory to
+    # populate, scan and remove.
+    all_rows = (
+        np.concatenate(row_blocks, axis=0) if row_blocks
+        else np.zeros((0, 3 + 2 * ndim), dtype=np.int64)
+    )
+    row_blocks = []
+    manifest_blobs: list[bytes] = [empty_blob] * int(n_src)
+    payloadsC = [{"rows": shard} for shard in shard_rows_by_object(all_rows)]
+    sharedC = {
+        "sid_ndim": int(ndim),
+        "store_path": str(store_path),
+        "source_level": int(source_level),
+    }
+    if payloadsC:
+        for rc in executor(
+            _reduce_polyline_object_index_shard, payloadsC, sharedC,
+        ):
+            oids = np.asarray(rc.get("oid", np.zeros((0,), np.int64)), np.int64)
+            blobs = pickle.loads(rc.get("blobs", b"")) if len(oids) else []
+            for i, oid in enumerate(oids.tolist()):
+                if 0 <= int(oid) < int(n_src):
+                    manifest_blobs[int(oid)] = blobs[i]
+    write_object_manifests(level_group, manifest_blobs)
+    level_group.write_array_meta(OBJECT_INDEX, {
+        "zv_array": "object_index",
+        "num_objects": int(n_src),
+        "sid_ndim": int(ndim),
+        "layout": OBJECT_INDEX_LAYOUT_V1,
+    })
 
     # Carry object attributes forward; "present" = objects with geometry here.
     present_oids = np.flatnonzero(
@@ -1496,6 +1696,19 @@ def coarsen_polyline_level(
 
     _stamp_root_capability(root, CAP_PRESERVED_OBJECT_IDS)
 
+    # Record the tolerance this level was simplified at.  Neither the bin
+    # nor the method tag can say it once it is explicit, and a refresh has
+    # to reproduce it rather than fall back to the derived one.  Recorded
+    # when derived too, so a reader can ask any rdp level the same question.
+    # Written last and from the coordinator: the level's attributes are one
+    # blob shared with every writer above.
+    if coarsen_mode != "decimate":
+        _write_coarsening_record(
+            root, target_level,
+            rdp_tolerance=simplify_epsilon,
+            rdp_tolerance_source=tolerance_source,
+        )
+
     summary = {
         "vertex_count": int(total_out_vertices),
         "object_count": int(len(present_oids)),
@@ -1510,4 +1723,5 @@ def coarsen_polyline_level(
         summary["stride"] = stride
     else:
         summary["simplify_epsilon"] = simplify_epsilon
+        summary["rdp_tolerance_source"] = tolerance_source
     return summary

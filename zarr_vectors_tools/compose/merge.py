@@ -36,6 +36,7 @@ origin renumbers every chunk already written.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -71,9 +72,13 @@ def plan_merge(
 ) -> dict[str, Any]:
     """Everything a merge would do, without doing any of it.
 
-    Reads only metadata, so it is cheap on a store of any size, and it
-    answers the question that actually blocks a merge — does the incoming
+    Answers the question that actually blocks a merge — does the incoming
     geometry fit the target's grid — before a single vertex is written.
+
+    Cheap on a *store* source, which is read through its metadata.  A
+    **file** source is opened the way the merge would open it, which for a
+    format with no header-level object count means parsing it; budget for
+    that rather than assuming this is free on any input.
     """
     import zarr_vectors as zv
 
@@ -108,6 +113,16 @@ def plan_merge(
             "groups": list(info.group_names),
         })
         offset += int(info.object_count or 0)
+
+    # Sources own scratch state -- a staged ingest's temporary directory,
+    # an open memmap -- and planning is the one entry point that used to
+    # walk away without releasing it, so a planning loop over many files
+    # leaked one temp directory per call.
+    for source in opened:
+        try:
+            source.close()
+        except Exception:  # noqa: BLE001 - a source with nothing to release
+            pass
 
     return {
         "target": str(target),
@@ -319,6 +334,7 @@ def _merge_one(
     added = 0
     vertices = 0
     skipped = 0
+    empty = 0
 
     grid_shape, cell_size = allocated_grid(level)
 
@@ -327,6 +343,32 @@ def _merge_one(
     ):
         keep, offenders = _grid_mask(batch.parts, grid_shape, cell_size)
         if not keep.all():
+            if on_out_of_bounds == "expand":
+                # Expansion grows the grid upward only -- the cell origin is
+                # fixed at coordinate 0 by ``floor(p / cell)`` -- so anything
+                # still outside cannot be accommodated.  Dropping it here
+                # would be "skip" behaviour under a flag that promised to
+                # make room.
+                negative = [o for o in offenders if any(c < 0 for c in o)]
+                why = (
+                    "negative cell coordinates, which no expansion can reach: "
+                    "the grid's origin is fixed at coordinate 0"
+                    if negative else
+                    "cells beyond the grid even after expansion"
+                )
+                raise StoreError(
+                    f"{info.label}: {int((~keep).sum())} object(s) in batch "
+                    f"{batch_no} land in {why}.\n"
+                    f"  first offender lands in cell "
+                    f"{(negative or offenders)[0]}\n"
+                    f"  grid          {list(grid_shape)} cells of "
+                    f"{list(cell_size)}\n"
+                    f"  target bounds {_fmt(target_bounds)}\n"
+                    "Transform the source into the target's frame (pass a "
+                    "Source with transform=), rebuild the target over bounds "
+                    "that cover both, or pass on_out_of_bounds='skip' to drop "
+                    "what does not fit."
+                )
             if on_out_of_bounds == "raise":
                 bad = int((~keep).sum())
                 raise StoreError(
@@ -351,10 +393,17 @@ def _merge_one(
                 cell_shape, target_vertex_attrs,
             )
             cursor = 0
+            # A kept object with no vertices writes no geometry, so it must
+            # not claim an attribute row either: ``added`` counted only the
+            # objects written while the columns below were sliced by ``keep``
+            # alone, and append_object_attributes then raised "N values for
+            # N-1 new objects" -- after every batch had already committed.
+            written = keep.copy()
             for i, part in enumerate(batch.parts):
                 length = len(part)
                 start, cursor = cursor, cursor + length
                 if not keep[i] or length == 0:
+                    written[i] = False
                     continue
                 ref = session.add_object(
                     level=0,
@@ -373,8 +422,9 @@ def _merge_one(
                 level, [remap[int(o)] for o in batch.object_ids if int(o) in remap],
             )
 
+        empty += int(np.count_nonzero(keep & ~written))
         for name, column in batch.object_attributes.items():
-            values = np.asarray(column)[keep]
+            values = np.asarray(column)[written]
             if len(values):
                 object_columns.setdefault(name, []).append(values)
 
@@ -622,10 +672,18 @@ def _open_or_create_target(
 
     if hasattr(target, "level") and hasattr(target, "bounds"):
         return target, False
+    exists = Path(str(target)).exists()
     try:
         return zv.open(str(target), mode="r+"), False
-    except Exception:  # noqa: BLE001 - does not exist, or is not a store
-        pass
+    except Exception as exc:  # noqa: BLE001 - absent, or present but unusable
+        if exists:
+            # A store that IS there but will not open (permissions, a
+            # half-written metadata block, a format this build cannot read)
+            # was reported as "does not exist", which sends the caller off to
+            # create=True and a second, equally failing attempt.
+            raise StoreError(
+                f"{target} exists but could not be opened: {exc}"
+            ) from exc
 
     if not create:
         raise StoreError(
@@ -854,15 +912,11 @@ def _refresh_level_metadata(dataset: Any, level: Any, fallback: int) -> int:
     that was already wrong before this merge is corrected rather than
     added to.
     """
-    from zarr_vectors.building import refresh_arrays_present
-    from zarr_vectors.building import update_level_metadata
+    from zarr_vectors.building import refresh_arrays_present, update_level_metadata
 
     total = fallback
     try:
-        from zarr_vectors.building import chunk_local_to_global_offsets
-
-        _offsets, _keys, counted = chunk_local_to_global_offsets(level.store)
-        total = int(counted)
+        total = int(_count_level_vertices(level.store))
     except Exception:  # noqa: BLE001 - fall back to what we added
         pass
     # update_level_metadata takes the LEVEL group, not the root plus an
@@ -879,6 +933,37 @@ def _refresh_level_metadata(dataset: Any, level: Any, fallback: int) -> int:
     return total
 
 
+def _count_level_vertices(level_group: Any) -> int:
+    """Total stored vertices at a level, from the fragment indices.
+
+    ``chunk_local_to_global_offsets`` derives the count by dividing each
+    ``vertices`` blob's byte length by ``ndim * itemsize`` with **ndim
+    hardcoded to 3**, so on a 2-D store it reported two thirds of the truth
+    and stamped that on the level.  The fragment index carries the row count
+    directly, is dimension-independent, and its blobs are a rounding error
+    next to the vertex payloads this used to read in full.
+    """
+    from zarr_vectors.building import list_chunk_keys, read_vertex_fragment_index
+
+    total = 0
+    for chunk in list_chunk_keys(level_group):
+        try:
+            index = read_vertex_fragment_index(level_group, chunk)
+        except Exception:  # noqa: BLE001 - a chunk with no index holds nothing
+            continue
+        rows = 0
+        for f in range(index.num_fragments):
+            if index.is_range(f):
+                start, count = index.range(f)
+                rows = max(rows, int(start) + int(count))
+            else:
+                idx = np.asarray(index.indices(f), dtype=np.int64)
+                if idx.size:
+                    rows = max(rows, int(idx.max()) + 1)
+        total += rows
+    return total
+
+
 def _rebuild_manifests(dataset: Any) -> None:
     """Re-derive every per-chunk presence manifest from what is on disk.
 
@@ -887,8 +972,11 @@ def _rebuild_manifests(dataset: Any) -> None:
     not list leaves ``list_chunk_keys`` under-reporting, and a later read
     driven off it silently skips those cells.
     """
+    from zarr_vectors.building import rebuild_presence
+
     for index in dataset.levels:
-        try:
-            dataset.level(int(index)).store.rebuild_nonempty_manifests()
-        except Exception:  # noqa: BLE001 - older cores lack the method
-            return
+        # ``Group.rebuild_nonempty_manifests`` does not exist -- the call
+        # raised AttributeError on the first level and the except swallowed
+        # it, so this never rebuilt anything.  ``rebuild_presence`` is the
+        # supported spelling, and the one the parallel ingesters use.
+        rebuild_presence(dataset.level(int(index)).store)

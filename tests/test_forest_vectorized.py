@@ -12,7 +12,6 @@ import numpy as np
 
 from zarr_vectors_tools.multiresolution import _forest
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
-    _build_rooted_tree,
     _collapse_to_kept,
     decimate_skeleton,
 )
@@ -29,35 +28,27 @@ def _random_tree(rng, n):
 
 
 def _decimate_keep_reference(parent, edges, stride, forced):
-    """Reproduce decimate_skeleton's keep mask via the scalar tree walk."""
+    """The keep mask ``decimate_skeleton`` itself produces.
+
+    Taken from the function under comparison rather than re-implemented
+    here.  The hand-copy this replaces drifted from the original the moment
+    ``stride <= 1`` changed from "keep anchors only" to the identity, and
+    the drift surfaced as a failure of the *vectorised* twin -- which was
+    correct -- rather than of the stale copy.  Deriving it removes the
+    second place the rule could be written down.
+
+    Positions are irrelevant to the keep decision, so zeros suffice.
+    """
     n = len(parent)
-    _, children, roots = _build_rooted_tree(n, edges)
+    positions = np.zeros((n, 3), dtype=np.float32)
+    result = decimate_skeleton(
+        positions, edges, stride=stride,
+        forced_keep=(
+            np.flatnonzero(forced) if forced is not None else None
+        ),
+    )
     keep = np.zeros(n, dtype=bool)
-    for r in roots:
-        keep[r] = True
-    for v in range(n):
-        nc = len(children.get(v, ()))
-        if nc == 0 or nc >= 2:
-            keep[v] = True
-    if forced is not None:
-        for v in np.flatnonzero(forced):
-            keep[int(v)] = True
-    if stride > 1:
-        anchors = np.flatnonzero(keep).tolist()
-        for a in anchors:
-            for first_child in children.get(a, ()):
-                chain = [a]
-                cur = first_child
-                while True:
-                    chain.append(cur)
-                    if keep[cur]:
-                        break
-                    kids = children.get(cur, ())
-                    if len(kids) != 1:
-                        break
-                    cur = kids[0]
-                for j in range(stride, len(chain) - 1, stride):
-                    keep[chain[j]] = True
+    keep[result["kept_source_indices"]] = True
     return keep
 
 

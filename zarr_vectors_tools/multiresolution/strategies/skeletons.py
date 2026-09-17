@@ -32,25 +32,22 @@ ingest convention is "ignore cross-chunk edges if missing").
 
 from __future__ import annotations
 
-from zarr_vectors.building import rebuild_presence
-
 import pickle
-import shutil
-import tempfile
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-
+from zarr_vectors.building import rebuild_presence
 from zarr_vectors.constants import (
     VERTEX_ATTRIBUTES,
     VERTICES,
 )
-from zarr_vectors_tools.multiresolution.constants import COARSEN_SKELETON
 
+from zarr_vectors_tools.multiresolution.constants import COARSEN_SKELETON
 
 # ===================================================================
 # Pure tree simplification
@@ -265,7 +262,10 @@ def _collapse_to_kept(
             if attr_agg == "max":
                 np.fmax.at(agg, ow, vals)
             elif attr_agg == "min":
-                agg[:] = np.iinfo(data.dtype).max if np.issubdtype(data.dtype, np.integer) else np.inf
+                agg[:] = (
+                    np.iinfo(data.dtype).max
+                    if np.issubdtype(data.dtype, np.integer) else np.inf
+                )
                 np.fmin.at(agg, ow, vals)
             elif attr_agg == "first":
                 agg[new_of_old[kept]] = data[kept]
@@ -305,6 +305,13 @@ def decimate_skeleton(
     reducing at deeper pyramid levels (RDP bottoms out once a skeleton is
     near-minimal).
 
+    ``stride <= 1`` is the IDENTITY: every vertex is kept.  It used to mean
+    "keep anchors only", the most aggressive setting this function has,
+    which is the opposite of what a factor of 1 means everywhere else in the
+    package (``coarsen_level`` documents 1.0 as "no aggregation") and turned
+    a pyramid refresh that could not recover the stride into a level with
+    the interior of every chain deleted.
+
     Same return shape as :func:`simplify_skeleton`.
     """
     positions = np.asarray(positions)
@@ -331,7 +338,10 @@ def decimate_skeleton(
             if 0 <= iv < n:
                 keep[iv] = True
 
-    if stride > 1:
+    if stride <= 1:
+        # The identity, matching every other coarsener's factor of 1.
+        keep[:] = True
+    else:
         anchors = np.flatnonzero(keep).tolist()
         for a in anchors:
             for first_child in children.get(a, ()):
@@ -401,6 +411,129 @@ def _frag_edges(n: int) -> npt.NDArray:
     return np.stack([i, i - 1], axis=1)
 
 
+def _read_skeleton_children(
+    src,
+    child_ccs: list[tuple[int, ...]],
+    *,
+    ndim: int,
+    attr_names: list[str],
+    attr_dtypes: dict[str, np.dtype],
+    ccl_cells: list,
+    ccl_segments: list | None = None,
+    link_spec: dict | None = None,
+) -> tuple[list[tuple], list[list]]:
+    """One prefetch for everything a target chunk's plan reads from the source.
+
+    Returns ``(children, cell_records)``: ``children`` holds ``(scc, vgroups,
+    segs, oids, lgroups, attr_cells)`` for every child chunk with vertices --
+    the per-fragment ``segment_id`` / ``object_id`` columns, the branch link
+    groups and each per-vertex attribute's groups, any of them None where the
+    array or cell is absent -- and ``cell_records`` holds the decoded records
+    of each entry of ``ccl_cells``, in order, ``[]`` where a cell could not be
+    read.
+
+    Same reason as the polyline coarsener's ``_read_polyline_children``: each
+    read resolved its array node afresh, so a target chunk's plan was mostly
+    ``zarr.json`` reads (measured on a 1500-skeleton store: 115 of Phase A's
+    142 seconds were the reads, 64 of them in ``open``).  ``cached_nodes``
+    resolves each node once per task and ``batched_reads`` fetches every cell
+    the plan names in one pass.  With ``ccl_segments`` / ``link_spec`` (see
+    :func:`zarr_vectors_tools.algorithms._links.link_cell_reads`) the link
+    cells are prefetched and decoded exactly, with no per-task segment
+    enumeration and no per-cell metadata lookup, as the polyline reader does.
+    """
+    from zarr_vectors.building import (
+        read_chunk_attributes,
+        read_chunk_fragment_attributes,
+        read_chunk_links,
+        read_chunk_vertices,
+        read_links_for_tuple,
+    )
+    from zarr_vectors.constants import FRAGMENT_ATTRIBUTES, LINK_FRAGMENTS, VERTEX_FRAGMENTS
+    from zarr_vectors.exceptions import ArrayError
+
+    from zarr_vectors_tools.algorithms._links import (
+        chunk_key_str,
+        link_cell_prefetch_plan,
+        link_prefetch_plan,
+        prune_prefetch_plan,
+        read_link_cell_records,
+    )
+
+    child_keys = [chunk_key_str(c) for c in child_ccs]
+    plan: list[tuple[str, list[str]]] = [
+        (VERTICES, child_keys),
+        (VERTEX_FRAGMENTS, child_keys),
+        (f"{FRAGMENT_ATTRIBUTES}/segment_id", child_keys),
+        (f"{FRAGMENT_ATTRIBUTES}/object_id", child_keys),
+        *((f"{VERTEX_ATTRIBUTES}/{name}", child_keys) for name in attr_names),
+    ]
+    use_spec = link_spec is not None and ccl_segments is not None
+    children: list[tuple] = []
+    cell_records: list[list] = []
+    with src.cached_nodes():
+        if use_spec:
+            # The children's intra (branch) link cells and their
+            # link_fragments sidecars; the cross-chunk cells are added below,
+            # after pruning, since the coordinator listed them.
+            plan.append((LINK_FRAGMENTS, child_keys))
+            if link_spec["intra_path"] is not None:
+                plan.append((link_spec["intra_path"], child_keys))
+        else:
+            link_chunks = sorted(
+                {tuple(int(c) for c in cell[0]) for cell in ccl_cells} | set(child_ccs)
+            )
+            plan.extend(link_prefetch_plan(src, link_chunks, delta=0))
+        # Only cells that exist: on a local filesystem each absent cell would
+        # cost a failed open().
+        plan = prune_prefetch_plan(src, plan)
+        if use_spec:
+            plan.extend(link_cell_prefetch_plan(ccl_cells, ccl_segments, link_spec))
+        with src.batched_reads(plan):
+            for scc in child_ccs:
+                try:
+                    vgroups = read_chunk_vertices(src, scc, dtype=np.float32, ndim=ndim)
+                except ArrayError:
+                    continue
+                if not vgroups:
+                    continue
+                try:
+                    segs = read_chunk_fragment_attributes(
+                        src, "segment_id", scc, dtype=np.uint64,
+                    )
+                except ArrayError:
+                    segs = None
+                try:
+                    oids = read_chunk_fragment_attributes(
+                        src, "object_id", scc, dtype=np.uint64,
+                    )
+                except ArrayError:
+                    oids = None
+                try:
+                    lgroups = read_chunk_links(src, scc, link_width=2, delta=0)
+                except ArrayError:
+                    lgroups = None
+                attr_cells: dict[str, Any] = {}
+                for name in attr_names:
+                    try:
+                        attr_cells[name] = read_chunk_attributes(
+                            src, name, scc, dtype=attr_dtypes[name],
+                        )
+                    except ArrayError:
+                        attr_cells[name] = None
+                children.append((scc, vgroups, segs, oids, lgroups, attr_cells))
+            for i, cell in enumerate(ccl_cells):
+                try:
+                    if use_spec:
+                        recs = read_link_cell_records(src, cell, ccl_segments[i], link_spec)
+                    else:
+                        recs = read_links_for_tuple(src, cell, delta=0)
+                except Exception:
+                    recs = []
+                cell_records.append(recs)
+    return children, cell_records
+
+
 def _build_local_plan(
     src,
     tcc: tuple[int, ...],
@@ -414,6 +547,8 @@ def _build_local_plan(
     target_cs: npt.NDArray,
     source_cs: npt.NDArray,
     ccl_cells: list | None = None,
+    ccl_segments: list | None = None,
+    link_spec: dict | None = None,
 ) -> tuple[list[dict], dict, dict]:
     """Build ONE target chunk's coarsen plan by reading only its source children.
 
@@ -440,19 +575,17 @@ def _build_local_plan(
     """
     from itertools import product
 
-    from zarr_vectors.building import (
-        read_chunk_attributes,
-        read_chunk_fragment_attributes,
-        read_chunk_links,
-        read_chunk_vertices,
-    )
-    from zarr_vectors.exceptions import ArrayError
-
     tcc = tuple(int(x) for x in tcc)
     child_ccs = [
         tuple(tcc[a] * scale[a] + d[a] for a in range(ndim))
         for d in product(*[range(scale[a]) for a in range(ndim)])
     ]
+
+    children, cell_records = _read_skeleton_children(
+        src, child_ccs, ndim=ndim, attr_names=attr_names, attr_dtypes=attr_dtypes,
+        ccl_cells=list(ccl_cells or ()),
+        ccl_segments=ccl_segments, link_spec=link_spec,
+    )
 
     vcache: dict = {}
     acache: dict = {name: {} for name in attr_names}
@@ -460,26 +593,7 @@ def _build_local_plan(
     fragoid: dict = {}
     fraglinks: dict = {}
     child_ranges: dict = {}  # scc -> (starts, ends, fidxs) for chunk-local→fragment
-    for scc in child_ccs:
-        try:
-            vgroups = read_chunk_vertices(src, scc, dtype=np.float32, ndim=ndim)
-        except ArrayError:
-            continue
-        if not vgroups:
-            continue
-        try:
-            segs = read_chunk_fragment_attributes(src, "segment_id", scc, dtype=np.uint64)
-        except ArrayError:
-            segs = None
-        try:
-            oids = read_chunk_fragment_attributes(src, "object_id", scc, dtype=np.uint64)
-        except ArrayError:
-            oids = None
-        try:
-            lgroups = read_chunk_links(src, scc, link_width=2, delta=0)
-        except ArrayError:
-            lgroups = None
-
+    for scc, vgroups, segs, oids, lgroups, attr_cells in children:
         keep_fidx: set[int] = set()
         starts = []
         st = 0
@@ -506,10 +620,7 @@ def _build_local_plan(
 
         if keep_fidx:
             for name in attr_names:
-                try:
-                    ag = read_chunk_attributes(src, name, scc, dtype=attr_dtypes[name])
-                except ArrayError:
-                    ag = None
+                ag = attr_cells.get(name)
                 if ag is not None:
                     for fidx in keep_fidx:
                         if fidx < len(ag):
@@ -545,8 +656,6 @@ def _build_local_plan(
     # merges.  Reading the v0.8 partitioned ccl per chunk-pair stays local and,
     # unlike geometric coincidence, handles BOTH coincident boundary vertices
     # AND phase-split (distinct-vertex) cross edges.
-    from zarr_vectors.building import read_links_for_tuple
-
     child_set = set(child_ranges)
     oid_of_frag: dict = {}
     for _oid, _mems in members_by_oid.items():
@@ -554,12 +663,9 @@ def _build_local_plan(
             oid_of_frag[_m] = _oid
     conns_by_oid: dict = defaultdict(list)
     # ``ccl_cells`` are the source cross-chunk-link cells touching this target's
-    # children (enumerated once by the coordinator and bucketed per target).
-    for cell in (ccl_cells or ()):
-        try:
-            recs = read_links_for_tuple(src, cell, delta=0)
-        except Exception:
-            continue
+    # children (enumerated once by the coordinator and bucketed per target);
+    # their records were read above, one list per cell.
+    for recs in cell_records:
         for rec in recs:
             if len(rec) != 2:
                 continue
@@ -656,6 +762,125 @@ def _build_local_plan(
     return groups, vcache, acache
 
 
+def _decimate_components(
+    comps: list[dict],
+    forced_pairs: list[list[tuple[int, int]] | None],
+    *,
+    stride: int,
+    attr_agg: str,
+) -> list[dict[str, Any]]:
+    """:func:`decimate_skeleton` over many components in one batched pass.
+
+    ``comps`` are :func:`split_components` pieces; ``forced_pairs[i]`` is
+    ``None`` or component ``i``'s forced vertices as ``(any, local index)``
+    pairs.  Entry ``i`` of the result equals ``decimate_skeleton(
+    comps[i]["positions"], comps[i]["edges"], stride=stride, forced_keep=
+    [local indices], attributes=comps[i]["attributes"], attr_agg=attr_agg)``:
+    positions, edge rows and their order, aggregated attributes and
+    ``kept_source_indices``.
+
+    The components are concatenated into one forest -- a global ``parent``
+    array filled the way :func:`_build_rooted_tree` fills each piece's -- and
+    run through the vectorised ``_forest.decimate_keep`` / ``_forest.collapse``,
+    which are pinned to the scalar reference.  Splitting back is exact: kept
+    vertices come out in ascending global order, so each component's
+    survivors and the edges they own are one contiguous run, and each
+    aggregate is a ``ufunc.at`` over slots no other component shares, applied
+    in the same row order as the per-component call (so ``mean`` sums are
+    bit-identical).  Components whose positions or attributes differ in dtype
+    or trailing shape go in separate batches, since concatenating them would
+    promote.
+    """
+    from zarr_vectors_tools.multiresolution import _forest
+
+    out: list[dict[str, Any]] = [{} for _ in comps]
+    batches: dict[tuple, list[int]] = defaultdict(list)
+    for i, comp in enumerate(comps):
+        pos = np.asarray(comp["positions"])
+        if len(pos) == 0:
+            pairs = forced_pairs[i]
+            out[i] = decimate_skeleton(
+                pos, comp["edges"], stride=stride,
+                forced_keep=None if pairs is None else [ci for _mv, ci in pairs],
+                attributes=comp["attributes"], attr_agg=attr_agg,
+            )
+            continue
+        sig = (
+            pos.dtype.str,
+            pos.shape[1:],
+            tuple(
+                (name, a.dtype.str, a.shape[1:])
+                for name, a in (
+                    (name, np.asarray(v)) for name, v in comp["attributes"].items()
+                )
+            ),
+        )
+        batches[sig].append(i)
+
+    for (_pdt, _ptail, attr_sig), idxs in batches.items():
+        sizes_list = [len(comps[i]["positions"]) for i in idxs]
+        offs = np.zeros(len(idxs) + 1, dtype=np.int64)
+        np.cumsum(sizes_list, out=offs[1:])
+        offs_list = offs.tolist()
+        n = offs_list[-1]
+        positions = np.concatenate(
+            [np.asarray(comps[i]["positions"]) for i in idxs], axis=0,
+        )
+        # One fancy assignment over every component's [child, parent] rows,
+        # each shifted to its component's offset: the rows of one component
+        # keep their relative order, so a repeated child resolves as in
+        # _build_rooted_tree.
+        edge_blocks = [
+            np.asarray(comps[i]["edges"], dtype=np.int64).reshape(-1, 2) for i in idxs
+        ]
+        edge_counts = [len(e) for e in edge_blocks]
+        parent = np.full(n, -1, dtype=np.int64)
+        if sum(edge_counts):
+            all_edges = np.concatenate(edge_blocks, axis=0)
+            shift = np.repeat(offs[:-1], edge_counts)
+            parent[all_edges[:, 0] + shift] = all_edges[:, 1] + shift
+        forced = np.zeros(n, dtype=bool)
+        forced_idx: list[int] = []
+        for j, i in enumerate(idxs):
+            pairs = forced_pairs[i]
+            if pairs is None:
+                continue
+            o, size = offs_list[j], sizes_list[j]
+            forced_idx.extend(o + ci for _mv, ci in pairs if 0 <= ci < size)
+        if forced_idx:
+            forced[np.asarray(forced_idx, dtype=np.int64)] = True
+        attributes = {
+            name: np.concatenate(
+                [np.asarray(comps[i]["attributes"][name]) for i in idxs], axis=0,
+            )
+            for name, _dt, _tail in attr_sig
+        }
+        keep = _forest.decimate_keep(parent, stride=stride, forced=forced)
+        res = _forest.collapse(parent, keep, attributes, attr_agg)
+        kept = res["kept"]
+        edges = res["edges"]
+        kept_bounds = np.searchsorted(kept, offs)
+        edge_bounds = np.searchsorted(edges[:, 0], kept_bounds)
+        # Rebase to component-local indices once, then hand out slices.
+        comp_ids = np.arange(len(idxs), dtype=np.int64)
+        kept_comp = np.repeat(comp_ids, np.diff(kept_bounds))
+        local_kept = kept - offs[kept_comp]
+        local_edges = edges - kept_bounds[np.repeat(comp_ids, np.diff(edge_bounds))][:, None]
+        kept_positions = positions[kept]
+        aggs = list(res["attributes"].items())
+        kb = kept_bounds.tolist()
+        eb = edge_bounds.tolist()
+        for j, i in enumerate(idxs):
+            k0, k1 = kb[j], kb[j + 1]
+            out[i] = {
+                "positions": kept_positions[k0:k1],
+                "edges": local_edges[eb[j]:eb[j + 1]],
+                "attributes": {name: agg[k0:k1] for name, agg in aggs},
+                "kept_source_indices": local_kept[k0:k1],
+            }
+    return out
+
+
 def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     """Coarsen ONE target chunk — a picklable worker for parallel pyramiding.
 
@@ -678,8 +903,9 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     arrays are created by the coordinator before dispatch.
     """
     from zarr_vectors.building import get_resolution_level, open_store
-    from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
     from zarr_vectors.types.skeletons import write_skeleton_chunk
+
+    from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 
     shared = shared or {}
     ndim = shared["ndim"]
@@ -706,15 +932,19 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
         attr_dtypes=attr_dtypes, keep_mask=keep_mask,
         boundary_off=boundary_off, target_cs=target_cs, source_cs=source_cs,
         ccl_cells=payload.get("ccl_cells"),
+        ccl_segments=payload.get("ccl_segments"),
+        link_spec=shared.get("link_spec"),
     )
     input_fragments = int(len(vcache))
     input_vertices = int(sum(len(v) for v in vcache.values()))
     input_objects = int(len(groups))
 
-    pieces: list = []
-    total_out_vertices = 0
-    anchor_meta: dict = {}   # tag -> (segment_id, coord-tuple) for outer-face verts
-    tagc = 0
+    # Pass 1: merge each object group's fragments and split it into rooted
+    # components.  A group with forced (outer-face) vertices records, per
+    # component, its forced vertices as ``(merged index, local index)`` in
+    # ``forced_set`` iteration order -- the order anchor tags are handed out
+    # in below.
+    plans: list[tuple[dict, list, list]] = []
     for g in groups:
         parts = []
         for cc, fidx in g["members"]:
@@ -739,18 +969,38 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
         comps = split_components(
             mverts, medges, mattrs, vertex_ids=np.arange(len(mverts)),
         )
-        for comp in comps:
-            comp_vids = comp["vertex_ids"].tolist()
-            pos_in_comp = {int(mv): ci for ci, mv in enumerate(comp_vids)}
-            forced_local = None
-            if forced_set:
-                forced_local = [pos_in_comp[mv] for mv in forced_set
-                                if mv in pos_in_comp]
-            simp = decimate_skeleton(
-                comp["positions"], comp["edges"],
-                stride=stride, forced_keep=forced_local,
-                attributes=comp["attributes"], attr_agg=attr_agg,
-            )
+        forced_pairs: list[list[tuple[int, int]] | None] = [None] * len(comps)
+        if forced_set:
+            n_merged = len(mverts)
+            comp_of = np.empty(n_merged, dtype=np.int64)
+            local_of = np.empty(n_merged, dtype=np.int64)
+            for ci, comp in enumerate(comps):
+                vids = np.asarray(comp["vertex_ids"], dtype=np.int64)
+                comp_of[vids] = ci
+                local_of[vids] = np.arange(len(vids), dtype=np.int64)
+            buckets: list[list[tuple[int, int]]] = [[] for _ in comps]
+            for mv in forced_set:
+                if 0 <= mv < n_merged:
+                    buckets[int(comp_of[mv])].append((mv, int(local_of[mv])))
+            forced_pairs = list(buckets)
+        plans.append((g, comps, forced_pairs))
+
+    # Pass 2: decimate every component of this target chunk as one forest.
+    simps = _decimate_components(
+        [comp for _g, comps, _fp in plans for comp in comps],
+        [pairs for _g, _c, fps in plans for pairs in fps],
+        stride=stride, attr_agg=attr_agg,
+    )
+
+    pieces: list = []
+    total_out_vertices = 0
+    anchor_meta: dict = {}   # tag -> (segment_id, coord-tuple) for outer-face verts
+    tagc = 0
+    k = 0
+    for g, comps, forced_pairs in plans:
+        for comp, pairs in zip(comps, forced_pairs):
+            simp = simps[k]
+            k += 1
             rpos = simp["positions"]
             if len(rpos) == 0:
                 continue
@@ -763,16 +1013,13 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
             }
             # Tag surviving OUTER-face vertices as anchors → resolve their stored
             # chunk-local index after write → cross-target sidecar for Phase B.
-            if forced_set:
+            if pairs is not None:
                 kept_pos = {
                     int(c): i
                     for i, c in enumerate(simp["kept_source_indices"].tolist())
                 }
                 anchors = {}
-                for mv in forced_set:
-                    ci = pos_in_comp.get(mv)
-                    if ci is None:
-                        continue
+                for _mv, ci in pairs:
                     sl = kept_pos.get(ci)
                     if sl is None:
                         continue
@@ -824,48 +1071,73 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
         level_group, tcc, pieces, attr_dtypes=attr_dtypes,
         record_presence=False,
     )
-    # Spill object-index refs partitioned by OID shard to avoid a central
-    # gather of whole-level ``{oid: manifest}`` structures.
-    oid_shards = int(shared.get("oid_reduce_shards", 1) or 1)
-    oid_tmp_dir = str(shared.get("oid_reduce_tmp_dir", ""))
-    sidecar_tmp_dir = str(shared.get("sidecar_tmp_dir", ""))
-    shard_rows: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for r in recs:
-        oid = int(r[0])
-        fidx = int(r[2])
-        shard_rows[oid % oid_shards].append((oid, fidx))
-    shard_files: list[tuple[int, str]] = []
-    if oid_tmp_dir and shard_rows:
-        tcc_tag = ".".join(str(int(x)) for x in tcc)
-        for shard, rows in shard_rows.items():
-            arr = np.asarray(rows, dtype=np.int64).reshape(-1, 2)
-            path = Path(oid_tmp_dir) / f"{tcc_tag}.s{int(shard)}.npy"
-            np.save(path, arr, allow_pickle=False)
-            shard_files.append((int(shard), str(path)))
+    # Object-index rows ``(oid, fragment_idx)`` and cross-target anchor rows
+    # ``(segment_id, *coord, vi)`` travel back inline as compact int64
+    # arrays.  Both used to go through temp files -- the rows as one .npy
+    # per (target chunk, oid shard), the anchors as one .npy per chunk --
+    # read back one file at a time by Phases C and B, which on a level of
+    # thousands of target chunks was hundreds of thousands of tiny files.
+    # Both are O(fragments) at 16-40 bytes a row, the same order the
+    # polyline coarsener already carries inline.
+    oid_rows = (
+        np.asarray([(int(r[0]), int(r[2])) for r in recs], dtype=np.int64).reshape(-1, 2)
+        if recs else None
+    )
     sc_rows = []
     for tag, (seg, coord) in anchor_meta.items():
         loc = alocs.get(tag)
         if loc is not None:
             sc_rows.append((seg, *coord, int(loc[1])))  # [segment_id, *coord, vi]
-    sidecar = (np.asarray(sc_rows, dtype=np.int64) if sc_rows
-               else np.zeros((0, 2 + ndim), dtype=np.int64))
-    sidecar_path = None
-    if sidecar_tmp_dir and len(sidecar):
-        tcc_tag = ".".join(str(int(x)) for x in tcc)
-        p = Path(sidecar_tmp_dir) / f"{tcc_tag}.anchors.npy"
-        np.save(p, sidecar, allow_pickle=False)
-        sidecar_path = str(p)
+    anchors = (
+        np.asarray(sc_rows, dtype=np.int64).reshape(-1, 2 + ndim) if sc_rows else None
+    )
     return {
         "tcc": tcc,
         "input_fragments": input_fragments,
         "input_vertices": input_vertices,
         "input_objects": input_objects,
         "fragment_count": int(len(recs)),
-        "oid_shards": shard_files,
-        "sidecar_path": sidecar_path,
+        "oid_rows": oid_rows,
+        "anchors": anchors,
         "vertex_count": int(total_out_vertices),
         "dropped_oids": np.asarray(dropped_oids, dtype=np.int64),
     }
+
+
+def _anchor_join_table(
+    arr: npt.NDArray[np.int64] | None, ndim: int,
+) -> tuple | None:
+    """Sorted join table for one target chunk's anchor rows, or None if empty.
+
+    Rows are ``(segment_id, *coord, vi)``; the key is ``(segment_id, *coord)``
+    and the FIRST row carrying a key supplies its ``vi``.  Returns
+    ``(sorted_keys, sorted_vi, first_keys, first_vi)``: the distinct keys in
+    sorted order (for ``searchsorted``) and again in first-occurrence order
+    (for probing).  Keys are compared as opaque fixed-width byte blobs, which
+    is all an equi-join needs.
+    """
+    if arr is None:
+        return None
+    rows = np.ascontiguousarray(np.asarray(arr, dtype=np.int64).reshape(-1, 2 + ndim))
+    if len(rows) == 0:
+        return None
+    width = 1 + ndim
+    keys = np.ascontiguousarray(rows[:, :width])
+    blobs = keys.view(np.dtype((np.void, keys.dtype.itemsize * width))).reshape(-1)
+    order = np.argsort(blobs, kind="stable")
+    sorted_blobs = blobs[order]
+    first = np.ones(len(order), dtype=bool)
+    first[1:] = sorted_blobs[1:] != sorted_blobs[:-1]
+    # A stable sort keeps a key's rows in input order, so the head of each
+    # run is that key's first occurrence.
+    first_rows = order[first]
+    by_occurrence = np.sort(first_rows)
+    return (
+        sorted_blobs[first],
+        rows[first_rows, 1 + ndim],
+        blobs[by_occurrence],
+        rows[by_occurrence, 1 + ndim],
+    )
 
 
 def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
@@ -886,57 +1158,45 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
 
     shared = shared or {}
     ndim = shared["ndim"]
-    sidecar_paths = {
-        tuple(int(x) for x in e["tcc"]): str(e["path"])
-        for e in payload.get("sidecar_paths", [])
+    # Anchor rows arrive inline (see _coarsen_target_chunk), keyed by target
+    # chunk; only the chunks this task's pairs touch are carried.
+    sidecar_arrays: dict[tuple[int, ...], npt.NDArray[np.int64]] = {
+        tuple(int(x) for x in e["tcc"]): np.asarray(e["arr"], dtype=np.int64)
+        for e in payload.get("anchors", [])
     }
     pairs = payload["pairs"]
-    sidecar_cache: dict[str, npt.NDArray[np.int64]] = {}
-    keymap_cache: dict[tuple[int, ...], dict[tuple[int, tuple[int, ...]], int]] = {}
+    table_cache: dict[tuple[int, ...], tuple | None] = {}
 
-    def _read_sidecar(cc: tuple[int, ...]) -> npt.NDArray[np.int64] | None:
-        path = sidecar_paths.get(cc)
-        if path is None:
-            return None
-        arr = sidecar_cache.get(path)
-        if arr is None:
-            arr = np.asarray(np.load(path, allow_pickle=False), dtype=np.int64)
-            sidecar_cache[path] = arr
-        return arr
-
-    def _chunk_keymap(cc: tuple[int, ...]) -> dict[tuple[int, tuple[int, ...]], int]:
-        km = keymap_cache.get(cc)
-        if km is not None:
-            return km
-        arr = _read_sidecar(cc)
-        km = {}
-        if arr is not None and len(arr):
-            for row in arr:
-                key = (int(row[0]), tuple(int(x) for x in row[1:1 + ndim]))
-                if key not in km:
-                    km[key] = int(row[1 + ndim])
-        keymap_cache[cc] = km
-        return km
+    def _table(cc: tuple[int, ...]) -> tuple | None:
+        if cc not in table_cache:
+            table_cache[cc] = _anchor_join_table(sidecar_arrays.get(cc), ndim)
+        return table_cache[cc]
 
     links: list = []
     for A_, B_ in pairs:
         A = tuple(int(x) for x in A_)
         B = tuple(int(x) for x in B_)
-        amap = _chunk_keymap(A)
-        bmap = _chunk_keymap(B)
-        if not amap or not bmap:
+        ta = _table(A)
+        tb = _table(B)
+        if ta is None or tb is None:
             continue
-        # Intersect keymaps directly (seg_id + coord), iterating the smaller map.
-        if len(amap) <= len(bmap):
-            for k, viA in amap.items():
-                viB = bmap.get(k)
-                if viB is not None:
-                    links.append([(A, int(viA)), (B, int(viB))])
-        else:
-            for k, viB in bmap.items():
-                viA = amap.get(k)
-                if viA is not None:
-                    links.append([(A, int(viA)), (B, int(viB))])
+        # Probe with the map holding fewer distinct keys, in the order those
+        # keys first occur in its anchor rows (ties probe with A) -- the
+        # iteration order of the per-chunk dict this join replaced, so the
+        # records come out in the same order.
+        a_probes = len(ta[0]) <= len(tb[0])
+        probe, target = (ta, tb) if a_probes else (tb, ta)
+        t_keys, t_vi, p_keys, p_vi = target[0], target[1], probe[2], probe[3]
+        pos = np.searchsorted(t_keys, p_keys)
+        in_range = pos < len(t_keys)
+        pos = np.where(in_range, pos, 0)
+        hit = in_range & (t_keys[pos] == p_keys)
+        if not hit.any():
+            continue
+        own = p_vi[hit].tolist()
+        other = t_vi[pos[hit]].tolist()
+        via, vib = (own, other) if a_probes else (other, own)
+        links.extend([(A, a), (B, b)] for a, b in zip(via, vib))
     if links:
         root = open_store(shared["store_path"], mode="r+")
         level_group = get_resolution_level(root, shared["target_level"])
@@ -958,27 +1218,27 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
 
 
 def _reduce_object_index_shard(payload: dict, shared: dict | None = None) -> dict:
-    """Reduce one OID shard's chunk spills into encoded manifest blobs.
+    """Reduce one OID shard's rows into encoded manifest blobs.
 
-    Phase A workers spill per-chunk ``(oid, fidx)`` rows partitioned by
-    ``oid % num_shards``. This worker ingests one shard's spills, groups rows by
-    OID, and returns encoded v0.6 manifest blobs for just those OIDs.
+    ``payload["rows"]`` is one int64 array ``(oid, fragment_idx, *target
+    chunk)`` holding every fragment of this shard's objects, cut from the
+    Phase A results by the coordinator (see
+    :func:`zarr_vectors_tools.multiresolution.object_index.shard_rows_by_object`).
+    This worker groups the rows by OID and returns encoded v0.6 manifest
+    blobs for just those OIDs.
     """
     from zarr_vectors.building import encode_object_manifest_blocks
 
     shared = shared or {}
     sid_ndim = int(shared["sid_ndim"])
+    width = 2 + sid_ndim
 
+    rows = np.asarray(
+        payload.get("rows", np.zeros((0, width), np.int64)), dtype=np.int64,
+    ).reshape(-1, width)
     manifests: dict[int, list[tuple[tuple[int, ...], int]]] = defaultdict(list)
-    for e in payload.get("entries", []):
-        tcc = tuple(int(x) for x in e["tcc"])
-        path = str(e["path"])
-        arr = np.load(path, allow_pickle=False)
-        if arr.size == 0:
-            continue
-        rows = np.asarray(arr, dtype=np.int64).reshape(-1, 2)
-        for oid, fidx in rows.tolist():
-            manifests[int(oid)].append((tcc, int(fidx)))
+    for row in rows.tolist():
+        manifests[row[0]].append((tuple(row[2:2 + sid_ndim]), row[1]))
 
     oids = np.asarray(sorted(manifests), dtype=np.int64)
     blobs: list[bytes] = []
@@ -1012,6 +1272,7 @@ def coarsen_skeleton_level(
     boundary_offset_nm: Sequence[float] | None = None,
     compressor: Any = None,
     executor: Any = None,
+    progress: bool = False,
 ) -> dict[str, Any]:
     """Coarsen one skeleton level by uniform per-path decimation.
 
@@ -1038,6 +1299,9 @@ def coarsen_skeleton_level(
             ``"length"`` drops shortest skeletons first.
         sparsity_seed: RNG seed.
         attr_agg: Per-vertex attribute aggregation over collapsed runs.
+        progress: Print ``[coarsen Lx->Ly]`` phase lines as the level is
+            built.  Off by default; the per-phase durations are returned
+            under ``timings`` either way.
 
     Returns:
         Summary dict.
@@ -1047,37 +1311,37 @@ def coarsen_skeleton_level(
     from zarr_vectors.building import (
         OBJECT_INDEX,
         OBJECT_INDEX_LAYOUT_V1,
+        LevelMetadata,
         create_attribute_array,
         create_fragment_attribute_array,
         create_links_array,
         create_links_family,
         create_object_attributes_array,
         create_object_index_array,
+        create_resolution_level,
         create_vertices_array,
         finalize_links,
+        get_level_chunk_shape,
+        get_resolution_level,
         list_chunk_keys,
+        open_store,
         read_all_object_manifests,
         read_chunk_fragment_attributes,
+        read_level_metadata,
         read_object_attributes,
+        read_root_metadata,
+        upsert_level_transform,
         write_object_attributes,
         write_object_manifests,
     )
+    from zarr_vectors.exceptions import ArrayError
+    from zarr_vectors.types.skeletons import get_coordinate_offset
+
     from zarr_vectors_tools.multiresolution.constants import (
         CROSS_LINK_TASK_SHARD_AXIS,
     )
-    from zarr_vectors.building import (
-        LevelMetadata,
-        create_resolution_level,
-        get_level_chunk_shape,
-        get_resolution_level,
-        open_store,
-        read_level_metadata,
-        read_root_metadata,
-    )
-    from zarr_vectors.exceptions import ArrayError
+    from zarr_vectors_tools.multiresolution.object_index import shard_rows_by_object
     from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
-    from zarr_vectors.building import upsert_level_transform
-    from zarr_vectors.types.skeletons import get_coordinate_offset
 
     # Per-target-chunk work is dispatched through ``executor`` (a
     # ``map``-like callable); the default runs serially in-process, so serial
@@ -1091,6 +1355,8 @@ def coarsen_skeleton_level(
     _timings: dict[str, float] = {}
 
     def _progress(msg: str) -> None:
+        if not progress:
+            return
         print(
             f"[coarsen L{int(source_level)}->L{int(target_level)}] {msg}",
             flush=True,
@@ -1283,10 +1549,6 @@ def coarsen_skeleton_level(
     # --- Phase A: decimate each target chunk (workers self-plan locally) ---
     boundary_off = (list(boundary_offset_nm)
                     if boundary_offset_nm is not None else [0.0] * ndim)
-    oid_reduce_shards = 64
-    oid_reduce_tmp_dir = tempfile.mkdtemp(prefix=f"oid_reduce_l{target_level}_")
-    sidecar_tmp_dir = tempfile.mkdtemp(prefix=f"sidecar_l{target_level}_")
-
     sharedA = {
         "store_path": str(store_path),
         "source_level": int(source_level),
@@ -1302,18 +1564,20 @@ def coarsen_skeleton_level(
         "target_cs": list(target_chunk_shape),
         "source_cs": list(src_chunk_shape),
         "drop_interior_below": int(drop_interior_below or 0),
-        "oid_reduce_shards": int(oid_reduce_shards),
-        "oid_reduce_tmp_dir": str(oid_reduce_tmp_dir),
-        "sidecar_tmp_dir": str(sidecar_tmp_dir),
     }
     # Enumerate the source cross-chunk-link cells ONCE and bucket each cell to
     # the target chunk(s) that own its endpoint chunks (chunk // scale). Replaces
     # a per-target-per-child cell scan (O(target_chunks × children × cells))
     # with a single O(cells) pass; workers then read only their bucket's cells.
-    from zarr_vectors_tools.algorithms._links import list_link_cells
+    # The same pass records which offsets array each cell lives in; the
+    # arrays' decode parameters travel once in ``sharedA``.
+    from zarr_vectors_tools.algorithms._links import link_cell_reads
 
+    link_cells, link_segments, link_spec = link_cell_reads(src, delta=0)
+    sharedA["link_spec"] = link_spec
     cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
-    for cell in list_link_cells(src, delta=0):
+    segs_by_target: dict[tuple[int, ...], list] = defaultdict(list)
+    for cell, seg in zip(link_cells, link_segments):
         seen_t: set = set()
         for c in cell:
             t = tuple(int(c[a]) // scale[a] for a in range(ndim))
@@ -1321,8 +1585,13 @@ def coarsen_skeleton_level(
                 continue
             seen_t.add(t)
             cells_by_target[t].append(cell)
+            segs_by_target[t].append(seg)
     payloadsA = [
-        {"tcc": list(tcc), "ccl_cells": cells_by_target.get(tuple(tcc), [])}
+        {
+            "tcc": list(tcc),
+            "ccl_cells": cells_by_target.get(tuple(tcc), []),
+            "ccl_segments": segs_by_target.get(tuple(tcc), []),
+        }
         for tcc in target_chunks
     ]
     _timings["setup"] = _time.perf_counter() - _t0
@@ -1342,8 +1611,10 @@ def coarsen_skeleton_level(
     max_in_fragments = 0
     max_in_vertices = 0
     max_in_objects = 0
-    sidecar_paths: dict[tuple[int, ...], str] = {}
-    shard_entries: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    sidecar_arrays: dict[tuple[int, ...], np.ndarray] = {}
+    # Object-index rows from every target chunk, suffixed with the chunk they
+    # came from so the reducer can name the fragment; see _coarsen_target_chunk.
+    row_blocks: list[np.ndarray] = []
     for res in resultsA:
         in_f = int(res.get("input_fragments", 0))
         in_v = int(res.get("input_vertices", 0))
@@ -1357,13 +1628,13 @@ def coarsen_skeleton_level(
         total_fragments += int(res["fragment_count"])
         total_out_vertices += int(res["vertex_count"])
         tcc = tuple(int(x) for x in res["tcc"])
-        sp = res.get("sidecar_path")
-        if sp:
-            sidecar_paths[tcc] = str(sp)
-        for shard, path in res.get("oid_shards", []):
-            shard_entries[int(shard)].append(
-                {"tcc": list(tcc), "path": str(path)}
-            )
+        anchors = res.get("anchors")
+        if anchors is not None and len(anchors):
+            sidecar_arrays[tcc] = anchors
+        rows = res.get("oid_rows")
+        if rows is not None and len(rows):
+            tcc_cols = np.broadcast_to(np.asarray(tcc, dtype=np.int64), (len(rows), ndim))
+            row_blocks.append(np.concatenate([rows, tcc_cols], axis=1))
     # Release phase-A result payloads as soon as we've compacted what we need.
     resultsA = []
 
@@ -1378,35 +1649,36 @@ def coarsen_skeleton_level(
     )
 
     # --- Phase C: shard-parallel object-index reduce + one-shot commit -----
+    # Shards are contiguous object-id ranges cut from the gathered rows, so
+    # each task owns whole objects and there is no spill directory to
+    # populate, scan and remove.
     empty_blob = b"\x00\x00\x00\x00"  # encode_object_manifest_blocks([], sid_ndim)
     manifest_blobs: list[bytes] = [empty_blob] * int(n_src)
-    try:
-        _tc = _time.perf_counter()
-        payloadsC = [
-            {"shard": int(s), "entries": es}
-            for s, es in sorted(shard_entries.items())
-            if es
-        ]
-        _progress(f"phase C start: shard_tasks={len(payloadsC)}")
-        sharedC = {"sid_ndim": int(ndim)}
-        if payloadsC:
-            for rc in executor(_reduce_object_index_shard, payloadsC, sharedC):
-                oids = np.asarray(rc.get("oid", np.zeros((0,), np.int64)), np.int64)
-                blobs = pickle.loads(rc.get("blobs", b"")) if len(oids) else []
-                for i, oid in enumerate(oids.tolist()):
-                    if 0 <= int(oid) < int(n_src):
-                        manifest_blobs[int(oid)] = blobs[i]
-        write_object_manifests(level_group, manifest_blobs)
-        level_group.write_array_meta(OBJECT_INDEX, {
-            "zv_array": "object_index",
-            "num_objects": int(n_src),
-            "sid_ndim": int(ndim),
-            "layout": OBJECT_INDEX_LAYOUT_V1,
-        })
-        _timings["reduce_phase_c"] = _time.perf_counter() - _tc
-        _progress(f"phase C done: dt={_timings['reduce_phase_c']:.2f}s")
-    finally:
-        shutil.rmtree(oid_reduce_tmp_dir, ignore_errors=True)
+    _tc = _time.perf_counter()
+    all_rows = (
+        np.concatenate(row_blocks, axis=0) if row_blocks
+        else np.zeros((0, 2 + ndim), dtype=np.int64)
+    )
+    row_blocks = []
+    payloadsC = [{"rows": shard} for shard in shard_rows_by_object(all_rows)]
+    _progress(f"phase C start: shard_tasks={len(payloadsC)}")
+    sharedC = {"sid_ndim": int(ndim)}
+    if payloadsC:
+        for rc in executor(_reduce_object_index_shard, payloadsC, sharedC):
+            oids = np.asarray(rc.get("oid", np.zeros((0,), np.int64)), np.int64)
+            blobs = pickle.loads(rc.get("blobs", b"")) if len(oids) else []
+            for i, oid in enumerate(oids.tolist()):
+                if 0 <= int(oid) < int(n_src):
+                    manifest_blobs[int(oid)] = blobs[i]
+    write_object_manifests(level_group, manifest_blobs)
+    level_group.write_array_meta(OBJECT_INDEX, {
+        "zv_array": "object_index",
+        "num_objects": int(n_src),
+        "sid_ndim": int(ndim),
+        "layout": OBJECT_INDEX_LAYOUT_V1,
+    })
+    _timings["reduce_phase_c"] = _time.perf_counter() - _tc
+    _progress(f"phase C done: dt={_timings['reduce_phase_c']:.2f}s")
 
     # carry object attributes forward; "present" = objects with geometry here.
     present_oids = np.flatnonzero(
@@ -1470,40 +1742,40 @@ def coarsen_skeleton_level(
             )
             shard_pairs[shard].append((tcc, nb))
     n_cross = 0
-    try:
-        _tb = _time.perf_counter()
-        _progress(f"phase B start: shard_groups={len(shard_pairs)}")
-        if shard_pairs:
-            payloadsB = []
-            for _shard, sps in shard_pairs.items():
-                need: set = set()
-                for A, B in sps:
-                    need.add(A)
-                    need.add(B)
-                sc_sub = [
-                    {"tcc": list(c), "path": sidecar_paths[c]}
-                    for c in need
-                    if c in sidecar_paths
-                ]
-                payloadsB.append({
-                    "pairs": [(list(A), list(B)) for A, B in sps],
-                    "sidecar_paths": sc_sub,
-                })
-            sharedB = {
-                "store_path": str(store_path),
-                "target_level": int(target_level),
-                "ndim": int(ndim),
-                "chunk_grid_shape": list(chunk_grid_shape),
-                "chunk_origin": list(chunk_origin),
-            }
-            for rb in executor(_cross_edge_shard, payloadsB, sharedB):
-                n_cross += int(rb.get("n_links", 0))
-        _timings["cross_links_phase_b"] = _time.perf_counter() - _tb
-        _progress(
-            f"phase B done: links={n_cross} dt={_timings['cross_links_phase_b']:.2f}s"
-        )
-    finally:
-        shutil.rmtree(sidecar_tmp_dir, ignore_errors=True)
+    _tb = _time.perf_counter()
+    _progress(f"phase B start: shard_groups={len(shard_pairs)}")
+    if shard_pairs:
+        payloadsB = []
+        for _shard, sps in shard_pairs.items():
+            need: set = set()
+            for A, B in sps:
+                need.add(A)
+                need.add(B)
+            # Forward each needed chunk's anchor array inline; only the
+            # chunks this shard's pairs touch are carried, so a worker never
+            # receives the whole level's anchors.
+            sc_sub = [
+                {"tcc": list(c), "arr": sidecar_arrays[c]}
+                for c in need
+                if c in sidecar_arrays
+            ]
+            payloadsB.append({
+                "pairs": [(list(A), list(B)) for A, B in sps],
+                "anchors": sc_sub,
+            })
+        sharedB = {
+            "store_path": str(store_path),
+            "target_level": int(target_level),
+            "ndim": int(ndim),
+            "chunk_grid_shape": list(chunk_grid_shape),
+            "chunk_origin": list(chunk_origin),
+        }
+        for rb in executor(_cross_edge_shard, payloadsB, sharedB):
+            n_cross += int(rb.get("n_links", 0))
+    _timings["cross_links_phase_b"] = _time.perf_counter() - _tb
+    _progress(
+        f"phase B done: links={n_cross} dt={_timings['cross_links_phase_b']:.2f}s"
+    )
 
     # Reconcile the whole links/0 family after the decentralized per-cell
     # writes above: recompute num_links and re-derive each offsets array's
@@ -1534,7 +1806,7 @@ def coarsen_skeleton_level(
 
 
 # Re-export the ChunkCoords name used in annotations above.
-from zarr_vectors.typing import ChunkCoords  # noqa: E402
+from zarr_vectors.typing import ChunkCoords  # noqa: E402,F401
 
 
 def build_skeleton_pyramid(
@@ -1550,6 +1822,7 @@ def build_skeleton_pyramid(
     boundary_offset_nm: Sequence[float] | None = None,
     compressor: Any = None,
     executor: Any = None,
+    progress: bool = False,
 ) -> dict[str, Any]:
     """Build a skeleton pyramid by repeated :func:`coarsen_skeleton_level`.
 
@@ -1558,7 +1831,8 @@ def build_skeleton_pyramid(
     and ``sparsity_factors`` (default 1.0 = keep all) are aligned with
     ``strides``.  ``executor`` (a ``map``-like callable) is threaded into each
     level to coarsen target chunks in parallel; levels stay sequential
-    (level ``i+1`` reads ``i``).  Default ``None`` → serial.
+    (level ``i+1`` reads ``i``).  Default ``None`` → serial.  ``progress``
+    is forwarded to every level.
 
     Returns a summary with one entry per produced level.
     """
@@ -1589,5 +1863,6 @@ def build_skeleton_pyramid(
             # compressor is forwarded per level.
             compressor=compressor,
             executor=executor,
+            progress=progress,
         ))
     return {"levels": summaries, "num_levels": n + 1}

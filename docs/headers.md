@@ -67,8 +67,25 @@ Captures the TrackVis TRK file header so it can be reconstructed by
 | `n_properties`, `property_names` | int, list[str] | per-streamline data field names |
 | `n_count` | int | original streamline count |
 
+| `space` | str or None | `"voxmm"` or `"rasmm"`: the space the stored positions are in |
+| `origin`, `version` | list[float], int | as the file had them |
+
 `TRKHeader.affine` is a convenience `@property` that returns the
 `(4, 4)` numpy array, or `None` if no affine was preserved.
+
+### `TRXHeader`
+
+The reference image a TRX file was written against, so `export_trx` can
+write it back:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `voxel_to_rasmm` | `list[float]` | flattened 4×4 affine |
+| `dimensions` | `(int, int, int)` | reference grid dimensions |
+| `dpv_names`, `dps_names`, `dpg_names` | list[str] | the data arrays the file had |
+
+TRX positions are always RAS millimetres, so there is no stored space to
+record. `TRXHeader.affine` returns the `(4, 4)` array.
 
 ### `NIfTIHeader`
 
@@ -135,6 +152,17 @@ Written by `ingest_h5ad` and `ingest_table`, and *extended in place* by
 what lets `export_h5ad` emit staged columns under their original labels,
 indistinguishable from columns written at ingest. See
 [Single-cell and spatial omics](ingest/single_cell.md).
+
+### `SurfaceHeader`
+
+Written by `ingest_gifti` and `ingest_freesurfer`, and extended in place by
+`attach_cifti`. Records which surface was chunked and in what `space`, one
+entry per hemisphere (`object_id`, CIFTI `structure`, `n_vertices`,
+`n_faces`), the `coords_<name>` alternates, each continuous map's source
+file, parcellation `label_tables`, the join-key attribute, and FreeSurfer's
+`c_ras`. `object_for("left")` returns a hemisphere's object id. The CIFTI
+attach reads `n_vertices` from it to refuse a map from a different mesh. See
+[Cortical surfaces](ingest/surfaces.md).
 
 ## See also
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.building import (
     get_resolution_level,
     open_store,
@@ -13,6 +12,7 @@ from zarr_vectors.building import (
     write_link_attributes,
 )
 from zarr_vectors.types.graphs import write_graph
+
 from zarr_vectors_tools.algorithms import bfs_distances, shortest_path
 
 

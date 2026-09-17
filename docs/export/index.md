@@ -1,12 +1,24 @@
 # Export workflows
 
-Every function in `zarr_vectors_tools.export` reads a Zarr Vectors store
+Every function in `zarr_vectors_tools.convert.export` reads a Zarr Vectors store
 and writes one file format. They all share the same call shape and all
 return a summary dict.
 
+From the shell they are reached through `zvtools convert` with a store as
+the input:
+
+```bash
+zvtools convert cloud.zv cloud.ply --attribute intensity
+zvtools convert tracts.zv cst.trk --level 2 --group-id 4
+```
+
+See [the CLI reference](../getting_started/cli.md#export-options) for the
+flags. The Python API below is what the command calls, and takes filters
+the command does not expose (`chunks=`, and the format-specific options).
+
 ```python
 # The subpackage does NOT re-export; always import the module directly.
-from zarr_vectors_tools.export.ply import export_ply
+from zarr_vectors_tools.convert.export.ply import export_ply
 
 result = export_ply(
     "cloud.zv",             # store_path — source Zarr Vectors store
@@ -19,35 +31,31 @@ result["vertex_count"]      # every exporter returns a summary dict
 ```
 
 :::{warning}
-`zarr_vectors_tools/export/__init__.py` is empty. `from
-zarr_vectors_tools.export import export_ply` raises `ImportError` —
-import from the module (`zarr_vectors_tools.export.ply`) every time.
+`zarr_vectors_tools/convert/export/__init__.py` is empty. `from
+zarr_vectors_tools.convert.export import export_ply` raises `ImportError` —
+import from the module (`zarr_vectors_tools.convert.export.ply`) every time.
 :::
 
 ## Format matrix
 
 | Source geometry | Export function | Output format | Supported filters | Extra required |
 | --- | --- | --- | --- | --- |
-| points | `zarr_vectors_tools.export.csv_points.export_csv` | CSV / XYZ text | `bbox`, `object_ids`, `chunks` | none |
-| points | `zarr_vectors_tools.export.ply.export_ply` | PLY (binary or ASCII) | `bbox`, `object_ids`, `chunks` | `ply` |
-| points | `zarr_vectors_tools.export.h5ad.export_h5ad` | AnnData `.h5ad` | `bbox`, `chunks` *(see note)* | `h5ad` |
-| polylines | `zarr_vectors_tools.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks` | `trk` |
-| polylines | `zarr_vectors_tools.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks` | `trx` |
-| graphs (trees) | `zarr_vectors_tools.export.swc.export_swc` | SWC | `chunks` | none |
-| meshes | `zarr_vectors_tools.export.obj.export_obj` | Wavefront OBJ | `bbox`, `object_ids`, `chunks` | none |
+| points | `zarr_vectors_tools.convert.export.csv_points.export_csv` | CSV / XYZ text | `bbox`, `object_ids`, `chunks` | none |
+| points | `zarr_vectors_tools.convert.export.ply.export_ply` | PLY (binary or ASCII) | `bbox`, `object_ids`, `chunks` | `ply` |
+| points | `zarr_vectors_tools.convert.export.h5ad.export_h5ad` | AnnData `.h5ad` | `bbox`, `chunks` *(see note)* | `h5ad` |
+| polylines | `zarr_vectors_tools.convert.export.trk.export_trk` | TrackVis TRK | `object_ids`, `group_ids`, `chunks`, `attribute_names`, `object_attribute_names` | `trk` |
+| polylines | `zarr_vectors_tools.convert.export.trx.export_trx` | TRX | `object_ids`, `group_ids`, `chunks`, `attribute_names`, `object_attribute_names` | `trx` |
+| graphs (trees) | `zarr_vectors_tools.convert.export.swc.export_swc` | SWC, or one file per object | `chunks`, `object_ids` | none |
+| surfaces | `zarr_vectors_tools.convert.export.gifti.export_gifti` | GIFTI directory (`.surf` / `.shape` / `.func` / `.label.gii`) | `hemispheres`, `surfaces`, `attribute_names` | `surfaces` |
+| skeletons, graphs | `zarr_vectors_tools.convert.export.precomputed.export_precomputed_skeletons` | Neuroglancer precomputed skeleton layer (directory or bucket) | `object_ids`, `segment_ids`, `attribute_names`, `object_attribute_names` | `precomputed` |
+| meshes | `zarr_vectors_tools.convert.export.precomputed.export_precomputed_meshes` | Neuroglancer legacy mesh layer (bucket; not a local directory on Windows) | `object_ids`, `segment_ids`, `object_attribute_names` | `precomputed` |
+| meshes | `zarr_vectors_tools.convert.export.obj.export_obj` | Wavefront OBJ | `bbox`, `object_ids`, `chunks` | none |
 
 Install an extra with `pip install "zarr-vectors-tools[trk]"`.
 
 Filters AND together: `bbox=(...)` *and* `object_ids=[3, 5]` means
 "objects 3 and 5, intersected with the bounding box". Passing `None`
 (the default) disables that filter.
-
-:::{note}
-`export_h5ad` accepts `object_ids` only alongside `attribute_names=[]`.
-Core's object-filtered read path drops vertex attributes, which for an
-`.h5ad` would mean silently writing an empty `obs`; it raises instead.
-See [Single-cell and spatial omics](single_cell.md).
-:::
 
 ## Exporting from a coarser level
 
@@ -56,7 +64,7 @@ resolution; every level above it is progressively decimated, so
 `level=2` writes a much smaller file with the same spatial extent.
 
 ```python
-from zarr_vectors_tools.export.obj import export_obj
+from zarr_vectors_tools.convert.export.obj import export_obj
 
 # Full-resolution mesh — the real artefact, potentially huge.
 export_obj("model.zv", "model_full.obj", level=0)
@@ -92,28 +100,32 @@ number of source objects. If you need whole objects, filter with
 face spanning a listed and an unlisted chunk is dropped, which can split
 one tree or surface into several disconnected pieces.
 
+## Memory
+
+`export_csv` and `export_ply` read and write a batch of chunks at a time
+(`vertex_budget`, default four million points), so memory holds one batch
+and the file is identical to a whole-level read. The streamline, mesh,
+AnnData and whole-level SWC exporters still read the whole level before
+writing. Size the machine for the level you export, or export a coarser
+level or a subset (`object_ids`, `bbox`). See
+[Which paths are memory-bounded](../how_to/large_scale_pipelines.md#which-paths-are-memory-bounded).
+
 ## Format headers
 
 Ingest preserves format-specific metadata that the Zarr Vectors geometry model
 cannot hold — TRK affines, SWC comment lines, OBJ object names, CSV
 normalisation parameters — under `/headers/<format>/` on the store.
 
-:::{warning}
-The exporters do **not** read `/headers/` themselves. Nothing in
-`zarr_vectors_tools.export` touches `HeaderRegistry`, so metadata does
-not round-trip automatically: read the header back yourself and pass the
-values in as arguments where the exporter accepts them (currently only
-`export_trk(affine=...)`).
-:::
+The streamline and surface exporters read those headers back themselves:
 
-```python
-from zarr_vectors_tools.headers import HeaderRegistry
-from zarr_vectors_tools.export.trk import export_trk
+| Exporter | Header it reads | What it restores |
+| --- | --- | --- |
+| `export_trk` | `trk`, or `trx` | reference image (`vox_to_ras`, voxel size, dimensions, voxel order), and the stored coordinate space |
+| `export_trx` | `trx`, or `trk` | `VOXEL_TO_RASMM`, `DIMENSIONS`; voxmm positions are converted to RAS |
+| `export_gifti` | `surface` | hemispheres, surface names, label tables, dataspace |
 
-reg = HeaderRegistry("tracts.zv")
-header = reg.get("trk")                 # TRKHeader written at ingest time
-export_trk("tracts.zv", "out.trk", affine=header.affine)
-```
+The other exporters do not consult `/headers/`; read a header back with
+`HeaderRegistry` when you need its values.
 
 See [headers](../headers.md) for the registry API and the per-format
 dataclasses.
@@ -124,6 +136,7 @@ dataclasses.
 - [Streamlines](streamlines.md) — TRK, TRX
 - [Skeletons](skeletons.md) — SWC
 - [Meshes](meshes.md) — OBJ
+- [Cortical surfaces](surfaces.md) — GIFTI
 
 ## See also
 

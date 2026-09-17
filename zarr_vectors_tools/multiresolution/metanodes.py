@@ -12,8 +12,6 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from zarr_vectors.typing import ChunkShape
-
 
 def generate_metanodes(
     positions: npt.NDArray[np.floating],
@@ -54,17 +52,29 @@ def generate_metanodes(
     unique_bins, inverse = np.unique(bin_indices, axis=0, return_inverse=True)
     n_metanodes = len(unique_bins)
 
-    # Compute centroids and children
+    # Centroids, counts and members in three passes over the vertices, not
+    # one pass per bin.  ``inverse == m`` inside a loop over the bins is
+    # O(bins x vertices): measured 0.34 s at 20k points and 2.09 s at 80k,
+    # which is hours at the millions this feeds (coarsen_points_store,
+    # coarsen_graph and coarsen_mesh_cluster all come through here).
+    inverse = np.asarray(inverse).ravel()
+    metanode_counts = np.bincount(inverse, minlength=n_metanodes).astype(np.int64)
     metanode_positions = np.zeros((n_metanodes, ndim), dtype=np.float64)
-    metanode_counts = np.zeros(n_metanodes, dtype=np.int64)
-    children: list[npt.NDArray[np.int64]] = [None] * n_metanodes  # type: ignore
+    for d in range(ndim):
+        metanode_positions[:, d] = np.bincount(
+            inverse, weights=positions[:, d].astype(np.float64),
+            minlength=n_metanodes,
+        )
+    metanode_positions /= np.maximum(metanode_counts, 1)[:, None]
 
-    for m in range(n_metanodes):
-        mask = inverse == m
-        members = np.flatnonzero(mask)
-        children[m] = members
-        metanode_counts[m] = len(members)
-        metanode_positions[m] = positions[members].mean(axis=0)
+    # Members per bin: one stable sort, then split at the group boundaries.
+    # Ascending within each group, which is what the per-bin flatnonzero
+    # produced.
+    order = np.argsort(inverse, kind="stable")
+    boundaries = np.cumsum(metanode_counts)[:-1]
+    children: list[npt.NDArray[np.int64]] = [
+        part.astype(np.int64) for part in np.split(order, boundaries)
+    ]
 
     # Aggregate attributes
     metanode_attributes: dict[str, npt.NDArray] = {}

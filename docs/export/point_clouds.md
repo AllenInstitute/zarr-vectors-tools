@@ -6,7 +6,7 @@ and PLY via `export_ply`.
 ## CSV / XYZ — `export_csv`
 
 ```python
-from zarr_vectors_tools.export.csv_points import export_csv
+from zarr_vectors_tools.convert.export.csv_points import export_csv
 
 summary = export_csv(
     "cloud.zv",                 # store_path
@@ -39,7 +39,7 @@ raising.
 ## PLY — `export_ply`
 
 ```python
-from zarr_vectors_tools.export.ply import export_ply
+from zarr_vectors_tools.convert.export.ply import export_ply
 
 summary = export_ply(
     "cloud.zv",

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from zarr_vectors.building import (
     LevelMetadata,
     RootMetadata,
@@ -18,8 +17,9 @@ from zarr_vectors.building import (
     validate_level_chunk_shape_against_root,
 )
 from zarr_vectors.exceptions import MetadataError
-from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors.types.points import read_points, write_points
+
+from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 
 
 def _minimal_root_meta(chunk_shape=(200.0, 200.0, 200.0)) -> RootMetadata:

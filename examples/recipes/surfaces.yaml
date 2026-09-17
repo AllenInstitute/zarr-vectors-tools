@@ -1,0 +1,28 @@
+# A FreeSurfer subject in scanner space, HCP myelin maps staged onto it, and a
+# pyramid that keeps the maps.  Run with:  zvtools run surfaces.yaml
+name: cortical-surfaces
+steps:
+  - convert:
+      input: data/subjects/bert
+      output: out/bert.zarrvectors
+      chunk_shape: [20, 20, 20]
+      space: scanner
+      annot: [aparc, aparc.a2009s]
+  - attach:
+      store: out/bert.zarrvectors
+      input: data/bert.MyelinMap_BC.164k_fs_LR.dscalar.nii
+  - pyramid:
+      store: out/bert.zarrvectors
+      coarsen: [2, 2]
+      sparsity: [1, 1]
+  - validate:
+      store: out/bert.zarrvectors
+  - shard:
+      store: out/bert.zarrvectors
+      shape: 8
+  # Back to GIFTI for Workbench or FreeView; an extensionless output is a
+  # directory of .gii files.
+  - convert:
+      input: out/bert.zarrvectors
+      output: out/bert_gifti
+      prefix: sub-bert

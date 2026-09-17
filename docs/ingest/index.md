@@ -1,12 +1,12 @@
 # Ingest workflows
 
 Each ingest function reads one source format and writes a Zarr Vectors
-store. There are no re-exports — `zarr_vectors_tools/ingest/__init__.py`
+store. There are no re-exports — `zarr_vectors_tools/convert/ingest/__init__.py`
 is empty, so every import names its module in full.
 
 ```python
 # Always import from the module, never from the package.
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
 result = ingest_csv(
     "transcripts.csv",          # source file
@@ -35,20 +35,23 @@ Generated from `FORMAT_REGISTRY` in
 
 | Format | CLI `--format` key | Ingest function | Zarr Vectors geometry | Extra required |
 | --- | --- | --- | --- | --- |
-| CSV / XYZ point cloud | `csv` *(`.csv`, `.xyz`)* | `zarr_vectors_tools.ingest.csv_points.ingest_csv` | points | none |
-| LAS / LAZ | `las` *(`.las`, `.laz`)* | `zarr_vectors_tools.ingest.las.ingest_las` | points | `las` |
-| PLY (points) | `ply` *(`.ply`)* | `zarr_vectors_tools.ingest.ply.ingest_ply` | points | `ply` |
-| AnnData | `h5ad` *(`.h5ad`)* | `zarr_vectors_tools.ingest.h5ad.ingest_h5ad` | points | `h5ad` |
-| Keyed table | `table` *(no extension)* | `zarr_vectors_tools.ingest.cell_table.ingest_table` | points | none |
-| CSV line segments | `lines` *(no extension)* | `zarr_vectors_tools.ingest.lines.ingest_lines_csv` | lines | none |
-| TrackVis TRK | `trk` *(`.trk`)* | `zarr_vectors_tools.ingest.trk_parallel.ingest_trk_parallel` | streamlines | `parallel` |
-| TRX | `trx` *(`.trx`)* | `zarr_vectors_tools.ingest.trx.ingest_trx` | streamlines | `streamlines` |
-| MRtrix TCK | `tck` *(`.tck`)* | `zarr_vectors_tools.ingest.tck.ingest_tck` | streamlines | `streamlines` |
-| SWC | `swc` *(`.swc`)* | `zarr_vectors_tools.ingest.swc.ingest_swc` | skeleton | none |
-| Edge-list CSV pair | `edgelist` *(no extension)* | `zarr_vectors_tools.ingest.edgelist.ingest_edgelist` | graph | `graph` |
-| GraphML | `graphml` *(`.graphml`)* | `zarr_vectors_tools.ingest.graphml.ingest_graphml` | graph | `graph` |
-| Wavefront OBJ | `obj` *(`.obj`)* | `zarr_vectors_tools.ingest.obj.ingest_obj` | mesh | none |
-| STL | `stl` *(`.stl`)* | `zarr_vectors_tools.ingest.stl.ingest_stl` | mesh | none |
+| CSV / XYZ point cloud | `csv` *(`.csv`, `.xyz`)* | `zarr_vectors_tools.convert.ingest.csv_points.ingest_csv` | points | none |
+| LAS / LAZ | `las` *(`.las`, `.laz`)* | `zarr_vectors_tools.convert.ingest.las.ingest_las` | points | `las` |
+| PLY (points) | `ply` *(`.ply`)* | `zarr_vectors_tools.convert.ingest.ply.ingest_ply` | points | `ply` |
+| AnnData | `h5ad` *(`.h5ad`)* | `zarr_vectors_tools.convert.ingest.h5ad.ingest_h5ad` | points | `h5ad` |
+| Keyed table | `table` *(no extension)* | `zarr_vectors_tools.convert.ingest.cell_table.ingest_table` | points | none |
+| CSV line segments | `lines` *(no extension)* | `zarr_vectors_tools.convert.ingest.lines.ingest_lines_csv` | lines | none |
+| TrackVis TRK | `trk` *(`.trk`)* | `zarr_vectors_tools.convert.ingest.trk_parallel.ingest_trk_parallel` | streamlines | `parallel` |
+| TRX | `trx` *(`.trx`)* | `zarr_vectors_tools.convert.ingest.trx.ingest_trx` | streamlines | `streamlines` |
+| MRtrix TCK | `tck` *(`.tck`)* | `zarr_vectors_tools.convert.ingest.tck.ingest_tck` | streamlines | `streamlines` |
+| SWC | `swc` *(`.swc`)* | `zarr_vectors_tools.convert.ingest.swc.ingest_swc` | skeleton | none |
+| Edge-list CSV pair | `edgelist` *(no extension)* | `zarr_vectors_tools.convert.ingest.edgelist.ingest_edgelist` | graph | `graph` |
+| GraphML | `graphml` *(`.graphml`)* | `zarr_vectors_tools.convert.ingest.graphml.ingest_graphml` | graph | `graph` |
+| Wavefront OBJ | `obj` *(`.obj`)* | `zarr_vectors_tools.convert.ingest.obj.ingest_obj` | mesh | none |
+| STL | `stl` *(`.stl`)* | `zarr_vectors_tools.convert.ingest.stl.ingest_stl` | mesh | none |
+| GIFTI surfaces | `gifti` *(`.gii`, or a directory of them)* | `zarr_vectors_tools.convert.ingest.gifti.ingest_gifti` | mesh (one object per hemisphere) | `surfaces` |
+| FreeSurfer subject | `freesurfer` *(a subject directory)* | `zarr_vectors_tools.convert.ingest.freesurfer.ingest_freesurfer` | mesh (one object per hemisphere) | `surfaces` |
+| Neuroglancer precomputed skeletons or meshes | `precomputed` *(a URL, or a directory with an `info` file)* | `zarr_vectors_tools.convert.ingest.precomputed.ingest_precomputed` | skeleton or mesh (one object per segment ID) | `precomputed` |
 
 Install an extra with `pip install "zarr-vectors-tools[las]"`, or
 `[all]` for the lot. Python 3.11 or newer is required.
@@ -67,20 +70,36 @@ through pandas (so string and categorical columns work, where `csv`'s
 into a join key, so further files can be staged into the store afterwards.
 See [Single-cell and spatial omics](single_cell.md).
 
-`trk` is the only registry entry with `inline_pyramid=True`: the ingest
-builds the multiscale pyramid itself rather than leaving it to a
-follow-up `build_pyramid` call. See
-[Tractography at scale](tractography_at_scale.md).
+`gifti` and `freesurfer` also accept a **directory**, because one subject's
+cortex is many files. A FreeSurfer subject is recognised by
+`surf/lh.white` or `surf/rh.white`, and any other directory holding `.gii`
+files resolves to `gifti`. CIFTI files carry no geometry, so they are staged
+onto a surface store with `zvtools attach` instead. See
+[Cortical surfaces](surfaces.md).
+
+`precomputed` reads a layer, which is a directory or a bucket prefix: any
+URL resolves to it, since no other ingester reads one, as does a local
+directory holding an `info` file. `ingest_precomputed` reads that `info`
+and hands a skeleton layer to `precomputed_skeletons.run_ingest` when it
+has a `spatial_index`, or to `precomputed_plain_skeletons.run_ingest_plain`
+when it does not. A mesh layer goes to
+`precomputed_meshes.ingest_precomputed_meshes`. See
+[Skeletons in EM](em_skeletons.md) and
+[Meshes](meshes.md#neuroglancer-precomputed--ingest_precomputed_meshes).
+
+`trk` and `precomputed` are the registry entries with
+`inline_pyramid=True`: the ingest builds the multiscale pyramid itself
+rather than leaving it to a follow-up `build_pyramid` call. A precomputed
+mesh layer is the exception, and builds its pyramid afterwards like any
+other mesh. See [Tractography at scale](tractography_at_scale.md).
 
 ## Ingests not in the CLI registry
 
-Three entry points are reachable from Python only:
+One entry point is reachable from Python only:
 
 | Function | Source | Extra |
 | --- | --- | --- |
-| `zarr_vectors_tools.ingest.precomputed_skeletons.run_ingest` | Precomputed skeleton layer with a `spatial_index` (`.frags`) | `precomputed` |
-| `zarr_vectors_tools.ingest.precomputed_plain_skeletons.run_ingest_plain` | Precomputed skeleton layer with no spatial index | `precomputed` |
-| `zarr_vectors_tools.ingest.trk.ingest_trk` | TRK, serial whole-file read via `nibabel` | `streamlines` |
+| `zarr_vectors_tools.convert.ingest.trk.ingest_trk` | TRK, serial whole-file read via `nibabel` | `streamlines` |
 
 `ingest_trk` is the serial sibling of `ingest_trk_parallel`. `--format trk`
 on the CLI always routes to the parallel path; reach for the serial one
@@ -99,6 +118,8 @@ in Python when the file is small enough to hold in RAM and you want the
 - [Skeletons in EM](em_skeletons.md) — precomputed / CloudVolume sources
 - [Graphs](graphs.md) — edge-list CSV, GraphML
 - [Meshes](meshes.md) — OBJ, STL
+- [Cortical surfaces](surfaces.md) — GIFTI, FreeSurfer, and CIFTI maps
+  attached onto them
 
 Attribute names produced by the enrichment options are listed in full at
 [Enrichments](../enrichments.md).

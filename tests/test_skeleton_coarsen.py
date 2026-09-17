@@ -9,7 +9,6 @@ from collections import defaultdict
 
 import numpy as np
 import pytest
-
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -18,16 +17,15 @@ from zarr_vectors.building import (
     read_chunk_fragment_attributes,
     read_chunk_vertices,
 )
+from zarr_vectors.types import skeletons as sk
+
+from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
-    coarsen_skeleton_level,
     decimate_skeleton,
     simplify_skeleton,
 )
-from zarr_vectors.types import skeletons as sk
-from zarr_vectors_tools.multiresolution.object_index import build_object_index
-
 
 # --------------------------------------------------------------------------
 # Pure simplification
@@ -315,6 +313,7 @@ def _ppool_executor(func, items, shared=None):
         return list(ex.map(partial(func, shared=shared), items))
 
 
+@pytest.mark.slow
 def test_pyramid_parallel_executor_matches_serial(tmp_path):
     """A parallel (multi-process) executor must produce a byte-identical store
     to the serial default — the coordinator plans deterministically and each

@@ -12,7 +12,7 @@ The first `2 * ndim` columns are endpoint coordinates in
 after them is a per-line attribute.
 
 ```python
-from zarr_vectors_tools.ingest.lines import ingest_lines_csv
+from zarr_vectors_tools.convert.ingest.lines import ingest_lines_csv
 
 # segments.csv:  x0,y0,z0,x1,y1,z1,weight
 #                12.0,4.5,0.0,18.2,4.9,0.0,0.73

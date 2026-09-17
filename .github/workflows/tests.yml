@@ -1,0 +1,141 @@
+name: Tests
+
+# Two tiers, split by the `slow` marker (see [tool.pytest.ini_options] in
+# pyproject.toml):
+#
+#   lint + fast tier   every push to main / APEX-hackathon, and every PR
+#   full tier          nightly, and on demand (Actions tab -> Run workflow)
+#
+# Runners are shared with zarr-vectors-py's own suite, so this workflow keeps
+# its footprint small: push runs only on the long-lived branches (a feature
+# branch is tested through its PR, not twice), docs-only changes skip it, and
+# a newer push cancels the run it supersedes.
+#
+# GitHub only fires `schedule` from the default branch, and only offers
+# "Run workflow" once this file is on it.  So the nightly tests main; to run
+# the full tier on another branch, dispatch it with that ref:
+#
+#   gh workflow run tests.yml --ref APEX-hackathon -f tier=full
+
+on:
+  push:
+    branches: [main, APEX-hackathon]
+    paths-ignore: ["docs/**", "examples/**", "benchmarks/**", "assets/**", "**/*.md", ".readthedocs.yaml"]
+  pull_request:
+    paths-ignore: ["docs/**", "examples/**", "benchmarks/**", "assets/**", "**/*.md", ".readthedocs.yaml"]
+  schedule:
+    - cron: "17 7 * * *"   # 07:17 UTC; off the hour, when scheduled load peaks
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Which tier to run
+        type: choice
+        options: [full, fast]
+        default: full
+
+permissions:
+  contents: read
+
+# The event is part of the group so a push to main cannot cancel the nightly
+# that happens to be running on main.  Only push/PR runs cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  # This package needs an UNRELEASED core: the merged links/<delta>/<offsets>/
+  # layout and the `zarr_vectors.building` surface (see the comment on the
+  # zarr-vectors dependency in pyproject.toml), which are on core's main but
+  # not yet in a release.  No version specifier can express that, so CI
+  # installs core from git at this one pinned commit.
+  #
+  # To bump: pick a commit that is pushed to the core repo (a local-only
+  # commit will not clone), check this package's tests pass against it, and
+  # paste its full 40-character SHA here.  For the commit your local core
+  # checkout is on:
+  #
+  #   git -C ../zarr-vectors-py log -1 --format=%H
+  #   git -C ../zarr-vectors-py branch -r --contains <sha>   # must list a branch
+  #
+  # Currently core's main at the merge of core PR #35 (its APEX-hackathon).
+  CORE_SHA: 6794461a5f03e8defe936ca88a5536fce6ea4f49
+  CORE_REPO: https://github.com/AllenInstitute/zarr-vectors-py
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+defaults:
+  run:
+    shell: bash   # Git Bash on Windows, so every step reads the same
+
+jobs:
+  lint:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      # Pinned so a new ruff release cannot turn a clean tree red overnight;
+      # bump it deliberately and fix what it finds.
+      - run: python -m pip install "ruff==0.15.13"
+      # The package, not the repo: zarr_vectors_tools/ is lint-clean, while
+      # older test files still carry ~15 known cosmetic violations (long
+      # lines, `l` as a name, `a; b`).  Widen this once tests/ is cleaned up.
+      - run: ruff check --output-format=github zarr_vectors_tools
+
+  fast:
+    name: fast tier (${{ matrix.os }}, py${{ matrix.python }})
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'fast')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Lowest and highest supported Python on Linux ...
+          - {os: ubuntu-latest, python: "3.11"}
+          - {os: ubuntu-latest, python: "3.13"}
+          # ... and Windows, whose process pools spawn rather than fork and
+          # whose atomic renames fail where POSIX ones succeed.
+          - {os: windows-latest, python: "3.13"}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-for-tests
+        with:
+          python-version: ${{ matrix.python }}
+          core-repo: ${{ env.CORE_REPO }}
+          core-sha: ${{ env.CORE_SHA }}
+      # Budget: under 5 minutes.  The step limit is looser so runner noise
+      # does not fail it, but a test that belongs in the slow tier still gets
+      # caught here; --durations names the culprit.
+      - name: pytest -m "not slow"
+        timeout-minutes: 15
+        run: python -m pytest -m "not slow" -rs --durations=20 --basetemp="$RUNNER_TEMP/pytest"
+
+  full:
+    name: full tier (${{ matrix.os }}, py${{ matrix.python }})
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.tier == 'full')
+    runs-on: ${{ matrix.os }}
+    # About 30 minutes on an idle workstation; hosted runners are slower.
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-for-tests
+        with:
+          python-version: ${{ matrix.python }}
+          core-repo: ${{ env.CORE_REPO }}
+          core-sha: ${{ env.CORE_SHA }}
+      # A short --basetemp keeps deep store paths clear of Windows' 260-char limit.
+      - name: pytest
+        run: python -m pytest -rs --durations=30 --basetemp="$RUNNER_TEMP/pytest"

@@ -7,7 +7,7 @@ touches index-sized data. This is the path `--format trk` takes on the
 CLI, and the only ingest in the package that builds its pyramid inline.
 
 ```python
-from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
 summary = ingest_trk_parallel(
     "hcp_5M.trk",
@@ -156,6 +156,36 @@ file's size, and set `keep_intermediate=True` when debugging a failed
 run. Cleanup errors are swallowed deliberately: by the time cleanup runs
 the store is written, so a straggling scratch file must never fail an
 otherwise complete ingest.
+
+A directory you name is never deleted, and the ingest keeps a progress
+record in it, `trk_parallel_run.json`, with the options each stage ran
+with.
+
+## Resuming a run that stopped
+
+On a whole-brain file the offset scan and Phase A take hours, and the
+pyramid as long again. A run given `intermediate_dir` records each stage as
+it completes, and `resume=True` skips what is recorded and still on disk:
+
+| Stage | On resume |
+| --- | --- |
+| offset scan | reused if the file's size and modification time are unchanged |
+| Phase A | its part files are reused |
+| level 0 | reused if it finished; a partial store is removed and rebuilt from the part files |
+| pyramid | finished levels are kept; the level that was being written is removed and rebuilt |
+
+```bash
+zvtools convert tracts.trk tracts.zarrvectors --num-chunks 5000 --workers 8 \
+    --coarsen 8,8 --sparsity 1,4 --scratch-dir /scratch/tracts --resume
+```
+
+Pass the same options on every run, including the first. A resume whose
+options would change what an earlier stage wrote is refused, and the error
+names the options that differ. Pyramid options only decide which levels are
+kept. A leftover store at the output path is removed only when the record
+shows this ingest created it. In a [recipe](../getting_started/cli.md),
+`scratch_dir` and `resume: true` make a rerun after a failure pick up where
+it stopped.
 
 ## See also
 

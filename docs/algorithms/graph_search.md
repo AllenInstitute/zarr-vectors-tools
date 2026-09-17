@@ -1,15 +1,15 @@
 # Graph search
 
 Frontier search over a chunked graph (or skeleton) store. Both
-algorithms in this module use the same in-memory adjacency map, built
-once per call via the internal `build_adjacency` helper.
+algorithms read the level's links once per call into an array adjacency
+(compressed sparse rows: `indptr`, `indices`, `weights`).
 
-At format {{ zv_version }} connectivity is a single family, so
-`build_adjacency` performs **one whole-family `read_links(delta=0)`**
-rather than a per-chunk pass followed by a separate cross-chunk merge.
-Edge weights come from `read_link_attributes(level_group, weight_attr,
-delta=0)`, aligned row-for-row with the links by shared `(segment, cell)`
-enumeration order; a length mismatch falls back to unit weights.
+At format {{ zv_version }} connectivity is a single family, so the adjacency
+comes from **one whole-family `read_link_arrays(delta=0)`** rather than a
+per-chunk pass followed by a separate cross-chunk merge. Edge weights come
+from `read_link_attributes(level_group, weight_attr, delta=0)`, aligned
+row-for-row with the links by their shared `(segment, cell)` enumeration
+order; a length mismatch falls back to unit weights.
 
 :::{warning}
 Older code and notes describe merging cross-chunk edges in from
@@ -25,7 +25,7 @@ from zarr_vectors_tools.algorithms import bfs_distances
 
 result = bfs_distances("graph.zv", source=0, max_distance=5)
 result["distances"]      # (N,) int32 — -1 for unreached
-result["predecessors"]   # (N,) int64 — -1 for source and unreached
+result["predecessors"]   # (N,) int64 — lowest-numbered parent; -1 for source and unreached
 ```
 
 `source`
@@ -58,9 +58,9 @@ res = shortest_path("graph.zv", source=0, target=42, heuristic=euclid_to_target)
 `weight`
 : Name of an edge attribute to use as the per-edge cost. `None`
   (default) means unit weights, which makes Dijkstra equivalent to BFS.
-  Cross-chunk edges read their weight from
-  `cross_chunk_link_attributes/<weight>/0/` when that array exists;
-  otherwise they silently fall back to unit weight.
+  Every edge, intra- or cross-chunk, reads its weight from
+  `link_attributes/<weight>/0/`; without that family, weights are
+  silently 1.
 
 `heuristic`
 : Optional admissible lower-bound function `node_index -> float`. When
@@ -68,18 +68,24 @@ res = shortest_path("graph.zv", source=0, target=42, heuristic=euclid_to_target)
 
 ## Algorithm notes
 
-Both functions materialise the full adjacency once. Memory cost is
-**O(N + E)** in the number of nodes plus edges; for a graph with `E`
-intra-chunk edges plus `C` cross-chunk edges, every edge contributes
-two entries to the adjacency list (undirected). BFS itself is the
-standard double-ended queue; the Dijkstra path uses `heapq` with
-stale-entry filtering on pop. Path reconstruction follows the
-predecessor pointer chain from `target` back to `source`.
+Both functions build the full adjacency once. Memory is **O(N + E)**: every
+edge contributes two entries (undirected), a parallel edge one pair per
+copy, and a self-loop two entries on its vertex.
 
-The shared `build_adjacency` helper is also called by every algorithm
-in [Graph clustering](graph_clustering.md) — the in-memory adjacency
-that LPA, Louvain, and k-core need is identical to what the search
-routines build, so a single code path covers both.
+- **BFS** expands a whole frontier per step with numpy: gather the
+  frontier's neighbours, keep the unvisited ones, and give each its
+  lowest-numbered parent. The distances equal a queue BFS's, and the
+  predecessors do not depend on edge order.
+- **Dijkstra / A\*** keeps a `heapq`, over plain lists taken from the
+  adjacency arrays, and stops when the target is popped. A stale entry
+  (one pushed before a shorter route was found) is skipped on pop. A node
+  can be reopened, so an admissible heuristic that is not consistent still
+  finds the shortest path. Path reconstruction follows the predecessor
+  chain from `target` back to `source`.
+
+`build_adjacency` still returns the Python adjacency lists for callers that
+want them. The algorithms here and in
+[Graph clustering](graph_clustering.md) use the array form directly.
 
 ## See also
 

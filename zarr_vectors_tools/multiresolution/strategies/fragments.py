@@ -62,16 +62,12 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from zarr_vectors.constants import (
-    CAP_PRESERVED_OBJECT_IDS,
-    CAP_SHARED_FRAGMENTS,
-    VERTICES,
-)
 from zarr_vectors.building import (
     LevelMetadata,
     create_object_index_array,
     create_resolution_level,
     create_vertices_array,
+    get_level_chunk_shape,
     get_resolution_level,
     list_chunk_keys,
     open_store,
@@ -83,6 +79,11 @@ from zarr_vectors.building import (
     write_chunk_fragments,
     write_chunk_vertices,
     write_object_index,
+)
+from zarr_vectors.constants import (
+    CAP_PRESERVED_OBJECT_IDS,
+    CAP_SHARED_FRAGMENTS,
+    VERTICES,
 )
 from zarr_vectors.exceptions import ArrayError
 
@@ -303,11 +304,26 @@ def coarsen_fragments_level(
             n_out += 1
 
     # ---- write the target level ---------------------------------------
-    target_chunk_shape_override = None
-    if any(s != 1 for s in scale):
-        target_chunk_shape_override = tuple(
-            float(c) * float(s) for c, s in zip(root_meta.chunk_shape, scale)
+    # Scale the SOURCE level's chunk shape, not the root's.  ``_target_chunk``
+    # divides SOURCE coords by ``scale``, so the grid this level's coords live
+    # on is the source grid scaled once.  Deriving the declared shape from the
+    # root instead made every level past the first contradict its own
+    # coordinates -- at level 2 of a [2, 2] pyramid the store declared 20 while
+    # the coords had been divided by 4, so a bbox query resolved to the wrong
+    # chunks.  (``strategies.meshes`` already scales from the source; this is
+    # the same fix.)
+    src_chunk_shape = get_level_chunk_shape(root_meta, _src_lm)
+    target_chunk_shape = tuple(
+        float(c) * float(s) for c, s in zip(src_chunk_shape, scale)
+    )
+    target_chunk_shape_override = (
+        None
+        if all(
+            abs(t - r) < 1e-9
+            for t, r in zip(target_chunk_shape, root_meta.chunk_shape)
         )
+        else target_chunk_shape
+    )
 
     total_vertices = sum(
         sum(int(a.shape[0]) for a in arrs) for arrs in out_vertices.values()

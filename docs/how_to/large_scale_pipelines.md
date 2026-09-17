@@ -51,8 +51,8 @@ Precomputed skeleton ingest is Python-only — it is not in the `zvtools`
 format registry. The shape of a driver script:
 
 ```python
-from zarr_vectors_tools.ingest._parallel import dask_executor
-from zarr_vectors_tools.ingest.precomputed_skeletons import (
+from zarr_vectors_tools.convert.ingest._parallel import dask_executor
+from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
     PrecomputedFragsReader, enumerate_frag_keys, run_ingest,
 )
 
@@ -90,7 +90,7 @@ The plain (no spatial index) path splits its concurrency in two, because
 the two phases are bound by different resources:
 
 ```python
-from zarr_vectors_tools.ingest.precomputed_plain_skeletons import run_ingest_plain
+from zarr_vectors_tools.convert.ingest.precomputed_plain_skeletons import run_ingest_plain
 
 run_ingest_plain(
     "precomputed://gs://allen_neuroglancer_ccf/Mouselight",
@@ -125,6 +125,36 @@ level 0 was written with. Omit it here and you get compressed level-0
 data under raw coarse levels. Pass it every time.
 :::
 
+## Which paths are memory-bounded
+
+"Bounded" here means peak memory is set by a chunk, a batch or a part, not
+by the size of the input. Everything else holds the whole input (or the
+whole level) at once. Size your machine for those, or use the bounded path.
+
+| Path | Bounded by | Held whole |
+| --- | --- | --- |
+| `ingest_trk_parallel` (`zvtools convert x.trk`) | a part in Phase A, a chunk in Phase B | the offset index and the object manifests |
+| `run_ingest` (precomputed with a spatial index) | one `.frags` chunk per worker | the object-index records |
+| `run_ingest_plain` (precomputed without) | `batch_size` skeletons, then one chunk's pieces | the object-index records and cross-chunk endpoints |
+| `ingest_precomputed_meshes` | — | every ingested segment's vertices and faces |
+| `ingest_trk`, `ingest_tck`, `ingest_trx` | — | the whole tractogram |
+| `ingest_csv`, `ingest_ply`, `ingest_las`, `ingest_table` | — | the whole file |
+| `ingest_h5ad` | — | the whole file; with `backed=True`, all but the expression matrix |
+| `ingest_obj`, `ingest_stl`, `ingest_gifti`, `ingest_freesurfer` | — | the whole mesh |
+| the parallel coarseners (`build_pyramid`) | one target chunk per task | per-object bookkeeping for the level |
+| `export_csv`, `export_ply` | a batch of chunks (`vertex_budget`, default 4M points) | — |
+| `export_swc` with `object_ids` on an EM store | one segment | — |
+| `export_trk`, `export_trx`, `export_obj`, `export_h5ad`, whole-level `export_swc` | — | the whole level |
+| `export_precomputed` of an EM skeleton store | one segment | the segment-id list |
+| `export_precomputed` of a graph or mesh store | — | the whole level |
+| `select_streamlines` | the chunks the region touches | — |
+| `ingest_synapses` | `chunksize` table rows while reading | every synapse's position and attributes for the write |
+
+The export bound is measured: in the test suite a CSV export of 300,000
+points with a 20,000-point batch peaks at under a third of the traced
+memory of a single-batch export. The TRK bound is the one the tractography
+pages measure.
+
 ## Recovering from a failed pyramid
 
 Pyramid builds are the usual casualty of a long run — they are the most
@@ -132,9 +162,13 @@ memory-hungry stage, and the OOM killer finds them. Levels are written in
 sequence, so completed levels are intact and only the level in progress
 is partial.
 
-The recovery is to delete the first incomplete level and rebuild from the
-last good one, which is what `scripts/resume_trk_pyramid.py` does. In
-Python:
+For a TRK ingest, give it `intermediate_dir` and `resume=True`
+(`--scratch-dir DIR --resume`): the rerun keeps the finished pyramid levels
+and rebuilds only from the one that was being written. See
+[Tractography at scale](../ingest/tractography_at_scale.md#resuming-a-run-that-stopped).
+
+For any other store, delete the first incomplete level and rebuild from the
+last good one. In Python:
 
 ```python
 from zarr_vectors_tools.multiresolution.refresh import rebuild_pyramid_from_level
@@ -145,9 +179,12 @@ rebuild_pyramid_from_level(root, source_level=2)
 ```
 
 `rebuild_pyramid_from_level` reuses each level's stored `bin_ratio`,
-`object_sparsity` and `chunk_shape`, so the result is equivalent to a
-from-scratch build rather than an approximation. See
-[Refresh](../multiresolution/refresh.md).
+`object_sparsity`, `chunk_shape` and `coarsening_method`, so the result
+is equivalent to a from-scratch build rather than an approximation. Pass
+`sparsity_strategy=` (and `compressor=`) to match the original build —
+neither is recorded on disk. A skeleton pyramid also needs its stride,
+which nothing records: pass `coarsen_factors={level: stride}` or the
+refresh refuses. See [Refresh](../multiresolution/refresh.md).
 
 To avoid the OOM in the first place: more chunks (smaller `chunk_shape`)
 lowers peak memory per task, because the parallel coarseners are

@@ -7,8 +7,8 @@ ingest paths cover them, and which one you need is decided by the layer's
 
 | Layer has | Function | Reader | Read pattern |
 | --- | --- | --- | --- |
-| a `spatial_index` block | `zarr_vectors_tools.ingest.precomputed_skeletons.run_ingest` | `PrecomputedFragsReader` | one `<bbox>.frags` MapBuffer per spatial chunk |
-| no spatial index | `zarr_vectors_tools.ingest.precomputed_plain_skeletons.run_ingest_plain` | `PlainPrecomputedReader` | one cloud read per segment ID |
+| a `spatial_index` block | `zarr_vectors_tools.convert.ingest.precomputed_skeletons.run_ingest` | `PrecomputedFragsReader` | one `<bbox>.frags` MapBuffer per spatial chunk |
+| no spatial index | `zarr_vectors_tools.convert.ingest.precomputed_plain_skeletons.run_ingest_plain` | `PlainPrecomputedReader` | one cloud read per segment ID |
 
 Both need the `precomputed` extra:
 
@@ -19,6 +19,34 @@ pip install "zarr-vectors-tools[precomputed]"   # cloud-volume, mapbuffer, cloud
 Both produce the same thing — a multiscale skeleton store whose object
 index preserves the original uint64 segment IDs, so a segment picked in
 Neuroglancer resolves to the same object in the Zarr Vectors store.
+
+## From the command line
+
+`zvtools convert` takes a layer URL or directory and reads its `info` to
+choose between the two paths, so the command is the same for both. A
+spatially indexed layer keeps its own chunk grid; a plain one needs
+`--chunk-shape` in nanometres:
+
+```bash
+# Spatial index: a block of .frags chunks, with a pyramid.
+zvtools convert gs://flywire_v141_m783/skeletons_mip_1 flywire_cutout.zv \
+    --anchor 17398,10448,3088 --counts 8,8,4 \
+    --coarsen 8,8,8 --chunk-scale 2,2,2 --sparsity 1,1,4 \
+    --drop-interior-below 3 --workers 8
+
+# No spatial index: a few segments first, to check the chunk shape.
+zvtools convert precomputed://gs://allen_neuroglancer_ccf/Mouselight mouselight.zv \
+    --chunk-shape 1000000,1000000,1000000 --segment-id 1 --segment-id 2
+```
+
+`--coarsen` supplies the per-level `strides` and `--sparsity` the
+`sparsity_factors`, a divisor (`4` keeps a quarter of the objects).
+`--workers` runs the `.frags` extract and the pyramid in worker processes
+(`--workers-backend dask` for a Dask cluster). The plain path always reads
+with 8 threads, and `--workers` goes to its pyramid build. Without
+`--anchor`, the spatially indexed path lists every `.frags` file in the
+layer (or in `--frags-dir`) and ingests them all; see the next section for
+why a script usually names a block instead.
 
 ## Spatially indexed sources — `run_ingest`
 
@@ -35,7 +63,7 @@ Worked example — a FlyWire cutout, mirroring
 ```python
 import numpy as np
 
-from zarr_vectors_tools.ingest.precomputed_skeletons import (
+from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
     PrecomputedFragsReader, enumerate_frag_keys, run_ingest,
 )
 
@@ -79,7 +107,9 @@ steps of `chunk_size_voxels`, reconstructing filenames from the igneous
 bucket-wide listing on a production EM layer is expensive and slow, so
 the anchor is not a convenience — it is the mechanism. It is a required
 argument on the module's own CLI, and passing a corner that is not on the
-`.frags` grid yields keys for files that do not exist.
+`.frags` grid yields keys for files that do not exist. `zvtools convert`
+makes it optional, listing the layer when it is left out, because
+converting a whole layer is what that command is for.
 
 ### Chunk-grid alignment
 
@@ -94,11 +124,12 @@ are merged upward by the coarsener.
 
 ### Module CLI
 
-`precomputed_skeletons.py` carries its own argparse entry point, separate
-from `zvtools`:
+`precomputed_skeletons.py` also carries its own argparse entry point,
+separate from `zvtools`. It covers the spatially indexed path only, and adds
+`--no-align`:
 
 ```bash
-python -m zarr_vectors_tools.ingest.precomputed_skeletons \
+python -m zarr_vectors_tools.convert.ingest.precomputed_skeletons \
     gs://flywire_v141_m783/skeletons_mip_1 \
     flywire_cutout.zv \
     --anchor "17398 10448 3088" \
@@ -121,7 +152,7 @@ list comes from the layer's `segment_properties/info` inline `ids` array.
 Worked example — Allen Mouselight, mirroring `scripts/ingest_mouselight.py`:
 
 ```python
-from zarr_vectors_tools.ingest.precomputed_plain_skeletons import (
+from zarr_vectors_tools.convert.ingest.precomputed_plain_skeletons import (
     PlainPrecomputedReader, run_ingest_plain,
 )
 
@@ -167,6 +198,15 @@ Raising `read_workers` costs connections, not memory. Raising
 `pyramid_workers` costs memory, because each process holds its own
 working set.
 
+### Memory is a batch, not the layer
+
+Skeletons are read `batch_size` at a time (default 256) and every stage
+spills to scratch disk: each batch of skeletons, then each chunk's pieces,
+so one chunk is written at a time. Peak memory scales with `batch_size`,
+and the store does not depend on it. `scratch_dir` puts the scratch on a
+large disk; it is removed when the ingest finishes. Each reading thread
+opens the layer once, rather than once per segment.
+
 ### Segment properties become object attributes
 
 The plain path converts the layer's inline property table to per-object
@@ -192,8 +232,109 @@ chunk. That second condition is what makes it safe: a fragment that might
 continue elsewhere is never removed, only genuinely self-contained
 specks. `0` (the default) keeps everything.
 
+## Synapse tables — `ingest_synapses`
+
+A CAVE synapse export joins a skeleton store by segment id, with no spatial
+matching. The synapses become a point store whose object ids are the
+skeleton store's, so synapse object 12 is the same neuron as skeleton object
+12, and each neuron gains `synapse_pre_count` and `synapse_post_count`.
+
+```bash
+zvtools synapses flywire_synapses.csv flywire_cutout.zarrvectors synapses.zarrvectors \
+    --resolution 4,4,40 --column size
+```
+
+```python
+from zarr_vectors_tools.convert.ingest.synapses import ingest_synapses
+
+ingest_synapses("flywire_synapses.parquet", "flywire_cutout.zv", "synapses.zv",
+                side="post", resolution=(4, 4, 40), columns=["size"])
+```
+
+| Choice | Default | Options |
+| --- | --- | --- |
+| which segment owns a synapse | `side="post"` | `"pre"`; the other side's id is kept as `pre_segment_id` / `post_segment_id` |
+| where the point is | `position="ctr_pt_position"` | a `"[x y z]"` column, or `<name>_x/_y/_z` columns |
+| positions' units | `resolution=(1, 1, 1)` nm per voxel | FlyWire and MICrONS tables are `(4, 4, 40)` |
+| a segment the skeleton store lacks | `unmatched="keep"` as one extra object | `"drop"`, `"error"` |
+
+- The synapse id is stored as the join key, so further per-synapse tables
+  attach with `zvtools attach`.
+- Counts are written to every level of the skeleton store and replace any
+  earlier ones.
+- The synapse store's objects carry the skeleton store's `segment_id`, so
+  either store can be searched by segment; see
+  [One segment across stores](#one-segment-across-stores--segmentlink).
+- The table is read `chunksize` rows at a time. The point store is written in
+  one call, so memory holds every synapse's position and attributes, about
+  40 bytes per synapse.
+
+## Per-segment metrics — `compute_skeleton_metrics`
+
+One pass over a level's chunks measures every object and stores the result as
+object attributes, indexed by object id:
+
+```python
+from zarr_vectors_tools.algorithms.skeleton_metrics import compute_skeleton_metrics
+
+df = compute_skeleton_metrics("flywire.zv", level=0)   # writes object_attributes/*
+df.sort_values("cable_length").tail()
+```
+
+The metrics are `cable_length`, `node_count`, `leaf_count`, `branch_count`,
+`component_count`, `max_strahler` and `extent` (bounding-box size, one column
+per axis).
+
+- Cross-chunk edges are included, and the boundary vertex igneous duplicates
+  into both chunks counts once.
+- Strahler order is rooted at the stored root when there is one (SWC),
+  otherwise at the tip with the smallest (x, y, z).
+- Objects a sparsity level emptied read 0, and NaN for `extent`.
+- Pass `metrics=[...]` for a subset, `write=False` to only return the frame,
+  and `executor=` to summarise chunks in parallel.
+
+Cable length and counts are per level: a decimated level is shorter and has
+fewer nodes than level 0.
+
+:::{note}
+The `attribute` sparsity strategy cannot yet pick objects by a stored metric:
+no coarsener passes object attribute values through to it.
+:::
+
+## One segment across stores — `SegmentLink`
+
+A skeleton store, a mesh store and a synapse store of the same neurons share
+segment ids and nothing else; each numbers its objects its own way.
+`SegmentLink` opens them together and looks a segment up by value:
+
+```python
+from zarr_vectors_tools.algorithms.segment_link import SegmentLink
+
+link = SegmentLink({
+    "skeletons": "flywire_skeletons.zv",
+    "meshes": "flywire_meshes.zv",
+    "synapses": "flywire_synapses.zv",
+})
+link.resolve(720575940000000011)
+# {'skeletons': 0, 'meshes': 412, 'synapses': 0}
+link.link("meshes", 412)                 # the object picked in one store, in the others
+link.attributes(720575940000000011)      # e.g. cable length and synapse counts, and mesh volume
+link.resolve_many(ids, level=2)          # a DataFrame, <NA> where a store lacks the segment
+```
+
+- A store qualifies when its objects carry `object_attributes/segment_id`.
+  The precomputed skeleton and mesh ingests write it, and so does
+  `ingest_synapses`, with segment 0 for the object holding unmatched
+  synapses.
+- A segment resolves to `None` in a store that never held it, and at a
+  level whose sparsity dropped it. Object ids do not change between a
+  skeleton pyramid's levels; only which objects have geometry does.
+- Each store's segment ids are read once per level, so a `SegmentLink`
+  kept open answers repeated lookups without rereading them.
+
 ## See also
 
+- [Meshes](meshes.md#neuroglancer-precomputed--ingest_precomputed_meshes) — precomputed mesh layers
 - [Skeletons](skeletons.md) — SWC morphology ingest
 - [Parallelism](../how_to/parallelism.md)
 - [Building pyramids](../multiresolution/building_pyramids.md)

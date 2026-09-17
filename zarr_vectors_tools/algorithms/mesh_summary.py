@@ -24,11 +24,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-from zarr_vectors.constants import (
-    VERTEX_FRAGMENTS,
-    VERTICES,
-)
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -36,8 +31,12 @@ from zarr_vectors.building import (
     read_all_object_manifests,
     read_chunk_links,
     read_chunk_vertices,
-    read_fragment,
     read_root_metadata,
+    read_vertex_fragment_index,
+)
+from zarr_vectors.constants import (
+    VERTEX_FRAGMENTS,
+    VERTICES,
 )
 from zarr_vectors.typing import ChunkCoords
 
@@ -95,7 +94,9 @@ def compute_mesh_summary(
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
 
-    link_width = require_link_width(
+    # Called for the check, not the value: a non-triangle store must fail
+    # here rather than silently produce areas from mis-read rows.
+    require_link_width(
         level_group, 3, what="compute_mesh_summary v0 (triangle meshes only)",
     )
 
@@ -107,10 +108,24 @@ def compute_mesh_summary(
     face_count = 0
     vertex_count = 0
 
-    # Edge keys are ((chunk_key, local_index), (chunk_key, local_index))
-    # with the smaller endpoint first. Same scheme applies to intra and
-    # cross edges, so they share the deduplication set safely.
-    edge_set: set[tuple[tuple, tuple]] = set()
+    # Edge counting, without a Python object per edge.
+    #
+    # An edge is ``((chunk, local), (chunk, local))``.  Two edges can only
+    # be the same edge if they name the same chunk pair, so the global
+    # dedup the Euler characteristic needs decomposes into one dedup per
+    # chunk (edges inside it) plus one over the records that span chunks.
+    # That is what lets the per-chunk half stay as a NumPy array of index
+    # pairs -- 16 bytes an edge against the ~600 a set of nested tuples
+    # cost, which at a hundred million faces is the difference between a
+    # few gigabytes and not finishing.
+    #
+    # The spanning records are read FIRST so that a cross-chunk face's
+    # two corners that happen to share a chunk join that chunk's own dedup
+    # pass rather than needing a second global set.
+    edge_count = 0
+    spanning_edges: set[tuple[tuple, tuple]] = set()
+    same_chunk_from_records: dict[ChunkCoords, list[tuple[int, int]]] = {}
+    excluded_cross_face_edges = 0
 
     def _edge_key(a: tuple, b: tuple) -> tuple[tuple, tuple]:
         return (a, b) if a <= b else (b, a)
@@ -120,6 +135,29 @@ def compute_mesh_summary(
         (VERTEX_FRAGMENTS, chunk_key_strs),
         *link_prefetch_plan(level_group, chunk_keys),
     ]):
+        # Cross-only: the per-chunk loop below consumes every intra record
+        # via read_chunk_links, so the whole-family read_links would
+        # double-count them here.
+        try:
+            cross_links = read_cross_links(level_group, delta=0)
+        except Exception:
+            cross_links = []
+        # Records may have 2 endpoints (a cross-chunk edge) or 3+ (a
+        # cross-chunk face).  Each contributes (len - 1) consecutive edges.
+        for record in cross_links:
+            eps = [(tuple(chunk), int(vi)) for chunk, vi in record]
+            if len(eps) < 2:
+                continue
+            for k in range(len(eps) - 1):
+                a, b = eps[k], eps[k + 1]
+                excluded_cross_face_edges += 1
+                if a[0] == b[0]:
+                    same_chunk_from_records.setdefault(a[0], []).append(
+                        (a[1], b[1]),
+                    )
+                else:
+                    spanning_edges.add(_edge_key(a, b))
+
         for chunk_key in chunk_keys:
             try:
                 vgroups = read_chunk_vertices(
@@ -139,6 +177,7 @@ def compute_mesh_summary(
             except Exception:
                 link_groups = []
 
+            chunk_pairs: list[np.ndarray] = []
             for faces in link_groups:
                 if len(faces) == 0:
                     continue
@@ -152,33 +191,27 @@ def compute_mesh_summary(
                 surface_area += float(np.linalg.norm(cross, axis=1).sum() * 0.5)
                 volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
 
-                for col_a, col_b in ((0, 1), (1, 2), (2, 0)):
-                    a_locals = faces[:, col_a].tolist()
-                    b_locals = faces[:, col_b].tolist()
-                    for la, lb in zip(a_locals, b_locals):
-                        edge_set.add(
-                            _edge_key((chunk_key, int(la)), (chunk_key, int(lb)))
-                        )
+                chunk_pairs.append(np.concatenate([
+                    faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]],
+                ], axis=0))
 
-        # Cross-only: the per-chunk loop above already consumed every
-        # intra record via read_chunk_links, so the whole-family
-        # read_links would double-count them here.
-        try:
-            cross_links = read_cross_links(level_group, delta=0)
-        except Exception:
-            cross_links = []
-    excluded_cross_face_edges = 0
-    # Records may have 2 endpoints (cross-chunk edge) or 3+ (cross-chunk face).
-    # Each record contributes (len-1) consecutive edges to the dedup set.
-    for record in cross_links:
-        eps = [(chunk, int(vi)) for chunk, vi in record]
-        if len(eps) < 2:
-            continue
-        for k in range(len(eps) - 1):
-            edge_set.add(_edge_key(eps[k], eps[k + 1]))
-            excluded_cross_face_edges += 1
+            from_records = same_chunk_from_records.pop(tuple(chunk_key), None)
+            if from_records:
+                chunk_pairs.append(np.asarray(from_records, dtype=np.int64))
+            if chunk_pairs:
+                pairs = np.concatenate(chunk_pairs, axis=0).astype(np.int64)
+                # Undirected: sort each row so (a, b) and (b, a) dedup.
+                pairs.sort(axis=1)
+                edge_count += int(len(np.unique(pairs, axis=0)))
 
-    edge_count = len(edge_set)
+    # Any chunk that held only record-derived edges (no intra faces of its
+    # own) never reached the loop above.
+    for leftover in same_chunk_from_records.values():
+        pairs = np.asarray(leftover, dtype=np.int64)
+        pairs.sort(axis=1)
+        edge_count += int(len(np.unique(pairs, axis=0)))
+
+    edge_count += len(spanning_edges)
     euler = vertex_count - edge_count + face_count
 
     result: dict[str, Any] = {
@@ -205,69 +238,149 @@ def _compute_per_object(
     vertex_dtype: np.dtype,
     ndim: int,
 ) -> list[dict[str, Any]]:
-    """Walk object manifests to attribute area / volume / counts per object.
+    """Attribute area / volume / counts to objects, from the fragment index.
 
-    Faces in ``read_chunk_links(chunk)[fragment_idx]`` align with vertices
-    in fragment ``fragment_idx`` of the same chunk (per the v0.6 fragment
-    layout); a per-chunk link-group cache avoids re-decoding when many
-    objects share a chunk.
+    A face's stored corner indices are **chunk-local**: they address the
+    chunk's whole vertex buffer, not one fragment's slice of it.  Which
+    object a face belongs to is therefore a property of the ROWS it names,
+    recovered by asking the chunk's vertex-fragment index which fragment owns
+    each row and the object manifests which object owns each fragment.
+
+    Two earlier readings of this were wrong in ways that cancelled on a
+    single-object store and only on one:
+
+    * indexing ``read_chunk_links(chunk)[fragment_idx]`` into fragment
+      ``fragment_idx``'s own vertices (IndexError once a chunk held two
+      objects), and
+    * assuming that link group aligns with the vertex fragment of the same
+      index at all -- it does not, so every face in a chunk was credited to
+      whichever object owned fragment 0 and every other object reported zero.
+
+    A face whose corners span two objects (which a well-formed mesh store
+    does not produce, since objects partition faces) is credited to the
+    object owning its first corner.
     """
     manifests = read_all_object_manifests(level_group)
     if not manifests:
         return []
+    n_objects = len(manifests)
 
-    referenced_chunks: set[ChunkCoords] = {
-        chunk for manifest in manifests for chunk, _ in manifest
-    }
+    # fragment -> owning object.  First namer wins, matching how the
+    # coarseners attribute a fragment that several objects reference.
+    owner: dict[tuple[ChunkCoords, int], int] = {}
+    for oid, manifest in enumerate(manifests):
+        for chunk, fragment_idx in manifest:
+            owner.setdefault(
+                (tuple(int(c) for c in chunk), int(fragment_idx)), oid,
+            )
+
+    referenced_chunks = sorted({chunk for chunk, _ in owner})
     referenced_chunk_strs = [chunk_key_str(cc) for cc in referenced_chunks]
 
-    chunk_link_cache: dict[ChunkCoords, list[np.ndarray]] = {}
-    per_object: list[dict[str, Any]] = []
+    area = np.zeros(n_objects, dtype=np.float64)
+    volume = np.zeros(n_objects, dtype=np.float64)
+    faces_per_object = np.zeros(n_objects, dtype=np.int64)
+    verts_per_object = np.zeros(n_objects, dtype=np.int64)
 
     with level_group.batched_reads([
         (VERTICES, referenced_chunk_strs),
         (VERTEX_FRAGMENTS, referenced_chunk_strs),
         *link_prefetch_plan(level_group, referenced_chunks),
     ]):
-        for oid, manifest in enumerate(manifests):
-            area = 0.0
-            volume = 0.0
-            face_count = 0
-            vertex_count = 0
+        for chunk in referenced_chunks:
+            try:
+                fragment_index = read_vertex_fragment_index(level_group, chunk)
+                groups = read_chunk_vertices(
+                    level_group, chunk, dtype=vertex_dtype, ndim=ndim,
+                )
+            except Exception:
+                continue
+            if not groups:
+                continue
 
-            for chunk, fragment_idx in manifest:
-                verts = read_fragment(
-                    level_group, chunk, fragment_idx, dtype=vertex_dtype, ndim=ndim,
-                ).astype(np.float64, copy=False)
-                vertex_count += len(verts)
+            rows = [
+                _fragment_rows(fragment_index, f)
+                for f in range(fragment_index.num_fragments)
+            ]
+            n_rows = max(
+                (int(r.max()) + 1 for r in rows if r.size), default=0,
+            )
+            if n_rows == 0:
+                continue
 
-                if chunk not in chunk_link_cache:
-                    try:
-                        chunk_link_cache[chunk] = read_chunk_links(level_group, chunk)
-                    except Exception:
-                        chunk_link_cache[chunk] = []
-                groups = chunk_link_cache[chunk]
-
-                if fragment_idx >= len(groups):
+            positions = np.zeros((n_rows, ndim), dtype=np.float64)
+            row_owner = np.full(n_rows, -1, dtype=np.int64)
+            for f, idx in enumerate(rows):
+                if idx.size == 0:
                     continue
-                faces = groups[fragment_idx]
-                if faces.ndim != 2 or faces.shape[1] != 3 or len(faces) == 0:
-                    continue
+                if f < len(groups):
+                    block = np.asarray(groups[f], dtype=np.float64)
+                    if block.shape[0] == idx.size:
+                        positions[idx] = block
+                oid = owner.get((chunk, f), -1)
+                if oid >= 0:
+                    row_owner[idx] = oid
+                    verts_per_object[oid] += idx.size
 
-                v0 = verts[faces[:, 0]]
-                v1 = verts[faces[:, 1]]
-                v2 = verts[faces[:, 2]]
-                cr = np.cross(v1 - v0, v2 - v0)
-                area += float(np.linalg.norm(cr, axis=1).sum() * 0.5)
-                volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
-                face_count += len(faces)
+            try:
+                link_groups = read_chunk_links(level_group, chunk)
+            except Exception:
+                continue
+            usable = [
+                np.asarray(g, dtype=np.int64) for g in link_groups
+                if np.asarray(g).ndim == 2 and np.asarray(g).shape[1] == 3
+                and len(g)
+            ]
+            if not usable:
+                continue
+            faces = np.concatenate(usable, axis=0)
+            # Cross-chunk faces name rows this chunk does not hold; they have
+            # no object attribution in the format and are excluded here, as
+            # they are from the chunk-level totals.
+            inside = np.all((faces >= 0) & (faces < n_rows), axis=1)
+            faces = faces[inside]
+            if len(faces) == 0:
+                continue
 
-            per_object.append({
-                "object_id": oid,
-                "surface_area": area,
-                "volume": volume,
-                "face_count": face_count,
-                "vertex_count": vertex_count,
-            })
+            oid_per_face = row_owner[faces[:, 0]]
+            keep = oid_per_face >= 0
+            if not keep.any():
+                continue
+            faces = faces[keep]
+            oid_per_face = oid_per_face[keep]
 
-    return per_object
+            v0 = positions[faces[:, 0]]
+            v1 = positions[faces[:, 1]]
+            v2 = positions[faces[:, 2]]
+            cross = np.cross(v1 - v0, v2 - v0)
+            face_area = np.linalg.norm(cross, axis=1) * 0.5
+            face_volume = np.einsum("ij,ij->i", v0, np.cross(v1, v2)) / 6.0
+
+            area += np.bincount(
+                oid_per_face, weights=face_area, minlength=n_objects,
+            )[:n_objects]
+            volume += np.bincount(
+                oid_per_face, weights=face_volume, minlength=n_objects,
+            )[:n_objects]
+            faces_per_object += np.bincount(
+                oid_per_face, minlength=n_objects,
+            )[:n_objects].astype(np.int64)
+
+    return [
+        {
+            "object_id": oid,
+            "surface_area": float(area[oid]),
+            "volume": float(volume[oid]),
+            "face_count": int(faces_per_object[oid]),
+            "vertex_count": int(verts_per_object[oid]),
+        }
+        for oid in range(n_objects)
+    ]
+
+
+def _fragment_rows(fragment_index, f: int) -> np.ndarray:
+    """The chunk-buffer rows fragment ``f`` occupies, range or explicit."""
+    if fragment_index.is_range(f):
+        start, count = fragment_index.range(f)
+        return np.arange(int(start), int(start) + int(count), dtype=np.int64)
+    return np.asarray(fragment_index.indices(f), dtype=np.int64)

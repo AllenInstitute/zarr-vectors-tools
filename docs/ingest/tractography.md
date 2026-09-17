@@ -6,9 +6,9 @@ cover the common formats.
 
 | Format | Ingest function | Reader | Extra |
 | --- | --- | --- | --- |
-| MRtrix TCK | `zarr_vectors_tools.ingest.tck.ingest_tck` | `nibabel` | `streamlines` |
-| TrackVis TRK | `zarr_vectors_tools.ingest.trk.ingest_trk` | `nibabel` | `streamlines` |
-| TRX | `zarr_vectors_tools.ingest.trx.ingest_trx` | `trx-python` | `streamlines` |
+| MRtrix TCK | `zarr_vectors_tools.convert.ingest.tck.ingest_tck` | `nibabel` | `streamlines` |
+| TrackVis TRK | `zarr_vectors_tools.convert.ingest.trk.ingest_trk` | `nibabel` | `streamlines` |
+| TRX | `zarr_vectors_tools.convert.ingest.trx.ingest_trx` | `trx-python` | `streamlines` |
 
 :::{warning}
 All three load the whole tractogram into memory. Above roughly a million
@@ -20,7 +20,7 @@ streamlines, use `ingest_trk_parallel` instead — see
 ## MRtrix TCK — `ingest_tck`
 
 ```python
-from zarr_vectors_tools.ingest.tck import ingest_tck
+from zarr_vectors_tools.convert.ingest.tck import ingest_tck
 
 summary = ingest_tck(
     "tracts.tck",
@@ -40,7 +40,7 @@ the enrichment options.
 ## TrackVis TRK — `ingest_trk`
 
 ```python
-from zarr_vectors_tools.ingest.trk import ingest_trk
+from zarr_vectors_tools.convert.ingest.trk import ingest_trk
 
 ingest_trk(
     "tracts.trk",
@@ -59,9 +59,17 @@ both alongside the surviving streamlines, so a filtered store stays
 internally consistent.
 
 `preserve_header=True` writes a `TRKHeader` holding `voxel_size`,
-`dimensions`, `vox_to_ras`, `voxel_order`, and the scalar / property
-names, so `export_trk` can rebuild a valid file. It is best-effort: a
-malformed header is swallowed and the ingest still succeeds.
+`dimensions`, `vox_to_ras`, `voxel_order`, the scalar / property names, and
+`space="rasmm"`, so `export_trk` can rebuild a valid file. (Before this was
+fixed the header was read with the wrong keys inside a silent `except`, and
+no store from `ingest_trk` had one.) A multi-column scalar such as an RGB
+colour stays one three-column attribute.
+
+The parallel ingester (`zvtools convert x.trk`) also carries the file's
+scalars and properties, under the names in its header, unless
+`keep_scalars=False` / `keep_properties=False`. A file name that collides
+with a generated attribute (`--vertex-attr`, `--object-attr`) is refused
+rather than overwritten.
 
 ### Coordinate conventions
 
@@ -89,7 +97,7 @@ TRX is structurally the closest format to Zarr Vectors — both keep positions,
 offsets, and per-vertex/per-object data in separate arrays.
 
 ```python
-from zarr_vectors_tools.ingest.trx import ingest_trx
+from zarr_vectors_tools.convert.ingest.trx import ingest_trx
 
 ingest_trx(
     "tracts.trx",
@@ -106,20 +114,29 @@ ingest_trx(
 | `offsets` | vertex group boundaries (one group per streamline) |
 | `dpv/<name>` | `attributes/<name>/` (per-vertex) |
 | `dps/<name>` | `object_attributes/<name>/` (per-streamline) |
-| `groups/<name>` | `groupings/` |
-| `dpg/<name>` | `groupings_attributes/` |
+| `groups/<name>` | `groupings/`, one row per group, named after it |
+| `dpg/<group>/<name>` | `groupings_attributes/<name>/`, one row per group; NaN where a group lacks the key |
+| header `VOXEL_TO_RASMM`, `DIMENSIONS` | `TRXHeader` under `/headers/trx/` |
 | *(computed)* | `object_attributes/mean_<name>/` via `mean_scalar` |
 
 `mean_scalar` takes a name or a list of names of `dpv` scalars and writes
 the per-streamline mean of each. Names absent from the file are skipped
 silently — no error, no attribute.
 
-:::{note}
-Group *names* are not preserved as strings. Each TRX group becomes an
-integer-keyed grouping, and the only grouping attribute written is
-`group_id`, a float index into the original name order. Keep the name
-list yourself if you need to resolve tract labels later.
-:::
+Group names are kept on the groupings array, where core's group catalogue
+reads them and the pyramid carries them to every level:
+
+```python
+import zarr_vectors as zv
+
+level = zv.open("tracts.zv", mode="r").level(0)
+level.groups.names()               # ("AF_L", "CST_L", ...)
+level.groups["CST_L"].members      # object ids
+```
+
+Rows follow the order the TRX reader lists the groups in, so address a
+bundle by name rather than by row. Stores written before names were kept
+have a float `group_id` group attribute instead.
 
 When `length_range` drops streamlines, group membership is rebuilt
 against the surviving indices rather than being invalidated.
@@ -174,6 +191,64 @@ zvtools convert tracts.trk out.zarrvectors --format trk \
 Every generated attribute is carried through the sparsity pyramid, so
 coloring renders at all zoom levels. See the full attribute table in
 [Enrichments](../enrichments.md#synthetic-attributes-for-coloring-test-data-trk-cli-only).
+
+## Selecting streamlines by region
+
+`select_streamlines` returns the object ids of the streamlines that meet a
+region: a NIfTI mask (with its own affine), or a box in RAS millimetres.
+Only the chunks the region touches are read.
+
+```python
+from zarr_vectors_tools.algorithms.streamline_select import select_streamlines
+from zarr_vectors_tools.convert.export.trk import export_trk
+
+through_cst = select_streamlines("tracts.zv", mask="cst_roi.nii.gz")
+ending_in_m1 = select_streamlines("tracts.zv", mask="m1.nii.gz", mode="endpoints")
+export_trk("tracts.zv", "cst.trk", object_ids=through_cst.tolist())
+```
+
+| `mode` | Selects a streamline when |
+| --- | --- |
+| `"path"` (default) | any vertex, or any point sampled along a segment, is inside |
+| `"endpoints"` | either end is inside |
+| `"both_endpoints"` | both ends are inside |
+
+Points along each segment are tested every `sample_spacing` (default half
+the mask's smallest voxel), so a simplified coarse level still finds a
+streamline that steps over a small region. A TRK store kept in voxel
+millimetres is mapped through its header first, so the same RAS mask selects
+the same streamlines however the file was ingested. Reading only the
+region's chunks misses one case: a segment longer than a chunk whose ends
+both lie outside the chunks the region touches. At level 0 that does not
+happen; at a heavily simplified level, select at a finer one.
+
+## Bundle summaries
+
+`bundle_summary` gives the first numbers a tract analysis wants, one row per
+group: streamline count, length mean / std / min / median / max, mean
+tortuosity, and start / end centroids. The rows are also written to the store
+as `group_attributes/bundle_*`, so TRX export carries them as `dpg`.
+
+```python
+from zarr_vectors_tools.algorithms.bundles import bundle_summary, read_bundle_summary
+
+table = bundle_summary("tracts.zv")               # level 0, written to every level
+table.loc["CST_L", ["streamline_count", "length_mean", "start_z"]]
+read_bundle_summary("tracts.zv", level=2)         # the same rows at a coarse level
+bundle_summary("tracts.zv", level=2)              # level 2's own members and geometry
+```
+
+```bash
+zvtools bundles tracts.zarrvectors --csv bundles.csv
+```
+
+By default a coarse level reports the whole level-0 bundle, not what
+thinning left. Streamlines have no direction, so each bundle is turned to
+agree with its main axis before endpoints are averaged; "start" is the low
+end along that axis. Pass `orient_endpoints=False` (`--as-stored`) for
+directed streamlines. Ingesting with `compute_length=True,
+compute_endpoints=True` lets level 0 be summarised without reading any
+geometry. A summary is a snapshot: edit the store's groups and run it again.
 
 ## See also
 

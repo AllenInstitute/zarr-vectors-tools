@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -13,6 +12,7 @@ from zarr_vectors.building import (
     read_chunk_attributes,
 )
 from zarr_vectors.types.meshes import write_mesh
+
 from zarr_vectors_tools.algorithms import (
     compute_mean_curvature,
     compute_vertex_normals,

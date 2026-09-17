@@ -96,20 +96,21 @@ def decimate_keep(
 
     Keeps roots, leaves, branch points, ``forced`` nodes, and — along each
     unbranched chain between anchors — every ``stride``-th node counted from the
-    upper anchor.  Mirrors the scalar code exactly, including its
-    ``if stride > 1`` guard (``stride <= 1`` keeps anchors only).
+    upper anchor.  Mirrors the scalar code exactly, including its treatment of
+    ``stride <= 1`` as the identity (keep everything).
     """
     n = len(parent)
     if n == 0:
         return np.zeros(0, dtype=bool)
+    if stride <= 1:
+        return np.ones(n, dtype=bool)
     cc = child_counts(parent)
     anchor = (parent < 0) | (cc != 1)
     if forced is not None:
         anchor = anchor | forced
     keep = anchor.copy()
-    if stride > 1:
-        D = dist_to_anchor(parent, anchor)
-        keep |= (D % stride == 0)
+    D = dist_to_anchor(parent, anchor)
+    keep |= (D % stride == 0)
     return keep
 
 

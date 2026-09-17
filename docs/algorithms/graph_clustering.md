@@ -3,13 +3,13 @@
 Three algorithms answering "what are the modules / dense regions in
 this network?":
 
-- `compute_k_core` — Batagelj-Zaversnik degree-peeling.
+- `compute_k_core` — degree peeling.
 - `compute_label_propagation` — synchronous LPA (Raghavan-Albert-Kumara 2007).
 - `compute_louvain` — greedy modularity optimisation (Blondel et al. 2008).
 
-All three materialise the in-memory adjacency once via
-`graph_search.build_adjacency`. LPA and Louvain need that because they
-touch every edge per iteration; k-core could stream but uniformity
+All three read the level's links once, as arrays, into an in-memory
+adjacency (compressed sparse rows). LPA and Louvain need all of it because
+they touch every edge per iteration; k-core could stream, but uniformity
 wins.
 
 ## `compute_k_core`
@@ -29,10 +29,13 @@ to a subgraph where every vertex has degree ≥ *k*.
 
 ### Algorithm notes
 
-A min-heap keyed by `(current_degree, vertex)` peels lowest-degree
-vertices one at a time. Stale entries (whose degree was decremented
-since the push) are filtered on pop. Complexity is **O((N + E) log N)**;
-memory is the adjacency list plus one heap entry per vertex.
+Peeling in batches: at the current *k*, every live vertex of degree at
+most *k* is removed in one numpy step, and its live neighbours' degrees
+drop. Those that fall to *k* or below form the next batch. When none do,
+*k* rises to the smallest live degree. Coreness is unique, so removing a
+batch at once gives the same answer as removing its vertices one at a time.
+Each batch costs its vertices' edges, so the total is **O(N + E)** plus one
+numpy step per batch. Memory is the adjacency plus a few per-vertex arrays.
 
 ## `compute_label_propagation`
 
@@ -58,10 +61,14 @@ result["community_sizes"]  # (n_communities,) int64
 ### LPA algorithm notes
 
 Each vertex starts in its own community. In each round, every vertex
-adopts the most frequent label among its neighbours, breaking ties via
-a seeded RNG. Iterates until labels stabilise or `max_iter` rounds have
-passed. Time per round is **O(N + E)**; total is bounded by `max_iter`
-rounds.
+adopts the most frequent label among its neighbours, breaking ties at random
+among the tied labels with a seeded RNG. A vertex with no neighbours keeps
+its label. Iterates until labels stabilise or `max_iter` rounds have passed.
+
+A round is one sort of the edge ends by `(vertex, neighbour label)`: count
+each run, then take each vertex's largest count, with a random draw
+breaking ties. Time per round is **O(E log E)** in numpy. Labels are
+numbered in order of each community's lowest vertex.
 
 ## `compute_louvain`
 
@@ -78,9 +85,9 @@ result["community_sizes"]  # (n_communities,) int64
 ```
 
 `weight`
-: Edge-attribute name. `None` (default) means unit weights. Cross-chunk
-  edges use weights from `cross_chunk_link_attributes/<weight>/0/`
-  when that array exists; otherwise unit weight (silent fallback).
+: Edge-attribute name. `None` (default) means unit weights. Every edge,
+  intra- or cross-chunk, reads its weight from `link_attributes/<weight>/0/`;
+  without that family, unit weight (silent fallback).
 
 `max_iter`
 : Maximum number of outer Phase-1 + Phase-2 rounds.
@@ -98,9 +105,15 @@ Stops when a full Phase-2 round yields modularity gain < `1e-6` or
 level-0 dendrogram collapsed back to the original vertices via
 successive `compact` remaps.
 
+The local-move phase is sequential by definition, since each move changes
+the gains of the moves after it. It still visits one vertex at a time, over
+plain lists taken from the adjacency arrays. The modularity and the
+contraction into super-nodes are array operations: a `bincount` over
+community pairs.
+
 ## See also
 
 - [Algorithms index](index.md)
-- [Graph search](graph_search.md) — shares `build_adjacency`.
+- [Graph search](graph_search.md) — reads the same adjacency.
 - [Graph components](graph_components.md) — coarser partition: every
   community is a subset of one connected component.

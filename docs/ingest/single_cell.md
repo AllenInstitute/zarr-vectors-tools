@@ -21,7 +21,7 @@ that is *spatial* is an `obsm` embedding, and that becomes the point
 cloud. Everything else rides along as per-vertex attributes.
 
 ```python
-from zarr_vectors_tools.ingest.h5ad import ingest_h5ad
+from zarr_vectors_tools.convert.ingest.h5ad import ingest_h5ad
 
 summary = ingest_h5ad(
     "xenium.h5ad",
@@ -64,7 +64,7 @@ stored by default and [`export_h5ad`](../export/single_cell.md) sorts on
 it, making the round-trip exact:
 
 ```python
-from zarr_vectors_tools.export.h5ad import export_h5ad
+from zarr_vectors_tools.convert.export.h5ad import export_h5ad
 
 export_h5ad("xenium.zv", "round_trip.h5ad")
 ```
@@ -154,7 +154,7 @@ can be built up over several sessions rather than in one pass.
 ### 4. Export the assembled result
 
 ```python
-from zarr_vectors_tools.export.h5ad import export_h5ad
+from zarr_vectors_tools.convert.export.h5ad import export_h5ad
 
 # A spatial subset, with everything staged in so far
 export_h5ad("abca1.zv", "slab.h5ad", bbox=([5.0, 3.0, 2.0], [5.5, 3.5, 2.5]))
@@ -182,7 +182,7 @@ columns from the file the store was built from — pass `keys=None` and
 point `key_attribute` at the row-index attribute instead:
 
 ```python
-from zarr_vectors_tools.ingest.attach import attach_attributes
+from zarr_vectors_tools.convert.ingest.attach import attach_attributes
 
 attach_attributes(
     "abca1.zv",

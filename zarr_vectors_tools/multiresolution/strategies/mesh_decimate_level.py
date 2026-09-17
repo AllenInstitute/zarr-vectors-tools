@@ -33,7 +33,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from .mesh_decimate import decimate_mesh, mesh_floor_report
+from .mesh_decimate import decimate_mesh
 
 #: Level-metadata tag recorded for levels this strategy produced.
 COARSEN_MESH_DECIMATE: str = "mesh_quadric_collapse"
@@ -127,22 +127,49 @@ def _unpermute(tri: npt.NDArray, perm: npt.NDArray, link_width: int):
     return out
 
 
-def _read_level_objects(src_group, ndim: int, link_width: int):
+def _vertex_attribute_spec(src_group):
+    """``{name: (dtype, ncols, channel_names)}`` for the level's vertex attrs."""
+    from zarr_vectors.constants import VERTEX_ATTRIBUTES
+    from zarr_vectors.exceptions import ArrayError
+
+    spec: dict[str, tuple[Any, int, Any]] = {}
+    if VERTEX_ATTRIBUTES not in src_group:
+        return spec
+    for name in src_group[VERTEX_ATTRIBUTES].children():
+        try:
+            meta = src_group.read_array_meta(f"{VERTEX_ATTRIBUTES}/{name}")
+        except ArrayError:
+            continue
+        channels = meta.get("channel_names")
+        spec[name] = (
+            np.dtype(meta.get("dtype", "float32")),
+            len(channels) if channels else 1,
+            channels,
+        )
+    return spec
+
+
+def _read_level_objects(src_group, ndim: int, link_width: int, attr_spec=None):
     """Gather a level into {oid: (vertices, faces)} in object-local indices.
 
     Returns the per-object meshes plus the map needed to interpret face
     endpoints: ``row_of[(chunk, local_idx)] -> (oid, object_local_index)``,
-    materialised as one array per chunk.
+    materialised as one array per chunk.  When ``attr_spec`` is given, each
+    object's per-vertex attribute columns come back alongside its vertices,
+    in the same row order.
     """
     from zarr_vectors.building import (
         iter_link_cells,
         list_chunk_keys,
         read_all_object_manifests,
+        read_chunk_attributes,
         read_chunk_vertices,
         read_vertex_fragment_index,
     )
     from zarr_vectors.constants import VERTICES
     from zarr_vectors.exceptions import ArrayError
+
+    attr_spec = attr_spec or {}
 
     manifests = read_all_object_manifests(src_group)
     owner: dict[tuple, int] = {}
@@ -152,6 +179,7 @@ def _read_level_objects(src_group, ndim: int, link_width: int):
 
     # ---- pass 1: vertices, and the (chunk,row) -> (oid, obj row) map ----
     obj_pos: dict[int, list] = {}
+    obj_attrs: dict[int, dict[str, list]] = {}
     obj_n: dict[int, int] = {}
     chunk_oid: dict[tuple, npt.NDArray] = {}
     chunk_row: dict[tuple, npt.NDArray] = {}
@@ -170,6 +198,18 @@ def _read_level_objects(src_group, ndim: int, link_width: int):
         pos = np.zeros((n_rows, ndim), np.float32)
         oid_of = np.full(n_rows, -1, np.int64)
         row_of = np.full(n_rows, -1, np.int64)
+        attr_cells: dict[str, list] = {}
+        attr_rows: dict[str, npt.NDArray] = {}
+        for name, (dt, ncols, _cn) in attr_spec.items():
+            try:
+                attr_cells[name] = read_chunk_attributes(
+                    src_group, name, cc, dtype=dt, ncols=ncols,
+                )
+            except ArrayError:
+                attr_cells[name] = []
+            attr_rows[name] = np.zeros(
+                (n_rows,) if ncols == 1 else (n_rows, ncols), dtype=dt,
+            )
         at = 0
         for f, g in enumerate(groups):
             g = np.asarray(g, np.float32)
@@ -186,12 +226,22 @@ def _read_level_objects(src_group, ndim: int, link_width: int):
             if idx.size != g.shape[0]:
                 idx = np.arange(at, at + g.shape[0], dtype=np.int64)
             pos[idx] = g
+            for name, (dt, _ncols, _cn) in attr_spec.items():
+                cells = attr_cells[name]
+                if f < len(cells):
+                    block = np.asarray(cells[f], dtype=dt)
+                    if block.shape[0] == idx.size:
+                        attr_rows[name][idx] = block
             o = owner.get((cc, f))
             if o is not None:
                 oid_of[idx] = o
                 base = obj_n.get(o, 0)
                 row_of[idx] = np.arange(base, base + len(idx))
                 obj_pos.setdefault(o, []).append(pos[idx])
+                for name in attr_spec:
+                    obj_attrs.setdefault(o, {}).setdefault(
+                        name, [],
+                    ).append(attr_rows[name][idx])
                 obj_n[o] = base + len(idx)
             at += g.shape[0]
         chunk_oid[cc] = oid_of
@@ -199,6 +249,13 @@ def _read_level_objects(src_group, ndim: int, link_width: int):
 
     objects = {o: [np.concatenate(p, axis=0), None]
                for o, p in obj_pos.items() if p}
+    attributes = {
+        o: {
+            name: np.concatenate(blocks, axis=0)
+            for name, blocks in per_name.items() if blocks
+        }
+        for o, per_name in obj_attrs.items()
+    }
 
     # ---- pass 2: faces, mapped into object-local index space ------------
     faces_of: dict[int, list] = {}
@@ -263,27 +320,55 @@ def _read_level_objects(src_group, ndim: int, link_width: int):
         fl = faces_of.get(o)
         objects[o][1] = (np.concatenate(fl, axis=0) if fl
                          else np.zeros((0, link_width), np.int64))
-    return {o: (vp, ff) for o, (vp, ff) in objects.items()}
+    meshes = {o: (vp, ff) for o, (vp, ff) in objects.items()}
+    return meshes, attributes
 
 
 # ===================================================================
 # writing one level from per-object meshes
 # ===================================================================
 
+def _drop_duplicate_faces(faces: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]:
+    """Faces with repeated and degenerate triangles removed, in order.
+
+    Quadric collapse can leave the same triangle twice where a fold closes
+    up: on FreeSurfer's bert, 65 per hemisphere per level.  Each one is a
+    face with no edge of its own, so a closed cortical sheet's Euler
+    characteristic read 67 instead of 2, and a renderer draws the triangle
+    twice.  A triangle is identified by its corners whatever their order,
+    and the first copy, with its winding, is the one kept.
+    """
+    if len(faces) == 0:
+        return faces
+    ordered = np.sort(faces, axis=1)
+    degenerate = np.any(ordered[:, 1:] == ordered[:, :-1], axis=1)
+    _, first = np.unique(ordered, axis=0, return_index=True)
+    keep = np.zeros(len(faces), dtype=bool)
+    keep[first] = True
+    keep &= ~degenerate
+    return faces if keep.all() else faces[keep]
+
+
 def _write_level_objects(
     root, level_group, meshes: dict[int, tuple], chunk_shape, ndim: int,
     link_width: int, n_src_objects: int, dtype_links=np.int64,
+    attributes: dict[int, dict] | None = None,
+    attr_spec: dict | None = None,
 ):
     """Re-split simplified per-object meshes onto the target chunk grid."""
     from zarr_vectors.building import (
         create_links_array,
         create_links_family,
         finalize_links,
+        write_chunk_attributes,
         write_chunk_links,
         write_chunk_vertices,
         write_links,
         write_object_index,
     )
+
+    attributes = attributes or {}
+    attr_spec = attr_spec or {}
 
     cs = np.asarray(chunk_shape, np.float64)
 
@@ -317,20 +402,37 @@ def _write_level_objects(
     for cc in sorted(per_chunk):
         members = sorted(per_chunk[cc])          # by oid: deterministic order
         blocks, base = [], 0
+        attr_blocks: dict[str, list] = {name: [] for name in attr_spec}
         for frag, (oid, rows) in enumerate(members):
             v = meshes[oid][0][rows]
             blocks.append(np.asarray(v, np.float32))
+            # Attribute rows are cut on exactly the same selection as the
+            # vertices, so a fragment's values stay paired with its points.
+            for name, (dt, ncols, _cn) in attr_spec.items():
+                column = attributes.get(oid, {}).get(name)
+                if column is None:
+                    shape = (len(rows),) if ncols == 1 else (len(rows), ncols)
+                    attr_blocks[name].append(np.zeros(shape, dtype=dt))
+                else:
+                    attr_blocks[name].append(
+                        np.asarray(column, dtype=dt)[rows]
+                    )
             local_of[oid][rows] = np.arange(base, base + len(rows))
             chunk_of[oid][rows] = np.asarray(cc, np.int64)
             manifests.setdefault(oid, []).append((cc, frag))
             base += len(rows)
         write_chunk_vertices(level_group, cc, blocks, dtype=np.float32)
+        for name, (dt, _ncols, _cn) in attr_spec.items():
+            write_chunk_attributes(
+                level_group, name, cc, attr_blocks[name], dtype=dt,
+            )
 
     # ---- faces: bucket by (base chunk, per-corner offsets) --------------
     pending: dict[tuple, list[npt.NDArray]] = {}
     for oid, (v, f) in sorted(meshes.items()):
         if len(f) == 0:
             continue
+        f = _drop_duplicate_faces(np.asarray(f, dtype=np.int64))
         loc = local_of[oid]
         ch = chunk_of[oid]
         cor_c = [ch[f[:, k]] for k in range(link_width)]
@@ -383,6 +485,44 @@ def _write_level_objects(
     return n_faces, manifests
 
 
+def _resample_attributes(
+    source_vertices: npt.NDArray,
+    new_vertices: npt.NDArray,
+    source_attributes: dict | None,
+    attr_spec: dict,
+) -> dict:
+    """Carry per-vertex attributes onto a simplified mesh.
+
+    An edge collapse MOVES vertices -- the survivor sits at the quadric
+    optimum, not on any input vertex -- so there is no index map to follow
+    and the honest carry is the value of the nearest source vertex.  That is
+    what ``meshes._quadric_pyfqmr`` already does, and it keeps a categorical
+    label a value that genuinely occurred rather than a blend of two.
+
+    Falls back to leaving the attributes off when SciPy is absent, rather
+    than failing a whole pyramid over it.
+    """
+    if not attr_spec or not source_attributes or len(new_vertices) == 0:
+        return {}
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError:  # pragma: no cover - the mesh extra pulls scipy
+        return {}
+    tree = cKDTree(np.asarray(source_vertices, dtype=np.float64))
+    _dist, nearest = tree.query(np.asarray(new_vertices, dtype=np.float64))
+    nearest = np.asarray(nearest, dtype=np.int64)
+    out: dict[str, npt.NDArray] = {}
+    for name, (dt, _ncols, _cn) in attr_spec.items():
+        column = source_attributes.get(name)
+        if column is None:
+            continue
+        values = np.asarray(column)
+        if len(values) == 0:
+            continue
+        out[name] = values[np.clip(nearest, 0, len(values) - 1)].astype(dt)
+    return out
+
+
 # ===================================================================
 # the strategy
 # ===================================================================
@@ -417,6 +557,7 @@ def coarsen_mesh_decimate_level(
 
     from zarr_vectors.building import (
         LevelMetadata,
+        create_attribute_array,
         create_object_index_array,
         create_resolution_level,
         create_vertices_array,
@@ -434,6 +575,19 @@ def coarsen_mesh_decimate_level(
     k = float(size_factor if size_factor is not None else coarsen_factor)
     if k <= 1.0:
         raise ValueError(f"reduction factor must exceed 1, got {k}")
+    # This strategy simplifies every object and drops none.  Accepting a
+    # sparsity factor and stamping ``object_sparsity = 1 / factor`` on the
+    # level -- which it did -- tells a reader that half the cells are gone
+    # while all of them are present, and the object count in the summary
+    # contradicts it.  Refuse rather than mislead; ``method="mesh"`` (vertex
+    # clustering) is the mesh strategy that does apply object selection.
+    if float(sparsity_factor) > 1.0:
+        raise ValueError(
+            f"sparsity_factor={sparsity_factor} is not supported by the "
+            f"quadric mesh coarsener: it simplifies every object and drops "
+            f"none. Use method='mesh' for object-dropping mesh levels, or "
+            f"leave sparsity_factor at 1.0."
+        )
 
     root = open_store(str(store_path), mode="r+")
     root_meta = read_root_metadata(root)
@@ -448,7 +602,14 @@ def coarsen_mesh_decimate_level(
     except Exception:  # noqa: BLE001
         link_width = 3
 
-    meshes = _read_level_objects(src_group, ndim, link_width)
+    # Per-vertex attributes come back with the meshes and are resampled onto
+    # the simplified vertices below.  Without this a quadric level keeps the
+    # surface and loses every scalar on it, which for a cortical surface is
+    # the whole payload.
+    attr_spec = _vertex_attribute_spec(src_group)
+    meshes, src_attributes = _read_level_objects(
+        src_group, ndim, link_width, attr_spec,
+    )
     n_src_objects = len(read_all_object_manifests(src_group))
 
     v_in = sum(len(v) for v, f in meshes.values())
@@ -465,6 +626,7 @@ def coarsen_mesh_decimate_level(
     share = total_target / f_in
 
     out: dict[int, tuple] = {}
+    out_attributes: dict[int, dict] = {}
     stats = []
     floors = 0
     budget_bound = 0
@@ -483,6 +645,8 @@ def coarsen_mesh_decimate_level(
             if fl > 0:
                 if len(f) <= fl:
                     out[oid] = (np.asarray(v, np.float32), np.asarray(f, np.int64))
+                    # Passed through untouched, so its attributes are too.
+                    out_attributes[oid] = src_attributes.get(oid, {})
                     at_own_floor += 1
                     continue
                 tgt = max(tgt, fl)
@@ -491,6 +655,9 @@ def coarsen_mesh_decimate_level(
                           max_passes=max_passes,
                           min_component_faces=min_component_faces)
         out[oid] = (r["vertices"], r["faces"])
+        out_attributes[oid] = _resample_attributes(
+            v, r["vertices"], src_attributes.get(oid), attr_spec,
+        )
         floors += int(r["hit_floor"] and not r["target_met"])
         budget_bound += int(r.get("pass_budget_bound", False))
         stats.append((oid, len(f), r["face_count"], r["hit_floor"]))
@@ -540,7 +707,10 @@ def coarsen_mesh_decimate_level(
     level_meta = LevelMetadata(
         level=target_level,
         vertex_count=v_out,
-        arrays_present=["vertices", "links", "object_index"],
+        arrays_present=(
+            ["vertices", "links", "object_index"]
+            + (["vertex_attributes"] if attr_spec else [])
+        ),
         bin_shape=target_bin,
         bin_ratio=tuple(max(1, int(round(t / r)))
                         for t, r in zip(target_bin, root_bin)),
@@ -558,10 +728,14 @@ def coarsen_mesh_decimate_level(
     with ctx:
         create_vertices_array(level_group, dtype="float32")
         create_object_index_array(level_group)
+        for name, (dt, _ncols, channels) in attr_spec.items():
+            create_attribute_array(
+                level_group, name, dtype=str(dt), channel_names=channels,
+            )
 
     written, manifests = _write_level_objects(
         root, level_group, out, target_chunk_shape, ndim, link_width,
-        n_src_objects)
+        n_src_objects, attributes=out_attributes, attr_spec=attr_spec)
     propagate_groupings(src_group, level_group,
                         surviving_oids=surviving_oids_from(
                             sorted(out), sparsity_factor))
@@ -584,6 +758,7 @@ def coarsen_mesh_decimate_level(
         "method": COARSEN_MESH_DECIMATE,
         "preserves_object_ids": True,
         "shared_fragments": False,
+        "attributes_carried": sorted(attr_spec),
     }
 
 
@@ -631,7 +806,6 @@ def build_mesh_pyramid_to_floor(
     case.
     """
     from zarr_vectors.building import (
-        get_resolution_level,
         list_resolution_levels,
         open_store,
         read_level_metadata,

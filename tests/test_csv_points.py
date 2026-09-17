@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-
 from zarr_vectors.types.points import read_points
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
-from zarr_vectors_tools.export.csv_points import export_csv
+
+from zarr_vectors_tools.convert.export.csv_points import export_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
 
 class TestCSVRoundTrip:
@@ -115,8 +115,9 @@ class TestOptionalDependencies:
         the missing dependency. When laspy IS installed, the same call against
         a non-existent file raises IngestError("Input file not found: ...")
         instead — both messages are valid IngestError surfaces."""
-        from zarr_vectors_tools.ingest.las import ingest_las
         from zarr_vectors.exceptions import IngestError
+
+        from zarr_vectors_tools.convert.ingest.las import ingest_las
 
         try:
             ingest_las(
@@ -132,8 +133,9 @@ class TestOptionalDependencies:
         """If plyfile is not installed, ingest_ply raises IngestError mentioning
         the missing dependency. When plyfile IS installed, the same call against
         a non-existent file raises IngestError("Input file not found: ...")."""
-        from zarr_vectors_tools.ingest.ply import ingest_ply
         from zarr_vectors.exceptions import IngestError
+
+        from zarr_vectors_tools.convert.ingest.ply import ingest_ply
 
         try:
             ingest_ply(

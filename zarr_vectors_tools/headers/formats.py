@@ -54,9 +54,33 @@ class TRKHeader(Header):
     n_properties: int = 0
     property_names: list[str] = field(default_factory=list)
     n_count: int = 0
+    origin: list[float] | None = None
+    """TrackVis ``origin`` field, as written by the file."""
+    version: int | None = None
+    """TrackVis format version."""
+    space: str | None = None
+    """Which space the STORED coordinates are in -- ``"voxmm"`` (as the file
+    had them) or ``"rasmm"`` (registered at read time).  Without it a later
+    merge or export cannot tell whether the affine still has to be applied,
+    which is the difference between two tractograms overlaying and one of
+    them sitting in the wrong place entirely."""
+    n_count_mismatch: list[int] | None = None
+    """``[declared, actual]`` when the header's streamline count disagreed
+    with what the file holds."""
+    extra: dict[str, Any] = field(default_factory=dict)
+    """Any key a producer wrote that this class does not name.  Carried so a
+    newer writer's field survives a round-trip through an older reader
+    instead of being dropped on the floor."""
+
+    #: Keys ``to_dict`` writes itself; everything else lands in ``extra``.
+    _KNOWN = (
+        "format_name", "voxel_size", "dimensions", "vox_to_ras", "voxel_order",
+        "n_scalars", "scalar_names", "n_properties", "property_names",
+        "n_count", "origin", "version", "space", "n_count_mismatch",
+    )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "format_name": self.format_name,
             "voxel_size": list(self.voxel_size),
             "dimensions": list(self.dimensions),
@@ -68,6 +92,12 @@ class TRKHeader(Header):
             "property_names": self.property_names,
             "n_count": self.n_count,
         }
+        for name in ("origin", "version", "space", "n_count_mismatch"):
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        out.update(self.extra)
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TRKHeader:
@@ -81,6 +111,11 @@ class TRKHeader(Header):
             n_properties=d.get("n_properties", 0),
             property_names=d.get("property_names", []),
             n_count=d.get("n_count", 0),
+            origin=d.get("origin"),
+            version=d.get("version"),
+            space=d.get("space"),
+            n_count_mismatch=d.get("n_count_mismatch"),
+            extra={k: v for k, v in d.items() if k not in cls._KNOWN},
         )
 
     @property
@@ -89,6 +124,68 @@ class TRKHeader(Header):
         if self.vox_to_ras is None:
             return None
         return np.array(self.vox_to_ras, dtype=np.float64).reshape(4, 4)
+
+
+# ===================================================================
+# TRX
+# ===================================================================
+
+@dataclass
+class TRXHeader(Header):
+    """What a TRX file says about the image its streamlines belong to.
+
+    TRX positions are always RAS millimetres, so unlike TRK there is no
+    stored space to undo.  What an export needs back is the reference
+    image -- its voxel-to-RAS affine and grid dimensions -- because tools
+    that load a TRX against a volume check the two agree.
+    """
+
+    format_name: str = "trx"
+    #: The reference image's voxel-to-RAS affine, flattened 4x4.
+    voxel_to_rasmm: list[float] | None = None
+    #: The reference image's grid dimensions.
+    dimensions: tuple[int, int, int] = (1, 1, 1)
+    #: Names of the per-vertex (dpv), per-streamline (dps) and per-group
+    #: (dpg) arrays the file had, as ingested.
+    dpv_names: list[str] = field(default_factory=list)
+    dps_names: list[str] = field(default_factory=list)
+    dpg_names: list[str] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    _KNOWN = (
+        "format_name", "voxel_to_rasmm", "dimensions",
+        "dpv_names", "dps_names", "dpg_names",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "format_name": self.format_name,
+            "voxel_to_rasmm": self.voxel_to_rasmm,
+            "dimensions": list(self.dimensions),
+            "dpv_names": list(self.dpv_names),
+            "dps_names": list(self.dps_names),
+            "dpg_names": list(self.dpg_names),
+        }
+        out.update(self.extra)
+        return out
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TRXHeader:
+        return cls(
+            voxel_to_rasmm=d.get("voxel_to_rasmm"),
+            dimensions=tuple(d.get("dimensions", [1, 1, 1])),
+            dpv_names=list(d.get("dpv_names", [])),
+            dps_names=list(d.get("dps_names", [])),
+            dpg_names=list(d.get("dpg_names", [])),
+            extra={k: v for k, v in d.items() if k not in cls._KNOWN},
+        )
+
+    @property
+    def affine(self) -> np.ndarray | None:
+        """The reference affine as a 4x4 numpy array."""
+        if self.voxel_to_rasmm is None:
+            return None
+        return np.array(self.voxel_to_rasmm, dtype=np.float64).reshape(4, 4)
 
 
 # ===================================================================
@@ -439,11 +536,116 @@ class H5ADHeader(Header):
 
 
 # ===================================================================
+# Cortical surfaces (GIFTI, FreeSurfer, CIFTI)
+# ===================================================================
+
+@dataclass
+class SurfaceHeader(Header):
+    """What a cortical surface store needs that its arrays cannot say.
+
+    A surface store holds one mesh object per hemisphere.  Four things about
+    it live here rather than in the arrays:
+
+    - **Which hemisphere is which object**, and how many vertices the source
+      mesh had.  CIFTI data is indexed by surface vertex, and a 32k map is
+      meaningless on a 164k surface, so the count is what lets an attach
+      refuse a mismatch instead of writing garbage.
+    - **Which surface is the geometry** and which ride along as coordinate
+      attributes (``coords_white``, ``coords_inflated``...).  All share one
+      topology; only one can be chunked.
+    - **The coordinate space** the geometry is in.  FreeSurfer surfaces are
+      in surface RAS, offset from scanner RAS by ``c_ras``; whether that
+      shift was applied is the difference between a surface that overlays a
+      tractogram and one that sits beside it.
+    - **Label tables.** Parcellations are stored as integer codes; the names
+      and colours that make them a parcellation are kept per attribute.
+    """
+
+    format_name: str = "surface"
+    #: Where the geometry came from: ``"gifti"`` or ``"freesurfer"``.
+    source: str = ""
+    #: ``"scanner"`` (world RAS mm), ``"surface"`` (FreeSurfer tkr RAS), or
+    #: the GIFTI dataspace name when the file declares one.
+    space: str = "unknown"
+    #: The surface chunked as geometry, e.g. ``"midthickness"``.
+    geometry: str = ""
+    #: One entry per object: ``{object_id, hemisphere, structure, n_vertices,
+    #: n_faces}``.  ``object_id`` is the store's; ``hemisphere`` is
+    #: ``"left"``/``"right"``.
+    hemispheres: list[dict[str, Any]] = field(default_factory=list)
+    #: Other surfaces of the same topology, as ``{attribute: surface name}``.
+    alternates: dict[str, str] = field(default_factory=dict)
+    #: Continuous per-vertex maps, as ``{attribute: source description}``.
+    scalars: dict[str, str] = field(default_factory=dict)
+    #: ``{attribute: {code: {"name": str, "rgba": [r, g, b, a]}}}``.  Codes
+    #: are strings because JSON object keys must be.
+    label_tables: dict[str, dict[str, dict[str, Any]]] = field(
+        default_factory=dict,
+    )
+    #: Per-vertex attribute holding ``hemisphere << 32 | source vertex``.
+    key_attribute: str = "zv_join_key"
+    #: The FreeSurfer ``c_ras`` offset, when the geometry carried one.
+    c_ras: list[float] | None = None
+    #: Anything a producer wrote that this class does not name.
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    _KNOWN = (
+        "format_name", "source", "space", "geometry", "hemispheres",
+        "alternates", "scalars", "label_tables", "key_attribute", "c_ras",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "format_name": self.format_name,
+            "source": self.source,
+            "space": self.space,
+            "geometry": self.geometry,
+            "hemispheres": [dict(h) for h in self.hemispheres],
+            "alternates": dict(self.alternates),
+            "scalars": dict(self.scalars),
+            "label_tables": {
+                name: {str(code): dict(entry) for code, entry in table.items()}
+                for name, table in self.label_tables.items()
+            },
+            "key_attribute": self.key_attribute,
+            "c_ras": None if self.c_ras is None else [float(v) for v in self.c_ras],
+        }
+        out.update(self.extra)
+        return out
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SurfaceHeader:
+        return cls(
+            source=d.get("source", ""),
+            space=d.get("space", "unknown"),
+            geometry=d.get("geometry", ""),
+            hemispheres=[dict(h) for h in d.get("hemispheres", [])],
+            alternates=dict(d.get("alternates", {})),
+            scalars=dict(d.get("scalars", {})),
+            label_tables={
+                name: {str(code): dict(entry) for code, entry in table.items()}
+                for name, table in d.get("label_tables", {}).items()
+            },
+            key_attribute=d.get("key_attribute", "zv_join_key"),
+            c_ras=d.get("c_ras"),
+            extra={k: v for k, v in d.items() if k not in cls._KNOWN},
+        )
+
+    def object_for(self, hemisphere: str) -> int | None:
+        """The store's object id for ``"left"`` or ``"right"``, if present."""
+        for entry in self.hemispheres:
+            if entry.get("hemisphere") == hemisphere:
+                return int(entry["object_id"])
+        return None
+
+
+# ===================================================================
 # Dispatch helper
 # ===================================================================
 
 HEADER_CLASSES: dict[str, type[Header]] = {
     "trk": TRKHeader,
+    "trx": TRXHeader,
     "nifti": NIfTIHeader,
     "swc": SWCHeader,
     "las": LASHeader,
@@ -451,6 +653,7 @@ HEADER_CLASSES: dict[str, type[Header]] = {
     "csv": CSVHeader,
     "graph": GraphHeader,
     "h5ad": H5ADHeader,
+    "surface": SurfaceHeader,
 }
 
 

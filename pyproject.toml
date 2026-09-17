@@ -67,6 +67,9 @@ trk = ["nibabel>=5.0"]
 trx = ["trx-python>=0.3"]
 # Back-compat alias: both streamline formats, unchanged for existing users.
 streamlines = ["zarr-vectors-tools[trk,trx]"]
+# Cortical surfaces: GIFTI and FreeSurfer ingest, CIFTI attach. nibabel reads
+# all three; ``all`` already carries it.
+surfaces = ["nibabel>=5.0"]
 graph = ["networkx>=3.0"]
 # AnnData (.h5ad) ingest/export -- single-cell and spatial-omics tables.
 # anndata pulls h5py + scipy, so it stays an extra rather than a core dep.
@@ -81,6 +84,8 @@ mesh = ["pyfqmr>=0.2", "scipy>=1.10"]
 precomputed = ["cloud-volume>=8.0", "mapbuffer>=0.7", "cloud-files>=4.0"]
 # Scale the ingest across worker processes (run_ingest(workers=...) / --workers).
 parallel = ["dask[distributed]>=2024.0"]
+# YAML recipes for `zvtools run`.  TOML and JSON recipes need nothing extra.
+recipes = ["pyyaml>=6.0"]
 # Requires a RAPIDS-compatible CUDA environment. Install per https://docs.rapids.ai.
 gpu = ["cudf"]
 all = [
@@ -96,9 +101,13 @@ all = [
     "mapbuffer>=0.7",
     "cloud-files>=4.0",
     "dask[distributed]>=2024.0",
+    "pyyaml>=6.0",
 ]
 dev = [
     "pytest>=7.0",
+    # Runs the suite across cores: `pytest -n auto`.  Every test writes under
+    # its own tmp_path, so tests are independent across worker processes.
+    "pytest-xdist>=3.5",
     "ruff>=0.4",
     # Both benchmark suites under benchmarks/ are Jupyter notebooks that
     # plot with matplotlib and tabulate with pandas (pandas is already a
@@ -123,6 +132,22 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Two tiers.  The full suite takes ~30 minutes on one machine and longer when
+# anything else is running, which is too slow to gate a pull request on, so the
+# handful of tests that dominate it -- end-to-end TRK ingests and the ones that
+# spawn worker processes -- carry the ``slow`` marker:
+#
+#     pytest -m "not slow"     # the fast tier, for every push
+#     pytest                   # everything: nightly in CI, and before a merge
+#
+# Either tier runs across cores with pytest-xdist (in the dev extra):
+# `pytest -n auto -m "not slow"`.  The tests are I/O-heavy, so more workers
+# than cores still helps on a fast disk.
+#
+# .github/workflows/tests.yml runs both.
+markers = [
+    "slow: end-to-end ingests and process-pool tests (minutes, not seconds)",
+]
 filterwarnings = [
     # Zarr Vectors stores every per-chunk array as Zarr's variable-length-bytes dtype,
     # which has no stable Zarr v3 spec yet — the warning fires on every array

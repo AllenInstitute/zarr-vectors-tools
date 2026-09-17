@@ -50,3 +50,51 @@ Mesh queries
    :members:
    :undoc-members:
    :show-inheritance:
+
+Cortical surfaces
+-----------------
+
+.. automodule:: zarr_vectors_tools.algorithms.surfaces
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Streamline bundles
+------------------
+
+.. automodule:: zarr_vectors_tools.algorithms.bundles
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Streamline selection
+--------------------
+
+.. automodule:: zarr_vectors_tools.algorithms.streamline_select
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Cortical parcels
+----------------
+
+.. automodule:: zarr_vectors_tools.algorithms.parcels
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Skeleton metrics
+----------------
+
+.. automodule:: zarr_vectors_tools.algorithms.skeleton_metrics
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Segments across stores
+----------------------
+
+.. automodule:: zarr_vectors_tools.algorithms.segment_link
+   :members:
+   :undoc-members:
+   :show-inheritance:

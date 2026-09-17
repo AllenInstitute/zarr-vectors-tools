@@ -6,12 +6,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from zarr_vectors.types.points import read_points
-from zarr_vectors_tools.ingest._point_enrichments import (
+
+from zarr_vectors_tools.convert.ingest._point_enrichments import (
     compute_per_object_vertex_count,
 )
-from zarr_vectors_tools.ingest.csv_points import ingest_csv
+from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
 
 
 def _write_csv(path: Path, header: str, rows: list[list[float]]) -> None:

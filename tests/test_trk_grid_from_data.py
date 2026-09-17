@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
@@ -31,7 +30,7 @@ from zarr_vectors.building import (
     read_chunk_vertices,
 )
 
-from zarr_vectors_tools.ingest.trk_parallel import ingest_trk_parallel
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
 from .test_trk_registration import _write_radiological_trk
 
@@ -58,6 +57,10 @@ def _store_chunk_shape(store):
     return np.asarray(_root_attrs(store)["chunk_shape"], dtype=np.float64)
 
 
+# The tests marked slow each ingest a TRK end to end on a 64-cell grid, like
+# test_trk_registration.  test_each_streamline_reassembles_in_order stays in
+# the fast tier: its grid is small, and it keeps one real TRK ingest per push.
+@pytest.mark.slow
 @pytest.mark.parametrize("register", [False, True])
 def test_every_vertex_lands_in_a_chunk_that_contains_it(tmp_path, register):
     """The property the clamp violated: a vertex stored under chunk coord c
@@ -90,6 +93,7 @@ def test_every_vertex_lands_in_a_chunk_that_contains_it(tmp_path, register):
     assert checked > 0
 
 
+@pytest.mark.slow
 def test_store_bounds_cover_the_geometry(tmp_path):
     """The store's declared bounds come from the data, so they contain it —
     the header's box does not even overlap this fixture on two axes."""
@@ -113,6 +117,7 @@ def test_store_bounds_cover_the_geometry(tmp_path):
     assert cloud.max(0)[0] > 100.0, "fixture must exceed the declared FOV"
 
 
+@pytest.mark.slow
 def test_no_vertices_are_lost(tmp_path):
     """Binning is a partition: dropping the clamp must not drop geometry.
     Stored vertices == input vertices + boundary-split duplicates, and every
@@ -141,6 +146,7 @@ def test_no_vertices_are_lost(tmp_path):
     assert np.allclose(np.sort(stored, axis=0), np.sort(want, axis=0), atol=1e-4)
 
 
+@pytest.mark.slow
 def test_chunk_shape_tracks_the_tracts_not_the_declared_fov(tmp_path):
     """chunk_shape is sized from a per-streamline vertex sample, so a header
     declaring a far larger FOV than the tracts occupy no longer inflates it."""
@@ -161,3 +167,46 @@ def test_chunk_shape_tracks_the_tracts_not_the_declared_fov(tmp_path):
     # not the declared 1000 mm (which would give ~250 mm and one single chunk).
     assert np.all(cs < 100.0), f"chunk_shape {cs} still reflects the declared FOV"
     assert len(list_chunk_keys(get_resolution_level(open_store(str(out)), 0), "vertices")) > 1
+
+
+def test_each_streamline_reassembles_in_order(tmp_path):
+    """A polyline's fragments must concatenate back to the polyline.
+
+    Phase A now writes its segment table sorted by target chunk, and Phase B
+    reads one slice of it per part instead of decompressing and masking the
+    whole table once per chunk.  The sort has to keep
+    ``(chunk, poly_id, index within the polyline)`` order, because that IS
+    the order Phase B emits fragments in and therefore the order the object
+    manifest records.  Get it wrong and every streamline comes back with its
+    segments shuffled -- which reads as plausible geometry.
+    """
+    from zarr_vectors.types.polylines import read_polylines
+
+    # Long, wandering streamlines so each one crosses several chunks and
+    # re-enters some of them.
+    streamlines = []
+    for i in range(8):
+        t = np.linspace(0.0, 1.0, 60)
+        streamlines.append(np.column_stack([
+            20.0 + 60.0 * t,
+            40.0 + 25.0 * np.sin(t * 9.0 + i),
+            40.0 + 25.0 * np.cos(t * 7.0 + i),
+        ]).astype(np.float32))
+
+    source = tmp_path / "order.trk"
+    _write_radiological_trk(source, streamlines, dim=100, vs=1.0)
+    store = tmp_path / "order.zv"
+    ingest_trk_parallel(
+        str(source), str(store), num_chunks=27, n_parts=3, workers=1,
+        build_multiscale=False, progress=False,
+    )
+
+    result = read_polylines(str(store))
+    by_object = {}
+    for index, oid in enumerate(result["object_ids"]):
+        by_object.setdefault(int(oid), []).extend(result["polylines"][index])
+
+    assert len(by_object) == len(streamlines)
+    for oid, fragments in by_object.items():
+        got = np.concatenate(fragments, axis=0)
+        np.testing.assert_allclose(got, streamlines[oid], atol=1e-4)

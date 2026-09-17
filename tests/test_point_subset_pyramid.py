@@ -14,11 +14,10 @@ import numpy as np
 import pandas as pd
 import pytest
 import zarr_vectors.building as B
-from zarr_vectors.constants import VERTICES
 from zarr_vectors.exceptions import CoarseningError
 from zarr_vectors.types.points import read_points
 
-from zarr_vectors_tools.ingest.cell_table import ingest_table
+from zarr_vectors_tools.convert.ingest.cell_table import ingest_table
 from zarr_vectors_tools.multiresolution.strategies.points import (
     build_point_subset_pyramid,
 )
