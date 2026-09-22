@@ -1,0 +1,242 @@
+name: Release
+
+# Manual release: bump the version, build the sdist + wheel, upload to PyPI,
+# then commit and tag what was published.
+#
+#   Actions tab -> Release -> Run workflow
+#   gh workflow run release.yml -f part=patch
+#
+# There is no API token anywhere in this workflow.  Uploads authenticate with
+# PyPI's Trusted Publishing: GitHub mints a short-lived OIDC identity for the
+# run, PyPI checks it against a publisher it has on file for this project and
+# swaps it for a token good for one upload.  Nothing long-lived is stored, and
+# nothing outside this repo/workflow/environment triple can publish.
+#
+# That triple has to match the publisher registered on PyPI EXACTLY.  It is:
+#
+#   Owner              AllenInstitute
+#   Repository         zarr-vectors-tools
+#   Workflow           release.yml          <- this file's name
+#   Environment        pypi                 (or testpypi for TestPyPI)
+#
+# So renaming this file, moving the repo, or renaming the environments below
+# breaks publishing until the publisher on PyPI is updated to match.
+#
+# The upload step is pypa/gh-action-pypi-publish, which is twine underneath --
+# it exists to do the OIDC token exchange, which twine has no native support
+# for.  Everything up to the upload is a plain `python -m build` + `twine
+# check`, so a dry run needs no credentials of any kind.
+#
+# The version is static in pyproject.toml (`[project] version`), so a release
+# is a commit, not just a tag.  This workflow makes that commit itself and
+# pushes it to the branch it was dispatched from -- run it from `main` unless
+# you are deliberately cutting from elsewhere.
+#
+# Order is deliberate: build and check BEFORE the upload, upload before the
+# push.  A failed build leaves the repo untouched; a failed upload leaves the
+# bump commit and tag unpushed, so the same version number can be retried
+# once the cause is fixed.  PyPI never accepts the same version twice, which
+# is why `dry-run` exists -- it does everything except upload and push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      part:
+        description: Which part of the version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      repository:
+        description: Where to upload
+        type: choice
+        options: [pypi, testpypi]
+        default: pypi
+      dry-run:
+        description: Build and check only -- no upload, no commit, no tag
+        type: boolean
+        default: false
+
+permissions:
+  # The bump commit is pushed back to the branch.
+  contents: write
+  # Lets the run mint the OIDC token that Trusted Publishing exchanges with
+  # PyPI.  Without it the upload fails with "missing or insufficient
+  # OIDC token permissions".
+  id-token: write
+
+# Two releases at once would race on the version number and on the push.
+# Never cancel one in flight: it may already have uploaded to PyPI.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Part of the Trusted Publishing identity, not just bookkeeping -- see the
+    # header.  Adding a required reviewer to the `pypi` environment turns the
+    # upload into an approval gate without touching this file.
+    environment: ${{ inputs.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Tags, so the "already released" guard below can see them.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Check the dispatch ref is a branch
+        # `gh workflow run --ref v0.2.0` would check out a detached HEAD and
+        # the push at the end would have nowhere to go.  Fail here instead.
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" != "branch" ]; then
+            echo "::error::Dispatch this workflow from a branch, not ${{ github.ref_type }} ${{ github.ref_name }}."
+            exit 1
+          fi
+
+      - name: Bump the version
+        id: bump
+        env:
+          PART: ${{ inputs.part }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, re, sys, tomllib
+          from pathlib import Path
+
+          part = os.environ["PART"]
+
+          pyproject = Path("pyproject.toml")
+          old = tomllib.loads(pyproject.read_text())["project"]["version"]
+          m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", old)
+          if not m:
+              # A dev/rc/post version means someone is mid-something by hand;
+              # bumping it would guess wrong in both directions.
+              sys.exit(f"::error::Current version {old!r} is not a plain X.Y.Z -- bump it by hand.")
+          major, minor, patch = (int(g) for g in m.groups())
+
+          if part == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif part == "minor":
+              minor, patch = minor + 1, 0
+          else:
+              patch += 1
+          new = f"{major}.{minor}.{patch}"
+
+          def rewrite(path, pattern, replacement):
+              """Replace exactly one line, or fail loudly."""
+              text = path.read_text()
+              text, n = re.subn(pattern, replacement, text, flags=re.MULTILINE)
+              if n != 1:
+                  sys.exit(f"::error::Expected 1 version line in {path}, found {n}.")
+              path.write_text(text)
+
+          # pyproject's [build-system] table has no `version` key, so the one
+          # line starting with `version = ` is the project's.
+          rewrite(pyproject, rf'^version = "{re.escape(old)}"$', f'version = "{new}"')
+          # Keep the docs build in step; `version` there is derived from it.
+          rewrite(Path("docs/conf.py"), rf'^release = "{re.escape(old)}"$', f'release = "{new}"')
+
+          print(f"old={old}")
+          print(f"new={new}")
+          print(f"tag=v{new}")
+          PY
+
+      - name: Check the tag is free
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # `git fetch --tags` ran with the full checkout above, so a local
+          # hit covers the remote too.
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG already exists -- that version was released."
+            exit 1
+          fi
+
+      - name: Build the sdist and wheel
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build
+
+      - name: Check the artifacts
+        env:
+          NEW: ${{ steps.bump.outputs.new }}
+        run: |
+          set -euo pipefail
+          # --strict fails on a README that PyPI would refuse to render, which
+          # is otherwise only discovered after the version is burnt.
+          python -m twine check --strict dist/*
+          # Guard against a stale dist/ or a build backend that picked up a
+          # version other than the one just written.  Matched by glob rather
+          # than by exact name: setuptools normalises `zarr-vectors-tools` to
+          # `zarr_vectors_tools` in the filenames, but that spelling is its
+          # business, not this workflow's.
+          ls -l dist/
+          shopt -s nullglob
+          sdists=(dist/*-"${NEW}".tar.gz)
+          wheels=(dist/*-"${NEW}"-*.whl)
+          if [ "${#sdists[@]}" -ne 1 ] || [ "${#wheels[@]}" -ne 1 ] || [ "$(ls dist | wc -l)" -ne 2 ]; then
+            echo "::error::dist/ does not hold exactly one sdist and one wheel at ${NEW}."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ steps.bump.outputs.new }}
+          path: dist/
+
+      - name: Commit and tag
+        if: ${{ !inputs.dry-run }}
+        env:
+          NEW: ${{ steps.bump.outputs.new }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml docs/conf.py
+          git commit -m "release: v${NEW}"
+          git tag -a "$TAG" -m "zarr-vectors-tools ${NEW}"
+
+      - name: Upload to PyPI
+        if: ${{ !inputs.dry-run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Omitted for pypi.org, which is the action's default.
+          repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
+
+      - name: Push the bump and the tag
+        if: ${{ !inputs.dry-run }}
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Atomic: either the branch and the tag both land, or neither does.
+          git push --atomic origin "HEAD:${{ github.ref_name }}" "$TAG"
+
+      - name: Summary
+        if: always()
+        env:
+          OLD: ${{ steps.bump.outputs.old }}
+          NEW: ${{ steps.bump.outputs.new }}
+        run: |
+          {
+            echo "## ${OLD:-?} -> ${NEW:-?} (${{ inputs.part }})"
+            echo
+            if [ "${{ inputs.dry-run }}" = "true" ]; then
+              echo "Dry run: built and checked only. Nothing uploaded, committed or tagged."
+            else
+              echo "Uploaded to **${{ inputs.repository }}**, tagged \`v${NEW}\`, pushed to \`${{ github.ref_name }}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
