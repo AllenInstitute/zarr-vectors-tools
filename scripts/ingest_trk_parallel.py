@@ -23,7 +23,7 @@ INPUT_TRK = Path(
 )
 
 # Output zarr-vectors store directory
-#OUTPUT_STORE = Path("/tmp/wholebrain_tractogram.zarrvectors")
+#OUTPUT_STORE = Path("/tmp/wholebrain_tractogram_subset.zarrvectors")
 OUTPUT_STORE = Path("/tmp/wholebrain_tractogram.zarrvectors")
 
 # For quick test runs: only ingest the first N streamlines from the file
@@ -46,7 +46,7 @@ N_PARTS = 20
 # Number of Dask worker processes that run in parallel.
 # This is the only knob that affects how many CPU cores are used at once.
 # Set to 1 for serial execution (useful for testing / low-memory machines).
-WORKERS = 8
+WORKERS = 5
 
 # Pyramid vertex-reduction mode:
 #   "rdp"      - Douglas-Peucker simplification (dramatic, geometry-dependent).
