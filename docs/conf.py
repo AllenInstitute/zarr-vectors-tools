@@ -17,7 +17,7 @@ copyright = (
 author = "BRIDGE Neuroscience"
 # Package version. Independent of the on-disk FORMAT version this package
 # targets, which is Zarr Vectors 0.9.0 (the merged links/<delta>/<offsets>/ layout).
-release = "0.2.0"
+release = "0.3.0"
 version = release
 
 # On-disk format targeted by this release. Single source of truth for the

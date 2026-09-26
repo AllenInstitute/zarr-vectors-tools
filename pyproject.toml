@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zarr-vectors-tools"
-version = "0.2.0"
+version = "0.3.0"
 description = "Ingest and export workflows for the Zarr Vectors. Wraps third-party readers/writers (nibabel, laspy, plyfile, networkx, trx-python) on top of zarr-vectors."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
