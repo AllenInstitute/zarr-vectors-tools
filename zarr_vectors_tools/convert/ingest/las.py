@@ -1,6 +1,11 @@
 """Ingest point clouds from LAS/LAZ files into Zarr Vectors.
 
-Requires the ``laspy`` package: ``pip install laspy``.
+Requires the ``laspy`` package: ``pip install 'zarr-vectors-tools[las]'``
+(which also installs ``lazrs``, the ``.laz`` decompressor).
+
+Each dimension is stored in a dtype that holds every value it can take:
+intensity, colour and classification are 8- and 16-bit integers, which
+float32 holds exactly; GPS time is float64, which it does not.
 """
 
 from __future__ import annotations
@@ -13,6 +18,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+
 
 def ingest_las(
     input_path: str | Path,
@@ -24,7 +31,7 @@ def ingest_las(
     include_attributes: bool = True,
     object_ids: np.ndarray | None = None,
     knn_distance_k: int | None = None,
-    per_object_vertex_count: bool = False,
+    per_object_vertex_count: bool | None = None,
 ) -> dict[str, Any]:
     """Ingest a LAS or LAZ file into a Zarr Vectors point cloud store.
 
@@ -40,9 +47,11 @@ def ingest_las(
         knn_distance_k: If an int, compute each point's mean Euclidean
             distance to its k nearest neighbours and store as
             ``attributes["knn_distance"]``. Requires ``scipy``.
-        per_object_vertex_count: If True and ``object_ids`` is provided,
-            write per-object vertex counts to
-            ``object_attributes["vertex_count"]``.
+        per_object_vertex_count: Write per-object vertex counts to
+            ``object_attributes["vertex_count"]``.  ``None`` (default):
+            whenever ``object_ids`` is given; ``True`` requires it.  With
+            objects, each fragment's ``segment_id`` is written too (see
+            :mod:`._object_columns`).
 
     Returns:
         Summary dict from :func:`~zarr_vectors.types.points.write_points`.
@@ -55,7 +64,7 @@ def ingest_las(
     except ImportError as e:
         raise IngestError(
             "laspy is required for LAS/LAZ ingest. "
-            "Install with: pip install laspy"
+            "Install with: pip install 'zarr-vectors-tools[las]'"
         ) from e
 
     input_path = Path(input_path)
@@ -68,7 +77,9 @@ def ingest_las(
         raise IngestError(f"Failed to read LAS file '{input_path}': {e}") from e
 
     # Extract XYZ positions
-    positions = np.stack([las.x, las.y, las.z], axis=1).astype(np.dtype(dtype))
+    world = np.stack([las.x, las.y, las.z], axis=1)
+    positions = world.astype(np.dtype(dtype))
+    precision_note = _precision_note(world, positions, las)
 
     # Extract attributes
     attributes: dict[str, np.ndarray] = {}
@@ -90,35 +101,57 @@ def ingest_las(
                 pass
 
         if hasattr(las, "gps_time") and las.gps_time is not None:
-            attributes["gps_time"] = np.asarray(las.gps_time, dtype=np.float64).astype(
-                np.float32
-            )
+            # float64, as the file has it.  float32 steps by 1/32 s at GPS
+            # week seconds (~4e5) and by 8 s at adjusted standard time
+            # (~1e8), so pulses milliseconds apart collapse to one value.
+            attributes["gps_time"] = np.asarray(las.gps_time, dtype=np.float64)
 
     if knn_distance_k is not None and len(positions):
         from zarr_vectors_tools.convert.ingest._point_enrichments import compute_knn_distance
         attributes["knn_distance"] = compute_knn_distance(positions, knn_distance_k)
 
-    object_attributes: dict[str, np.ndarray] | None = None
-    if per_object_vertex_count:
-        if object_ids is None:
-            raise IngestError(
-                "per_object_vertex_count requires object_ids to be supplied."
-            )
-        from zarr_vectors_tools.convert.ingest._point_enrichments import (
-            compute_per_object_vertex_count,
+    if per_object_vertex_count and object_ids is None:
+        raise IngestError(
+            "per_object_vertex_count requires object_ids to be supplied."
         )
-        _, counts = compute_per_object_vertex_count(object_ids)
-        object_attributes = {"vertex_count": counts}
 
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
         "bin_shape": bin_shape,
-        "attributes": attributes if attributes else None,
+        "vertex_attributes": attributes if attributes else None,
         "dtype": dtype,
     }
     if object_ids is not None:
         write_kwargs["object_ids"] = object_ids
-    if object_attributes is not None:
-        write_kwargs["object_attributes"] = object_attributes
 
-    return write_points(str(output_path), positions, **write_kwargs)
+    result = write_points(str(output_path), positions, **write_kwargs)
+    if object_ids is not None:
+        stamp_object_columns(
+            output_path, vertex_count=per_object_vertex_count is not False,
+        )
+    if precision_note:
+        result["warnings"] = [precision_note]
+    return result
+
+
+def _precision_note(world: np.ndarray, stored: np.ndarray, las: Any) -> str | None:
+    """Say so when the stored positions are coarser than the file's own.
+
+    LAS stores integers times a scale (often 1 cm), so georeferenced
+    coordinates are millions of units from the origin -- where float32, the
+    default and the only dtype the viewer reads, steps by a quarter of a
+    unit.  Not refused (the default is a choice), but not silent either.
+    """
+    scales = getattr(getattr(las, "header", None), "scales", None)
+    if scales is None or not len(world) or stored.dtype.kind != "f":
+        return None
+    step = float(np.spacing(np.abs(stored).max(axis=0)).max())
+    finest = float(np.min(np.asarray(scales, dtype=np.float64)))
+    if step <= finest:
+        return None
+    return (
+        f"positions are stored as {stored.dtype}, which steps by up to {step:.3g} "
+        f"at these coordinates, coarser than the file's {finest:g} resolution "
+        f"(max error {float(np.abs(stored - world).max()):.3g}); dtype='float64' "
+        f"(--dtype float64) keeps it, but the viewer reads float32 only"
+    )

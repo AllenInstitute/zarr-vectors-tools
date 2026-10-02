@@ -16,7 +16,8 @@ k-core peels every vertex at the current core number in one numpy step,
 and a label-propagation round is one sort over the edge ends.  Louvain's
 local moves are sequential by definition, so its inner loop still visits
 one vertex at a time, over plain lists; its modularity and contraction
-are array operations.
+are array operations.  On a skeleton store the adjacency includes the
+parent links its links convention implies rather than stores.
 
 Cross-chunk edges are not a special case: connectivity is one family, so
 they take per-edge weights from the same ``link_attributes/<weight>/0/``

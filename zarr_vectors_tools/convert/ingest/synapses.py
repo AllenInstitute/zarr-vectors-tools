@@ -33,6 +33,7 @@ import numpy as np
 import numpy.typing as npt
 from zarr_vectors.exceptions import IngestError
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 from zarr_vectors_tools.convert.ingest.attach import DEFAULT_KEY_ATTRIBUTE
 
 _SIDES = ("pre", "post")
@@ -175,6 +176,7 @@ def ingest_synapses(
     ))
 
     _write_segment_ids(output_path, segment_ids, int(all_owners.max()) + 1)
+    stamp_object_columns(output_path)
     if write_counts:
         _write_counts(skeleton_store, pre_counts, post_counts)
 

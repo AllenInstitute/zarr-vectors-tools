@@ -122,3 +122,112 @@ def shard_rows_by_object(
             nxt = int(np.searchsorted(oids, oids[nxt], side="right"))
         cuts.append(nxt)
     return [rows[a:b] for a, b in zip(cuts[:-1], cuts[1:])]
+
+
+#: The object attribute a viewer budgets each object by, per level.
+VERTEX_COUNT_ATTR = "vertex_count"
+
+
+def recount_object_vertex_counts(level_group, *, dtype=None) -> np.ndarray:
+    """Rewrite ``object_attributes/vertex_count`` from this level's own fragments.
+
+    Coarseners carry a level's object attributes forward unchanged, which is
+    right for a label or a length but not for a vertex count: the copied column
+    still describes level 0, and a reader that budgets objects by it (the
+    Neuroglancer fork's per-object detail does) over-costs every coarse level.
+    Counted from each chunk's fragment index, which is kilobytes per chunk, so
+    no vertices are read.  An object with no geometry at this level (dropped
+    by sparsity) counts 0, a real value rather than a missing one, so every
+    row is marked present.
+
+    Args:
+        level_group: The level just written, opened for writing.
+        dtype: dtype to write; default the existing column's, else uint32.
+
+    Returns:
+        The counts written, one per object.
+    """
+    from zarr_vectors.building import (
+        read_all_object_manifests,
+        read_object_attributes,
+        read_vertex_fragment_index,
+    )
+
+    manifests = read_all_object_manifests(level_group)
+    if dtype is None:
+        try:
+            dtype = np.asarray(read_object_attributes(level_group, VERTEX_COUNT_ATTR)).dtype
+        except Exception:  # noqa: BLE001 - no column yet
+            dtype = np.uint32
+    lengths: dict[ChunkCoords, np.ndarray] = {}
+    counts = np.zeros(len(manifests), dtype=np.int64)
+    for oid, manifest in enumerate(manifests):
+        for cc, fragment in manifest:
+            cc = tuple(int(c) for c in cc)
+            per_fragment = lengths.get(cc)
+            if per_fragment is None:
+                index = read_vertex_fragment_index(level_group, cc)
+                per_fragment = lengths[cc] = np.array(
+                    [index.range(f)[1] if index.is_range(f) else len(index.indices(f))
+                     for f in range(len(index))],
+                    dtype=np.int64,
+                )
+            counts[oid] += int(per_fragment[int(fragment)])
+    out = counts.astype(dtype)
+    create_object_attributes_array(level_group, VERTEX_COUNT_ATTR, dtype=str(out.dtype))
+    write_object_attributes(
+        level_group, VERTEX_COUNT_ATTR, out,
+        present_mask=np.ones(len(out), dtype=np.uint8),
+    )
+    return out
+
+
+def carry_object_columns(
+    src_group, level_group, keep_oids, n_objects: int,
+) -> list[str]:
+    """Carry a level's per-object columns to the coarser level just written.
+
+    Every ``object_attributes`` column is copied, in its own dtype, for the
+    objects the level kept (the rest are marked absent); ``vertex_count`` is
+    then recounted from this level's fragments, and the fragment
+    ``segment_id`` a viewer colours and picks by is stamped when the source
+    level had one.  Without these a coarse level could not be budgeted per
+    object, and its fragments would be coloured by their chunk-local index.
+
+    Returns:
+        The object attribute names carried.
+    """
+    from zarr_vectors.building import read_object_attributes
+    from zarr_vectors.constants import FRAGMENT_ATTRIBUTES, OBJECT_ATTRIBUTES
+
+    from zarr_vectors_tools.convert.ingest._object_columns import (
+        stamp_level_object_columns,
+    )
+
+    names = (
+        list(src_group[OBJECT_ATTRIBUTES].children())
+        if OBJECT_ATTRIBUTES in src_group else []
+    )
+    kept = np.asarray(sorted(int(o) for o in keep_oids), dtype=np.int64)
+    mask = np.zeros(int(n_objects), dtype=np.uint8)
+    mask[kept[kept < n_objects]] = 1
+    carried: list[str] = []
+    for name in names:
+        try:
+            src = np.asarray(read_object_attributes(src_group, name))
+        except Exception:  # noqa: BLE001 - unreadable column: leave it out
+            continue
+        out = np.zeros_like(src)
+        rows = kept[kept < len(src)]
+        out[rows] = src[rows]
+        create_object_attributes_array(
+            level_group, name, dtype=str(src.dtype),
+            num_channels=int(np.prod(src.shape[1:])) if src.ndim > 1 else 1,
+        )
+        write_object_attributes(level_group, name, out, present_mask=mask[: len(src)])
+        carried.append(name)
+    if VERTEX_COUNT_ATTR in carried:
+        recount_object_vertex_counts(level_group)
+    if src_group.array_exists(f"{FRAGMENT_ATTRIBUTES}/segment_id"):
+        stamp_level_object_columns(level_group, vertex_count=False, segment_id=True)
+    return carried

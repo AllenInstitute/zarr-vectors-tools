@@ -293,6 +293,7 @@ def write_surface_store(
     from zarr_vectors.constants import GROUPS
     from zarr_vectors.types.meshes import write_mesh
 
+    from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
     from zarr_vectors_tools.convert.ingest.attach import attach_attributes
     from zarr_vectors_tools.headers.formats import SurfaceHeader
     from zarr_vectors_tools.headers.registry import HeaderRegistry
@@ -381,6 +382,7 @@ def write_surface_store(
         attach_attributes(
             str(output_path), multi, keys=key_column, missing="error",
         )
+    stamp_object_columns(output_path)
 
     # ---- name the objects -------------------------------------------------
     # Objects already ARE hemispheres; a group per hemisphere gives them

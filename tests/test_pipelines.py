@@ -123,7 +123,8 @@ class TestSkeletonPipeline:
             comp = 1 if i == 0 else (2 if positions[i][0] < 0 else 3)
             r = 5.0 if i == 0 else rng.uniform(0.5, 3.0)
             x, y, z = positions[i]
-            lines.append(f"{i + 1} {comp} {x:.4f} {y:.4f} {z:.4f} {r:.4f} {parents[i] + 1 if parents[i] >= 0 else -1}")
+            parent = parents[i] + 1 if parents[i] >= 0 else -1
+            lines.append(f"{i + 1} {comp} {x:.4f} {y:.4f} {z:.4f} {r:.4f} {parent}")
 
         swc_in.write_text("\n".join(lines))
 
@@ -146,8 +147,8 @@ class TestSkeletonPipeline:
         swc_out = tmp_path / "neuron_out.swc"
         export_swc(store, swc_out)
         assert swc_out.exists()
-        data_lines = [l for l in swc_out.read_text().strip().split("\n")
-                      if not l.startswith("#")]
+        data_lines = [line for line in swc_out.read_text().strip().split("\n")
+                      if not line.startswith("#")]
         assert len(data_lines) == n_nodes
 
 
@@ -193,5 +194,5 @@ class TestMeshPipeline:
         obj_out = tmp_path / "grid_out.obj"
         export_obj(store, obj_out)
         assert obj_out.exists()
-        out_v = sum(1 for l in obj_out.read_text().split("\n") if l.startswith("v "))
+        out_v = sum(1 for line in obj_out.read_text().split("\n") if line.startswith("v "))
         assert out_v == 100

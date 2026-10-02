@@ -453,6 +453,13 @@ def ingest_to_store(
                 f"the {fmt} ingester has no default for it. Pass it as a reader "
                 f"option, e.g. chunk_shape=(100.0, 100.0, 100.0)."
             ) from exc
+        if "required" in str(exc):
+            # e.g. a table's position_columns: options only convert has.
+            raise IngestError(
+                f"staging {fmt!r} needs options a merge cannot pass ({exc}); "
+                f"convert it to a store first with 'zvtools convert', then "
+                f"merge that store"
+            ) from exc
         raise
     return str(target)
 

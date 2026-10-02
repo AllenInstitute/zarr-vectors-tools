@@ -267,8 +267,17 @@ def run_recipe(
 
         print(f"{label}: zvtools {shlex.join(argv)}")
         began = time.perf_counter()
+        run_argv = argv
+        if key in done:
+            # This step ran before (finished, failed part-way, or is being
+            # forced), so what sits at its output is its own earlier result:
+            # replace it.  convert and pyramid otherwise refuse an existing
+            # store or pyramid rather than write over it.
+            flag = {"convert": "--overwrite", "pyramid": "--replace"}.get(command)
+            if flag and flag not in argv:
+                run_argv = [*argv, flag]
         try:
-            args = parser.parse_args(argv)
+            args = parser.parse_args(run_argv)
             code = int(args.func(args) or 0)
         except SystemExit as exc:
             code = exc.code if isinstance(exc.code, int) else 1

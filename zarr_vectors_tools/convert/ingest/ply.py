@@ -1,6 +1,6 @@
 """Ingest point clouds from PLY files into Zarr Vectors.
 
-Requires the ``plyfile`` package: ``pip install plyfile``.
+Requires the ``plyfile`` package: ``pip install 'zarr-vectors-tools[ply]'``.
 Detects whether the PLY contains mesh faces or just points and
 dispatches accordingly.  This module handles point clouds only;
 mesh PLY ingest is in ``ingest.ply_mesh`` (future).
@@ -16,6 +16,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+
 
 def ingest_ply(
     input_path: str | Path,
@@ -27,7 +29,7 @@ def ingest_ply(
     include_attributes: bool = True,
     object_ids: np.ndarray | None = None,
     knn_distance_k: int | None = None,
-    per_object_vertex_count: bool = False,
+    per_object_vertex_count: bool | None = None,
 ) -> dict[str, Any]:
     """Ingest a PLY file as a Zarr Vectors point cloud.
 
@@ -43,9 +45,11 @@ def ingest_ply(
         knn_distance_k: If an int, compute each point's mean Euclidean
             distance to its k nearest neighbours and store as
             ``attributes["knn_distance"]``. Requires ``scipy``.
-        per_object_vertex_count: If True and ``object_ids`` is provided,
-            write per-object vertex counts to
-            ``object_attributes["vertex_count"]``.
+        per_object_vertex_count: Write per-object vertex counts to
+            ``object_attributes["vertex_count"]``.  ``None`` (default):
+            whenever ``object_ids`` is given; ``True`` requires it.  With
+            objects, each fragment's ``segment_id`` is written too (see
+            :mod:`._object_columns`).
 
     Returns:
         Summary dict from :func:`~zarr_vectors.types.points.write_points`.
@@ -59,7 +63,7 @@ def ingest_ply(
     except ImportError as e:
         raise IngestError(
             "plyfile is required for PLY ingest. "
-            "Install with: pip install plyfile"
+            "Install with: pip install 'zarr-vectors-tools[ply]'"
         ) from e
 
     input_path = Path(input_path)
@@ -112,27 +116,23 @@ def ingest_ply(
         from zarr_vectors_tools.convert.ingest._point_enrichments import compute_knn_distance
         attributes["knn_distance"] = compute_knn_distance(positions, knn_distance_k)
 
-    object_attributes: dict[str, np.ndarray] | None = None
-    if per_object_vertex_count:
-        if object_ids is None:
-            raise IngestError(
-                "per_object_vertex_count requires object_ids to be supplied."
-            )
-        from zarr_vectors_tools.convert.ingest._point_enrichments import (
-            compute_per_object_vertex_count,
+    if per_object_vertex_count and object_ids is None:
+        raise IngestError(
+            "per_object_vertex_count requires object_ids to be supplied."
         )
-        _, counts = compute_per_object_vertex_count(object_ids)
-        object_attributes = {"vertex_count": counts}
 
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
         "bin_shape": bin_shape,
-        "attributes": attributes if attributes else None,
+        "vertex_attributes": attributes if attributes else None,
         "dtype": dtype,
     }
     if object_ids is not None:
         write_kwargs["object_ids"] = object_ids
-    if object_attributes is not None:
-        write_kwargs["object_attributes"] = object_attributes
 
-    return write_points(str(output_path), positions, **write_kwargs)
+    result = write_points(str(output_path), positions, **write_kwargs)
+    if object_ids is not None:
+        stamp_object_columns(
+            output_path, vertex_count=per_object_vertex_count is not False,
+        )
+    return result

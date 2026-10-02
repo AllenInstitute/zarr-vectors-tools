@@ -17,6 +17,7 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 from zarr_vectors_tools.convert.ingest._text_tokens import (
     iter_chunks,
     line_heads,
@@ -25,6 +26,7 @@ from zarr_vectors_tools.convert.ingest._text_tokens import (
     starts_with,
     tokenize,
 )
+from zarr_vectors_tools.convert.ingest.obj import refuse_unreadable_encoding
 
 # One binary STL triangle: facet normal, three vertices, and the 16-bit
 # "attribute byte count" that nothing reads.
@@ -61,13 +63,16 @@ def ingest_stl(
         output_path: Path for the output zarr vectors store.
         chunk_shape: Spatial chunk size per dimension (3D).
         dtype: Dtype for position data.
-        encoding: ``"raw"`` or ``"draco"``.
+        encoding: ``"raw"``, the only encoding a store can be read back
+            in.  ``"draco"`` is refused: core writes Draco meshes but has
+            no decoder to read them.
         merge_vertices: If True, merge duplicate vertices.
         merge_tolerance: Distance threshold for merging.
 
     Returns:
         Summary dict from :func:`write_mesh`.
     """
+    refuse_unreadable_encoding(encoding)
     input_path = Path(input_path)
     if not input_path.exists():
         raise IngestError(f"Input file not found: {input_path}")
@@ -102,7 +107,7 @@ def ingest_stl(
     # them from the geometry, so keeping them would be a second source of
     # truth that nothing reads.
 
-    return write_mesh(
+    result = write_mesh(
         str(output_path),
         positions,
         faces,
@@ -111,6 +116,8 @@ def ingest_stl(
         encoding=encoding,
         dtype=dtype,
     )
+    stamp_object_columns(output_path)
+    return result
 
 
 def _is_ascii_stl(path: Path) -> bool:

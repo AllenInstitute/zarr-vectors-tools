@@ -86,7 +86,8 @@ class TestStreamlinesWithSparsity:
         assert summary["levels_created"] == 1
         # sparsity_factor=2.0 → keep_frac=0.5 ≈ object_sparsity=0.5.
         # Approximate check: at least one object was dropped.
-        assert summary["level_specs"][0]["objects_kept"] < summary["level_specs"][0]["source_objects"]
+        spec = summary["level_specs"][0]
+        assert spec["objects_kept"] < spec["source_objects"]
 
         assert validate(store, level=5).ok
 

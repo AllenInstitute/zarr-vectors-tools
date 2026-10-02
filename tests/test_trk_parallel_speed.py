@@ -77,9 +77,11 @@ def test_block_and_batch_boundaries_do_not_change_the_store(
         )
         return _tree(out)
 
-    reference = ingest(tmp_path / "reference.zv")
+    # Same store name in separate directories: core names the root OME node
+    # after the store, so differently named stores can never be identical.
+    reference = ingest(tmp_path / "reference" / "store.zv")
     # Blocks of a few vertices (most streamlines their own block, several
     # split across none) and parts' worth of single-chunk Phase B tasks.
     monkeypatch.setattr(trk_parallel, "_PHASE_A_BLOCK_VERTICES", 7)
-    small = ingest(tmp_path / "small_blocks.zv")
+    small = ingest(tmp_path / "small_blocks" / "store.zv")
     assert small == reference

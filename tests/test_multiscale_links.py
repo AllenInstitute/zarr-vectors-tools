@@ -434,7 +434,7 @@ def test_invalid_cross_level_depth_rejected():
 # wheel) so the rest of the suite keeps running.
 zarr = pytest.importorskip("zarr")
 
-from zarr_vectors.building import (
+from zarr_vectors.building import (  # noqa: E402 - after the importorskip above
     list_resolution_levels,
     open_store,
     read_root_metadata,

@@ -221,10 +221,22 @@ def attach_attributes(
     clashes = sorted(set(arrays) & existing)
     if clashes and not overwrite:
         raise IngestError(
-            f"attributes already exist: {clashes}. Pass overwrite=True to replace them."
+            f"attributes already exist: {clashes}. Pass --overwrite "
+            f"(overwrite=True) to replace them."
         )
 
     chunk_keys = B.list_chunk_keys(level_group, "vertices")
+
+    if missing == "error":
+        # Checked before anything is created.  Found mid-write, the refusal
+        # left the new arrays half-written and the header not updated, and
+        # the retry then failed on "attributes already exist" -- a store
+        # needing --overwrite to recover from a command that said it failed.
+        # Costs one extra read of the join keys, and only on this path.
+        _require_all_matched(
+            B, level_group, chunk_keys, key_attribute=key_attribute,
+            order=order, ordered_keys=ordered_keys, n_rows=n_rows,
+        )
 
     # Sharding has to be decided when the array is created: an unsharded
     # array is one storage object per spatial chunk, so a store staged
@@ -233,22 +245,38 @@ def attach_attributes(
     # Creating the arrays inside a sharded write session avoids the repack.
     session = _write_session(B, root, level_group, level, shard_shape)
 
-    with session:
-        for name, data in arrays.items():
-            channel_names = (
-                [f"ch{i}" for i in range(data.shape[1])] if data.ndim == 2 else None
-            )
-            B.create_attribute_array(
-                level_group, name, dtype=str(data.dtype),
-                channel_names=channel_names, exist_ok=True,
-            )
+    created = [name for name in arrays if name not in existing]
+    try:
+        with session:
+            for name, data in arrays.items():
+                channel_names = (
+                    [f"ch{i}" for i in range(data.shape[1])] if data.ndim == 2 else None
+                )
+                B.create_attribute_array(
+                    level_group, name, dtype=str(data.dtype),
+                    channel_names=channel_names, exist_ok=True,
+                )
 
-        fills = {name: _fill_for(data.dtype, fill_value) for name, data in arrays.items()}
-        matched, unmatched = _write_all_chunks(
-            B, level_group, chunk_keys, arrays, fills,
-            key_attribute=key_attribute, order=order, ordered_keys=ordered_keys,
-            n_rows=n_rows, missing=missing, progress=progress,
-        )
+            fills = {
+                name: _fill_for(data.dtype, fill_value) for name, data in arrays.items()
+            }
+            matched, unmatched = _write_all_chunks(
+                B, level_group, chunk_keys, arrays, fills,
+                key_attribute=key_attribute, order=order, ordered_keys=ordered_keys,
+                n_rows=n_rows, missing=missing, progress=progress,
+            )
+    except BaseException:
+        # Whatever else stops the write, take the arrays this call created
+        # with it, so a retry starts from the store as it was.  Arrays it
+        # was replacing (--overwrite) cannot be put back and are left as
+        # they are.
+        for name in created:
+            try:
+                level_group.delete_subtree(f"{B.VERTEX_ATTRIBUTES}/{name}")
+            except Exception:  # noqa: BLE001 - never created is fine
+                pass
+        B.refresh_arrays_present(level_group)
+        raise
 
     B.refresh_arrays_present(level_group)
 
@@ -285,6 +313,53 @@ def _write_session(B, root, level_group, level: int, shard_shape):
     )
 
 
+def _join(
+    stored: np.ndarray, *, order, ordered_keys, n_rows: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(rows, found)``: each stored key's row in the incoming file."""
+    if order is None:
+        rows = stored
+        found = (rows >= 0) & (rows < n_rows)
+        rows = np.clip(rows, 0, max(n_rows - 1, 0))
+    elif len(ordered_keys):
+        slot = np.searchsorted(ordered_keys, stored)
+        slot = np.clip(slot, 0, len(ordered_keys) - 1)
+        found = ordered_keys[slot] == stored
+        rows = order[slot]
+    else:
+        found = np.zeros(len(stored), dtype=bool)
+        rows = np.zeros(len(stored), dtype=np.int64)
+    return rows, found
+
+
+def _require_all_matched(
+    B, level_group, chunk_keys, *, key_attribute, order, ordered_keys, n_rows,
+) -> None:
+    """Raise, before anything is written, if any vertex has no row."""
+    total = unmatched = 0
+    first = None
+    for chunk_coords in chunk_keys:
+        for group in B.read_chunk_attributes(
+            level_group, key_attribute, chunk_coords, dtype="int64"
+        ) or ():
+            stored = np.asarray(group).ravel().astype(np.int64, copy=False)
+            _, found = _join(
+                stored, order=order, ordered_keys=ordered_keys, n_rows=n_rows,
+            )
+            total += len(stored)
+            missed = len(stored) - int(found.sum())
+            if missed and first is None:
+                first = chunk_coords
+            unmatched += missed
+    if unmatched:
+        raise IngestError(
+            f"{unmatched} of {total} vertices have no matching row in the "
+            f"incoming file (the first in chunk {first}); nothing was written. "
+            f"Pass --missing fill (missing='fill') to write a fill value for "
+            f"them instead."
+        )
+
+
 def _write_all_chunks(
     B, level_group, chunk_keys, arrays, fills, *,
     key_attribute, order, ordered_keys, n_rows, missing, progress,
@@ -302,29 +377,22 @@ def _write_all_chunks(
         per_name: dict[str, list[np.ndarray]] = {name: [] for name in arrays}
         for group in key_groups:
             stored = np.asarray(group).ravel().astype(np.int64, copy=False)
-
-            if order is None:
-                rows = stored
-                found = (rows >= 0) & (rows < n_rows)
-                rows = np.clip(rows, 0, max(n_rows - 1, 0))
-            elif len(ordered_keys):
-                slot = np.searchsorted(ordered_keys, stored)
-                slot = np.clip(slot, 0, len(ordered_keys) - 1)
-                found = ordered_keys[slot] == stored
-                rows = order[slot]
-            else:
-                found = np.zeros(len(stored), dtype=bool)
-                rows = np.zeros(len(stored), dtype=np.int64)
+            rows, found = _join(
+                stored, order=order, ordered_keys=ordered_keys, n_rows=n_rows,
+            )
 
             n_found = int(found.sum())
             matched += n_found
             unmatched += len(stored) - n_found
 
             if missing == "error" and n_found != len(stored):
+                # _require_all_matched has already checked every chunk; this
+                # is the backstop if the store changed in between.
                 raise IngestError(
                     f"{len(stored) - n_found} vertex/vertices in chunk "
                     f"{chunk_coords} have no matching row in the incoming file. "
-                    f"Pass missing='fill' to write a fill value instead."
+                    f"Pass --missing fill (missing='fill') to write a fill value "
+                    f"instead."
                 )
 
             for name, data in arrays.items():

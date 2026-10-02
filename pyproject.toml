@@ -56,7 +56,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-las = ["laspy>=2.4"]
+las = ["laspy[lazrs]>=2.4"]   # lazrs reads and writes .laz
 ply = ["plyfile>=1.0"]
 # TRK (TrackVis) export/ingest. nibabel is pure Python and installs under
 # Pyodide via micropip, so this extra is browser-installable on its own --
@@ -89,7 +89,7 @@ recipes = ["pyyaml>=6.0"]
 # Requires a RAPIDS-compatible CUDA environment. Install per https://docs.rapids.ai.
 gpu = ["cudf"]
 all = [
-    "laspy>=2.4",
+    "laspy[lazrs]>=2.4",
     "plyfile>=1.0",
     "nibabel>=5.0",
     "trx-python>=0.3",

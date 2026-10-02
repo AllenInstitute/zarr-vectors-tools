@@ -1,14 +1,17 @@
 """Spatial queries on chunked mesh stores: closest-point and ray-cast.
 
-Both use the existing ``chunks_intersecting_bbox`` helper to localise
-candidate chunks, then test against the intra-chunk triangle set of
-each candidate. Cross-chunk faces lose identity in the current core
-storage and are not tested — for typical meshes that's a tiny minority
-of faces.
+Both localise the search to chunks -- rings of chunks around the query, or
+the chunks a ray walks through -- and test the faces each one holds, plus
+the faces that span chunks and may pass through it (see
+:meth:`~zarr_vectors_tools.algorithms._mesh_faces.SpanningFaces.faces_through`).
+Every face is tested, whichever chunks its corners lie in, so the answer
+does not depend on the chunk shape.  Faces of four or more corners are split
+into a fan of triangles.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +21,6 @@ from zarr_vectors.building import (
     get_resolution_level,
     list_chunk_keys,
     open_store,
-    read_chunk_links,
-    read_chunk_vertices,
     read_root_metadata,
 )
 from zarr_vectors.constants import (
@@ -31,7 +32,13 @@ from zarr_vectors.typing import ChunkCoords
 from zarr_vectors_tools.algorithms._links import (
     chunk_key_str,
     link_prefetch_plan,
-    require_link_width,
+)
+from zarr_vectors_tools.algorithms._mesh_faces import (
+    SpanningFaces,
+    chunk_faces,
+    chunk_positions,
+    face_width,
+    fan,
 )
 
 # =====================================================================
@@ -175,6 +182,73 @@ def _level_chunk_shape(root, root_meta, level: int) -> tuple[float, ...]:
     return get_level_chunk_shape(root_meta, level_meta)
 
 
+class _Faces:
+    """The faces a query tests on reaching each chunk, every face once.
+
+    On reaching a chunk: its own faces, and the spanning faces whose chunk
+    box contains it that no earlier chunk has handed out.  Chunk vertex rows
+    are read once and kept, since a spanning face needs its neighbours'.
+    """
+
+    def __init__(self, level_group: Any, width: int, vertex_dtype: Any, ndim: int) -> None:
+        self.level_group = level_group
+        self.width = width
+        self._read = {"dtype": vertex_dtype, "ndim": ndim}
+        self._positions: dict[ChunkCoords, np.ndarray | None] = {}
+        self.spanning = SpanningFaces(level_group)
+        #: chunk -> the spanning faces that may pass through it.
+        self.through = self.spanning.faces_through()
+        self._handed_out = np.zeros(len(self.spanning), dtype=bool)
+        self._collected: set[ChunkCoords] = set()
+
+    def positions(self, chunk: ChunkCoords) -> np.ndarray | None:
+        if chunk not in self._positions:
+            self._positions[chunk] = chunk_positions(self.level_group, chunk, **self._read)
+        return self._positions[chunk]
+
+    def at(self, chunk: ChunkCoords) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, Callable]]:
+        """Triangle batches ``(a, b, c, describe)`` to test on reaching ``chunk``.
+
+        ``describe(i)`` gives ``(chunk_key, face_index, corners)`` for the face
+        triangle ``i`` of the batch came from.
+        """
+        batches: list[tuple[np.ndarray, np.ndarray, np.ndarray, Callable]] = []
+        positions = self.positions(chunk)
+        groups = chunk_faces(self.level_group, chunk, self.width) if positions is not None else []
+        if groups:
+            own = np.concatenate(groups, axis=0)
+            triangles, source = fan(own)
+
+            def describe_own(i: int, own=own, source=source) -> tuple:
+                face = int(source[i])
+                return chunk, face, tuple((chunk, int(v)) for v in own[face])
+
+            batches.append((
+                positions[triangles[:, 0]], positions[triangles[:, 1]],
+                positions[triangles[:, 2]], describe_own,
+            ))
+
+        passing = self.through.get(chunk)
+        if passing is not None:
+            passing = passing[~self._handed_out[passing]]
+        if passing is not None and passing.size:
+            self._handed_out[passing] = True
+            for k in np.unique(self.spanning.chunk_id[passing]).tolist():
+                corner_chunk = self.spanning.chunk_list[k]
+                if corner_chunk not in self._collected:
+                    self._collected.add(corner_chunk)
+                    self.spanning.collect(corner_chunk, self.positions(corner_chunk))
+            self.spanning.require_complete(passing)
+            a, b, c, _slots, source = self.spanning.triangles(passing)
+
+            def describe_spanning(i: int, source=source) -> tuple:
+                corners = self.spanning.record(int(source[i]))
+                return corners[0][0], None, corners
+
+            batches.append((a, b, c, describe_spanning))
+        return batches
+
+
 def closest_point(
     store_path: str | Path,
     query: np.ndarray,
@@ -201,12 +275,17 @@ def closest_point(
           - ``position`` (np.ndarray (3,)): the closest point on the
             mesh, or ``query`` if no face was found.
           - ``distance`` (float): Euclidean distance.
-          - ``chunk_key`` (tuple | None): chunk containing the winning face.
-          - ``face_index`` (int | None): local index of the winning face
-            inside that chunk.
+          - ``chunk_key`` (tuple | None): chunk holding the winning face's
+            first corner.
+          - ``face_index`` (int | None): the winning face's index among
+            ``chunk_key``'s own faces; ``None`` for a face whose corners lie
+            in more than one chunk.
+          - ``corners`` (tuple | None): the winning face's corners, each
+            ``(chunk, index in chunk)``, in its stored winding.
 
-    Cross-chunk faces lose identity in current core storage and are not
-    tested. For typical meshes this is a negligible minority.
+    Raises:
+        NotImplementedError: If the level holds no faces of three or more
+            corners.
     """
     query = np.asarray(query, dtype=np.float64).reshape(3)
 
@@ -225,9 +304,7 @@ def closest_point(
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
 
-    require_link_width(
-        level_group, 3, what="closest_point v0 (triangle meshes only)",
-    )
+    width = face_width(level_group, what="closest_point")
 
     occupied = set(list_chunk_keys(level_group))
     occupied_chunk_strs = [chunk_key_str(cc) for cc in occupied]
@@ -236,8 +313,7 @@ def closest_point(
         np.inf if max_distance is None else float(max_distance) ** 2
     )
     best_point = query.copy()
-    best_chunk: ChunkCoords | None = None
-    best_face_index: int | None = None
+    best: tuple | None = None
 
     visited: set[ChunkCoords] = set()
 
@@ -246,6 +322,9 @@ def closest_point(
         (VERTEX_FRAGMENTS, occupied_chunk_strs),
         *link_prefetch_plan(level_group, occupied),
     ]):
+        faces = _Faces(level_group, width, vertex_dtype, ndim)
+        # A face spanning chunks can pass through a chunk holding no vertex.
+        searchable = occupied | set(faces.through)
         for ring in range(max_expansion_rings + 1):
             radius = (ring + 0.5) * chunk_shape
             lo = query - radius
@@ -253,63 +332,43 @@ def closest_point(
             candidates = set(
                 chunks_intersecting_bbox(lo, hi, tuple(chunk_shape))
             )
-            new = [c for c in candidates if c in occupied and c not in visited]
+            new = [c for c in candidates if c in searchable and c not in visited]
             if not new:
                 # An empty ring is not the end of the search: the mesh may
                 # simply start further out.  Breaking here made every query
                 # more than ~1.5 chunks from the surface return found=False
                 # however many rings the caller allowed.  Stop only once
-                # nothing occupied is left to visit.
-                if len(visited) >= len(occupied):
+                # nothing is left to visit.
+                if len(visited) >= len(searchable):
                     break
                 continue
 
             for chunk_key in new:
                 visited.add(chunk_key)
-                try:
-                    vgroups = read_chunk_vertices(
-                        level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
-                    )
-                except Exception:
-                    continue
-                if not vgroups:
-                    continue
-                positions = np.concatenate(vgroups, axis=0).astype(np.float64)
-
-                try:
-                    link_groups = read_chunk_links(level_group, chunk_key)
-                except Exception:
-                    continue
-
-                running_local_offset = 0
-                for faces in link_groups:
-                    if len(faces) == 0:
-                        continue
-                    a = positions[faces[:, 0]]
-                    b = positions[faces[:, 1]]
-                    c = positions[faces[:, 2]]
+                for a, b, c, describe in faces.at(chunk_key):
                     pts, dist2 = _closest_point_on_triangle(query, a, b, c)
                     local_argmin = int(np.argmin(dist2))
                     if dist2[local_argmin] < best_dist2:
                         best_dist2 = float(dist2[local_argmin])
                         best_point = pts[local_argmin]
-                        best_chunk = chunk_key
-                        best_face_index = running_local_offset + local_argmin
-                    running_local_offset += len(faces)
+                        best = describe(local_argmin)
 
             # If we found something within the current ring radius, the
-            # answer is final (any closer face would be inside the searched
-            # bbox).
-            if best_chunk is not None and best_dist2 <= np.min(radius) ** 2:
+            # answer is final: a closer face would have its nearest point
+            # inside the searched bbox, so in a visited chunk, where it was
+            # tested -- its own chunk, or one it passes through.
+            if best is not None and best_dist2 <= np.min(radius) ** 2:
                 break
 
-    found = best_chunk is not None and np.isfinite(best_dist2)
+    found = best is not None and np.isfinite(best_dist2)
+    chunk_key, face_index, corners = best if best is not None else (None, None, None)
     return {
         "found": bool(found),
         "position": best_point.astype(np.float64),
         "distance": float(np.sqrt(best_dist2)) if found else float("inf"),
-        "chunk_key": best_chunk,
-        "face_index": best_face_index,
+        "chunk_key": chunk_key,
+        "face_index": face_index,
+        "corners": corners,
     }
 
 
@@ -323,12 +382,11 @@ def cast_ray(
 ) -> dict[str, Any]:
     """First-hit intersection of a ray with a chunked mesh.
 
-    Walks the chunk grid via 3D DDA along ``direction``. Tests each
-    visited chunk's intra-chunk faces via Möller–Trumbore. Stops at the
-    first hit or ``max_distance``.
-
-    Cross-chunk faces lose identity in current core storage and are not
-    tested. For typical meshes this is a negligible minority.
+    Walks the chunk grid via 3D DDA along ``direction``, testing each
+    visited chunk's faces, and the faces spanning chunks that pass through
+    it, via Möller–Trumbore.  Stops once the nearest hit so far lies no
+    further than where the ray leaves the current chunk, or at
+    ``max_distance``.
 
     Args:
         store_path: Path to the mesh store.
@@ -342,8 +400,18 @@ def cast_ray(
           - ``hit`` (bool)
           - ``t`` (float): ray parameter at the hit; ``inf`` for miss.
           - ``position`` (np.ndarray (3,)): hit position.
-          - ``chunk_key`` (tuple | None)
-          - ``face_index`` (int | None)
+          - ``chunk_key`` (tuple | None): chunk holding the hit face's first
+            corner.
+          - ``face_index`` (int | None): the hit face's index among
+            ``chunk_key``'s own faces; ``None`` for a face whose corners lie
+            in more than one chunk.
+          - ``corners`` (tuple | None): the hit face's corners, each
+            ``(chunk, index in chunk)``, in its stored winding.
+
+    Raises:
+        ValueError: If ``direction`` is zero.
+        NotImplementedError: If the level holds no faces of three or more
+            corners.
     """
     origin = np.asarray(origin, dtype=np.float64).reshape(3)
     direction = np.asarray(direction, dtype=np.float64).reshape(3)
@@ -363,15 +431,13 @@ def cast_ray(
 
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
-    require_link_width(
-        level_group, 3, what="cast_ray v0 (triangle meshes only)",
-    )
+    width = face_width(level_group, what="cast_ray")
 
     occupied = set(list_chunk_keys(level_group))
     if not occupied:
         return {
-            "hit": False, "t": float("inf"),
-            "position": origin, "chunk_key": None, "face_index": None,
+            "hit": False, "t": float("inf"), "position": origin,
+            "chunk_key": None, "face_index": None, "corners": None,
         }
     occupied_chunk_strs = [chunk_key_str(cc) for cc in occupied]
 
@@ -396,13 +462,14 @@ def cast_ray(
 
     best_t = np.inf
     best_position = origin.copy()
-    best_chunk: ChunkCoords | None = None
-    best_face: int | None = None
+    best: tuple | None = None
 
     # Halt criterion: along some axis we've permanently exited the bbox
     # of occupied chunks (i.e. step is taking us further away and we're
     # already past it). The previous "outside by more than 1" check would
-    # fire while the ray was still walking *towards* the mesh.
+    # fire while the ray was still walking *towards* the mesh.  A face
+    # spanning chunks lies within the box of its corners' chunks, which
+    # hold vertices, so this box bounds those faces too.
     occupied_min = np.min(np.array(list(occupied)), axis=0)
     occupied_max = np.max(np.array(list(occupied)), axis=0)
 
@@ -424,48 +491,27 @@ def cast_ray(
         (VERTEX_FRAGMENTS, occupied_chunk_strs),
         *link_prefetch_plan(level_group, occupied),
     ]):
+        faces = _Faces(level_group, width, vertex_dtype, ndim)
         while travelled <= max_t:
             cur_key: ChunkCoords = tuple(cur)
-            if cur_key in occupied:
-                try:
-                    vgroups = read_chunk_vertices(
-                        level_group, cur_key, dtype=vertex_dtype, ndim=ndim,
-                    )
-                    positions = (
-                        np.concatenate(vgroups, axis=0).astype(np.float64)
-                        if vgroups else None
-                    )
-                except Exception:
-                    positions = None
-
-                if positions is not None and len(positions):
-                    try:
-                        link_groups = read_chunk_links(level_group, cur_key)
-                    except Exception:
-                        link_groups = []
-
-                    running_local_offset = 0
-                    for faces in link_groups:
-                        if len(faces) == 0:
-                            continue
-                        a = positions[faces[:, 0]]
-                        b = positions[faces[:, 1]]
-                        c = positions[faces[:, 2]]
-                        ts = _moller_trumbore(origin, direction, a, b, c)
-                        finite = np.where(np.isfinite(ts), ts, np.inf)
-                        local_argmin = int(np.argmin(finite))
-                        if finite[local_argmin] < best_t and finite[local_argmin] <= max_t:
-                            best_t = float(finite[local_argmin])
-                            best_position = origin + best_t * direction
-                            best_chunk = cur_key
-                            best_face = running_local_offset + local_argmin
-                        running_local_offset += len(faces)
-
-                    if best_chunk is not None:
-                        break  # first hit wins along the ray walk
+            if cur_key in occupied or cur_key in faces.through:
+                for a, b, c, describe in faces.at(cur_key):
+                    ts = _moller_trumbore(origin, direction, a, b, c)
+                    finite = np.where(np.isfinite(ts), ts, np.inf)
+                    local_argmin = int(np.argmin(finite))
+                    if finite[local_argmin] < best_t and finite[local_argmin] <= max_t:
+                        best_t = float(finite[local_argmin])
+                        best_position = origin + best_t * direction
+                        best = describe(local_argmin)
 
             # Step to next chunk along axis with smallest t_max.
             axis = int(np.argmin(t_max))
+            # A chunk's own faces are hit inside it, but a face spanning
+            # chunks may be hit further on.  A hit no further than where the
+            # ray leaves this chunk is final: any face not yet tested is hit,
+            # if at all, in a chunk still ahead.
+            if best is not None and best_t <= t_max[axis]:
+                break
             travelled = float(t_max[axis])
             cur[axis] += int(step[axis])
             t_max[axis] += t_delta[axis]
@@ -473,13 +519,13 @@ def cast_ray(
             if _ray_past_bbox(cur):
                 break
 
-    hit = best_chunk is not None
+    hit = best is not None
+    chunk_key, face_index, corners = best if hit else (None, None, None)
     return {
         "hit": bool(hit),
         "t": best_t if hit else float("inf"),
         "position": best_position,
-        "chunk_key": best_chunk,
-        "face_index": best_face,
+        "chunk_key": chunk_key,
+        "face_index": face_index,
+        "corners": corners,
     }
-
-

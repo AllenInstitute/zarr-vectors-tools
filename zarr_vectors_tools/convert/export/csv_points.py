@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from zarr_vectors_tools.convert.export._point_batches import (
     attribute_columns,
     iter_point_batches,
     ndim_of,
+    position_names,
     require_attributes,
 )
 
@@ -26,8 +28,8 @@ def export_csv(
     bbox: BoundingBox | None = None,
     object_ids: list[int] | None = None,
     chunks: list[ChunkCoords] | None = None,
-    delimiter: str = ",",
-    header: bool = True,
+    delimiter: str | None = None,
+    header: bool | None = None,
     attribute_names: list[str] | None = None,
     vertex_budget: int = DEFAULT_VERTEX_BUDGET,
 ) -> dict[str, Any]:
@@ -36,6 +38,11 @@ def export_csv(
     The level is read and written a batch of chunks (or objects) at a time,
     so memory holds one batch whatever the level's size; the file is the
     same as a whole-level read would give.
+
+    The position columns are named as the source file named them when the
+    store recorded it (a CSV's header, a table's coordinate columns), else
+    after the store's axes (``x, y, z``).  A dictionary-encoded attribute
+    (a category column from a table or ``.h5ad``) is written as its labels.
 
     Args:
         store_path: Path to the Zarr Vectors store.
@@ -46,8 +53,10 @@ def export_csv(
         chunks: Optional whitelist of chunk coordinate tuples; only data
             stored in those chunks is exported. AND-ed with ``bbox`` and
             ``object_ids``.
-        delimiter: Column delimiter.
-        header: Whether to write a header row.
+        delimiter: Column delimiter; ``"whitespace"`` writes one space.
+            Default: a space for a ``.xyz`` output, else a comma.
+        header: Whether to write a header row.  Default: yes, except for a
+            ``.xyz`` output, which by convention has none.
         attribute_names: Attributes to include.  None = positions only.
         vertex_budget: Points to aim for per batch.
 
@@ -57,9 +66,16 @@ def export_csv(
     Raises:
         ExportError: If export fails.
     """
+    xyz = Path(output_path).suffix.lower() == ".xyz"
+    if delimiter is None:
+        delimiter = " " if xyz else ","
+    elif delimiter == "whitespace":
+        delimiter = " "
+    if header is None:
+        header = not xyz
     require_attributes(store_path, level, attribute_names)
     ndim = ndim_of(store_path)
-    columns = [f"dim{i}" for i in range(ndim)]
+    columns = position_names(store_path, ndim)
     wrote_header = False
     n_pts = 0
 
@@ -78,7 +94,7 @@ def export_csv(
                     if column is None:
                         continue
                     column = column.reshape(-1, 1) if column.ndim == 1 else column
-                    parts.append(column.astype(np.float64))
+                    parts.append(column if _is_text(column) else column.astype(np.float64))
                     names.extend(
                         [name] if column.shape[1] == 1
                         else [f"{name}_{i}" for i in range(column.shape[1])]
@@ -86,10 +102,14 @@ def export_csv(
                 if header and not wrote_header:
                     handle.write(delimiter.join(names) + "\n")
                     wrote_header = True
-                if len(positions):
+                if not len(positions):
+                    continue
+                if any(_is_text(part) for part in parts):
+                    _write_text_rows(handle, parts, delimiter)
+                else:
                     data = np.concatenate(parts, axis=1) if len(parts) > 1 else positions
                     np.savetxt(handle, data, delimiter=delimiter, fmt="%.6f")
-                    n_pts += len(positions)
+                n_pts += len(positions)
             if header and not wrote_header:
                 handle.write(delimiter.join(columns + list(attribute_names or [])) + "\n")
     except ExportError:
@@ -98,6 +118,25 @@ def export_csv(
         raise ExportError(f"Failed to write CSV '{output_path}': {e}") from e
 
     return {"vertex_count": n_pts}
+
+
+def _is_text(values: np.ndarray) -> bool:
+    """A column of labels: a dictionary-encoded attribute reads back as these."""
+    return np.asarray(values).dtype.kind in "OUS"
+
+
+def _write_text_rows(handle, parts: list[np.ndarray], delimiter: str) -> None:
+    """Rows with a label column among the numbers, quoted where they need it."""
+    cells: list[np.ndarray] = []
+    for part in parts:
+        for c in range(part.shape[1]):
+            values = part[:, c]
+            if _is_text(part):
+                cells.append(np.asarray(["" if v is None else str(v) for v in values]))
+            else:
+                cells.append(np.char.mod("%.6f", values.astype(np.float64)))
+    writer = csv.writer(handle, delimiter=delimiter, lineterminator="\n")
+    writer.writerows(zip(*cells))
 
 
 def _batches(store_path, level, bbox, object_ids, chunks, attribute_names, vertex_budget):

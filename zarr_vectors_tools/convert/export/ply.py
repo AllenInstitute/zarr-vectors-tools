@@ -1,6 +1,6 @@
 """Export Zarr Vectors point clouds to PLY files.
 
-Requires the ``plyfile`` package: ``pip install plyfile``.
+Requires the ``plyfile`` package: ``pip install 'zarr-vectors-tools[ply]'``.
 """
 
 from __future__ import annotations
@@ -51,7 +51,9 @@ def export_ply(
         chunks: Optional whitelist of chunk coordinate tuples; only data
             stored in those chunks is exported. AND-ed with ``bbox`` and
             ``object_ids``.
-        attribute_names: Attributes to include.
+        attribute_names: Attributes to include.  A float64 attribute (a
+            LAS ``gps_time``, say) is written as a ``double`` property, every
+            other one as ``float``.
         binary: Write binary PLY (default) or ASCII.
         vertex_budget: Points to aim for per batch.
 
@@ -66,13 +68,13 @@ def export_ply(
     except ImportError as e:
         raise ExportError(
             "plyfile is required for PLY export. "
-            "Install with: pip install plyfile"
+            "Install with: pip install 'zarr-vectors-tools[ply]'"
         ) from e
 
     require_attributes(store_path, level, attribute_names)
     ndim = ndim_of(store_path)
     dim_names = ["x", "y", "z"][:ndim] if ndim <= 3 else [f"dim{i}" for i in range(ndim)]
-    properties: list[str] | None = None
+    properties: list[tuple[str, str]] | None = None
     n_pts = 0
 
     output_path = Path(output_path)
@@ -91,27 +93,39 @@ def export_ply(
                     positions = result["positions"]
                     attrs = attribute_columns(result, attribute_names, level)
                     columns = [positions[:, i] for i in range(ndim)]
-                    names = list(dim_names)
+                    names = [(n, "<f4") for n in dim_names]
                     for name in (attribute_names or []):
                         column = attrs.get(name)
                         if column is None:
                             continue
+                        if np.asarray(column).dtype.kind in "OUS":
+                            raise ExportError(
+                                f"attribute {name!r} holds labels, not numbers, "
+                                f"and a PLY property can only hold numbers; "
+                                f"export it to CSV or .h5ad instead"
+                            )
                         column = column.reshape(-1, 1) if column.ndim == 1 else column
+                        # float64 stays double: a GPS time in float32 keeps
+                        # about one distinct value per 30 seconds.
+                        kind = "<f8" if column.dtype == np.float64 else "<f4"
                         if column.shape[1] == 1:
-                            names.append(name)
+                            names.append((name, kind))
                             columns.append(column[:, 0])
                         else:
-                            names.extend(f"{name}_{c}" for c in range(column.shape[1]))
+                            names.extend((f"{name}_{c}", kind) for c in range(column.shape[1]))
                             columns.extend(column[:, c] for c in range(column.shape[1]))
                     if properties is None:
                         properties = names
                     if not len(positions):
                         continue
-                    rows = np.column_stack(columns).astype("<f4")
+                    rows = np.empty(len(positions), dtype=properties)
+                    for (field, _kind), values in zip(properties, columns):
+                        rows[field] = values
                     if binary:
-                        body.write(np.ascontiguousarray(rows).tobytes())
+                        body.write(rows.tobytes())
                     else:
-                        np.savetxt(body, rows, fmt="%.9g")
+                        fmt = ["%.17g" if k == "<f8" else "%.9g" for _n, k in properties]
+                        np.savetxt(body, rows, fmt=fmt)
                     n_pts += len(positions)
             except ExportError:
                 raise
@@ -119,12 +133,15 @@ def export_ply(
                 raise ExportError(f"Failed to read store: {e}") from e
 
         if properties is None:
-            properties = list(dim_names) + list(attribute_names or [])
+            properties = [(n, "<f4") for n in [*dim_names, *(attribute_names or [])]]
         header = [
             "ply",
             f"format {'binary_little_endian' if binary else 'ascii'} 1.0",
             f"element vertex {n_pts}",
-            *[f"property float {name}" for name in properties],
+            *[
+                f"property {'double' if kind == '<f8' else 'float'} {name}"
+                for name, kind in properties
+            ],
             "end_header",
         ]
         with open(output_path, "wb") as out:

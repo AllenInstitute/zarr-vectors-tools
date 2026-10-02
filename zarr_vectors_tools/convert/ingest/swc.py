@@ -13,6 +13,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+
 
 def ingest_swc(
     input_path: str | Path,
@@ -36,12 +38,17 @@ def ingest_swc(
         preserve_header: If True, store SWC comment lines in
             ``/headers/swc/`` for round-trip export.
         compute_topological_depth: If True, write per-node edge count
-            from soma to ``node_attributes["topological_depth"]`` (uint16).
+            from soma to ``node_attributes["topological_depth"]``.
         compute_strahler: If True, write per-node Strahler stream order
-            to ``node_attributes["strahler"]`` (uint8).
+            to ``node_attributes["strahler"]``.
         compute_node_kind: If True, write per-node kind label to
-            ``node_attributes["node_kind"]`` (uint8: 0=soma, 1=branch,
-            2=continuation, 3=terminal).
+            ``node_attributes["node_kind"]`` (0=soma, 1=branch,
+            2=continuation, 3=terminal).  All three are stored as float32.
+
+    Each tree is one object, and ``object_attributes/segment_id`` numbers
+    them from 1 in root order, the id precomputed export and ``zvtools
+    synapses`` use; each fragment carries its ``object_id`` and
+    ``segment_id`` too, which the skeleton pyramid groups by.
 
     Returns:
         Summary dict from :func:`write_graph`.
@@ -104,17 +111,25 @@ def ingest_swc(
         "compartment": compartment,
     }
 
-    if compute_topological_depth or compute_strahler or compute_node_kind:
-        # Build a parent-index array in SWC node order. Root nodes have parent -1.
-        parent_idx = np.full(n_nodes, -1, dtype=np.int64)
-        for i in range(n_nodes):
-            pid = int(parent_ids[i])
-            if pid != -1 and pid in id_to_idx:
-                parent_idx[i] = id_to_idx[pid]
-        root_idx = int(np.where(parent_idx == -1)[0][0]) if (parent_idx == -1).any() else 0
+    # Parent index in SWC node order; a root (or a node whose parent is not
+    # in the file) has -1.  A file with several roots is a forest, and a
+    # skeleton store holds one rooted tree per object, so each tree becomes
+    # its own object, numbered in the order its root appears.
+    parent_idx = np.full(n_nodes, -1, dtype=np.int64)
+    for i in range(n_nodes):
+        pid = int(parent_ids[i])
+        if pid != -1 and pid in id_to_idx:
+            parent_idx[i] = id_to_idx[pid]
+    roots = np.flatnonzero(parent_idx == -1)
+    if roots.size == 0:
+        raise IngestError(f"SWC file has no root (parent -1): {input_path}")
+    object_ids = _tree_ids(parent_idx, roots) if roots.size > 1 else None
 
+    if compute_topological_depth or compute_strahler or compute_node_kind:
         from zarr_vectors_tools.convert.ingest._tree_enrichments import compute_tree_metrics
-        depth, strahler, node_kind = compute_tree_metrics(parent_idx, root_idx=root_idx)
+        depth, strahler, node_kind = compute_tree_metrics(
+            parent_idx, root_idx=roots.tolist(),
+        )
 
         if compute_topological_depth:
             node_attributes["topological_depth"] = depth.astype(np.float32)
@@ -131,8 +146,11 @@ def ingest_swc(
         bin_shape=bin_shape,
         kind="skeleton",
         vertex_attributes=node_attributes,
+        object_ids=object_ids,
         dtype=dtype,
     )
+    _stamp_tree_ids(output_path)
+    stamp_object_columns(output_path)
 
     if preserve_header:
         try:
@@ -148,3 +166,75 @@ def ingest_swc(
             pass
 
     return result
+
+
+def _stamp_tree_ids(store_path: str | Path) -> None:
+    """Write each tree's segment id, and each fragment's object and segment id.
+
+    ``write_graph`` writes neither.  Segment ids run 1..N in object order --
+    0 is background to Neuroglancer -- and the per-fragment columns are
+    recovered from the object manifests the writer just produced, so this
+    needs no second pass over the geometry.  The store is marked as the
+    linked skeleton layout, so a reader holding these segment ids does not
+    take it for a precomputed store.
+    """
+    from zarr_vectors.building import (
+        create_fragment_attribute_array,
+        create_object_attributes_array,
+        get_resolution_level,
+        open_store,
+        read_all_object_manifests,
+        write_chunk_fragment_attributes,
+        write_object_attributes,
+    )
+
+    from zarr_vectors_tools.multiresolution.skeleton_layout import (
+        LAYOUT_LINKED,
+        mark_skeleton_layout,
+    )
+
+    root = open_store(str(store_path), mode="r+")
+    level0 = get_resolution_level(root, 0)
+    manifests = read_all_object_manifests(level0)
+    per_chunk: dict[tuple[int, ...], dict[int, int]] = {}
+    for oid, entries in enumerate(manifests):
+        for chunk, fragment in entries:
+            per_chunk.setdefault(tuple(int(c) for c in chunk), {})[int(fragment)] = oid
+    for name in ("object_id", "segment_id"):
+        create_fragment_attribute_array(level0, name, dtype="uint64")
+    for chunk, fragments in per_chunk.items():
+        oids = np.zeros(max(fragments) + 1, dtype=np.uint64)
+        for fragment, oid in fragments.items():
+            oids[fragment] = oid
+        write_chunk_fragment_attributes(level0, "object_id", chunk, oids, dtype=np.uint64)
+        write_chunk_fragment_attributes(
+            level0, "segment_id", chunk, oids + np.uint64(1), dtype=np.uint64,
+        )
+    create_object_attributes_array(level0, "segment_id", dtype="uint64")
+    write_object_attributes(
+        level0, "segment_id", np.arange(1, len(manifests) + 1, dtype=np.uint64),
+    )
+    mark_skeleton_layout(root, LAYOUT_LINKED)
+
+
+def _tree_ids(parent_idx: np.ndarray, roots: np.ndarray) -> np.ndarray:
+    """Object id per node: the rank of its tree's root among ``roots``.
+
+    Pointer jumping: each pass replaces a node's pointer with its pointer's
+    pointer, so ``log2(depth)`` passes reach every root.  A cycle in the
+    parent column never reaches one, which is reported rather than looped on.
+    """
+    up = np.where(parent_idx == -1, np.arange(parent_idx.size), parent_idx)
+    for _ in range(64):
+        nxt = up[up]
+        if np.array_equal(nxt, up):
+            break
+        up = nxt
+    else:
+        raise IngestError("SWC parent column has a cycle; it is not a tree or forest")
+    rank = np.full(parent_idx.size, -1, dtype=np.int64)
+    rank[roots] = np.arange(roots.size)
+    ids = rank[up]
+    if (ids < 0).any():  # a node that is its own parent
+        raise IngestError("SWC parent column has a cycle; it is not a tree or forest")
+    return ids

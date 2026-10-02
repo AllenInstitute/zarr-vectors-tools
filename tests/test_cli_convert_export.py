@@ -77,7 +77,7 @@ class TestDirection:
         out = tmp_path / "out.csv"
         assert main(["convert", str(point_store), str(out)]) == 0
         assert out.exists()
-        assert out.read_text().splitlines()[0].startswith("dim0,dim1,dim2")
+        assert out.read_text().splitlines()[0].startswith("x,y,z")
 
     def test_the_round_trip_preserves_the_geometry(
         self, streamline_store: tuple[Path, list[np.ndarray]], tmp_path: Path,
@@ -113,7 +113,7 @@ class TestFormatResolution:
         assert main([
             "convert", str(point_store), str(out), "--format", "csv",
         ]) == 0
-        assert out.read_text().splitlines()[0].startswith("dim0")
+        assert out.read_text().splitlines()[0].startswith("x,y,z")
 
     def test_an_unknown_extension_says_what_is_available(
         self, point_store: Path, tmp_path: Path,
@@ -186,7 +186,7 @@ class TestExportOptions:
             "--attribute", "intensity",
         ]) == 0
         header = out.read_text().splitlines()[0]
-        assert header == "dim0,dim1,dim2,intensity"
+        assert header == "x,y,z,intensity"
 
     def test_a_bounding_box_is_read_as_two_corners(
         self, point_store: Path, tmp_path: Path,

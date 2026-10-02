@@ -43,15 +43,13 @@ _COARSENER_FOR_METHOD: dict[str, str] = {
     "polyline_decimate": "polyline",
 }
 
-#: Methods whose vertex-reduction parameter is NOT recoverable from the store.
+#: Methods whose vertex-reduction parameter is not the bin ratio.
 #:
-#: The skeleton coarsener's stride leaves no trace: it writes
-#: ``bin_shape = root bin`` and ``bin_ratio = 1`` whatever the stride was, so
-#: the bin-ratio arithmetic every other method is recovered by reads back 1.0
-#: -- which the coarsener then reads as "keep anchors only" and flattens the
-#: level (measured: a stride-4 level rebuilt from 10 vertices to 8).  Refusing
-#: is the only honest option; the caller knows the stride it built with and
-#: passes it through ``coarsen_factors``.
+#: A skeleton level's bin does not encode its stride, so the bin-ratio
+#: arithmetic every other method is recovered by would rebuild the level at
+#: the wrong stride.  Levels record it in their coarsening record (``stride``);
+#: a level written before that record existed has no trace of it, and is
+#: refused unless the caller passes the stride through ``coarsen_factors``.
 _UNRECOVERABLE_FACTOR: dict[str, str] = {
     "skeleton_simplify": (
         "the decimation stride, which no field on the level records"
@@ -220,8 +218,11 @@ def rebuild_pyramid_from_level(
                 f"you want."
             )
         override = None if coarsen_factors is None else coarsen_factors.get(lv)
+        recorded_stride = records.get(lv, {}).get("stride")
         if override is not None:
             coarsen_factor = float(override)
+        elif method_tag in _UNRECOVERABLE_FACTOR and recorded_stride is not None:
+            coarsen_factor = float(recorded_stride)
         elif method_tag in _UNRECOVERABLE_FACTOR:
             raise EditError(
                 f"Cannot refresh level {lv}: rebuilding a {method_tag!r} "

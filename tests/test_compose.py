@@ -516,7 +516,7 @@ class TestBounds:
         from zarr_vectors_tools.compose._carry import expand_grid
 
         dataset = make_store(tmp_path / "t.zarrvectors", [line([1, 1, 1], [2, 2, 2])])
-        with pytest.raises(Exception, match="negative chunk coordinates"):
+        with pytest.raises(Exception, match="downward"):
             expand_grid(dataset, dataset.level(0), (-1, 2, 2))
 
 
@@ -857,16 +857,16 @@ class TestMergeEdgeCases:
     def test_expand_refuses_negative_cells_instead_of_dropping_them(
         self, tmp_path: Path,
     ) -> None:
-        """``expand`` grows the grid upward; it cannot move the origin.
+        """``expand`` grows the grid upward; it cannot move the first cell.
 
-        Objects at negative coordinates were silently skipped under a flag
-        that promised to make room for them.
+        Objects below the grid were silently skipped under a flag that
+        promised to make room for them.
         """
         make_store(tmp_path / "t.zarrvectors", [line([1, 1, 1], [2, 2, 2])])
         negative = Geometry(
             kind="streamline", parts=[line([-5, 1, 1], [-4, 1, 1])],
         )
-        with pytest.raises(Exception, match="negative cell"):
+        with pytest.raises(Exception, match="downward"):
             merge_stores(
                 str(tmp_path / "t.zarrvectors"),
                 [GeometrySource(negative, label="neg")],
@@ -1004,7 +1004,8 @@ class TestTargetOnlyColumns:
         start = np.asarray(read_object_attributes(level.store, "start"))
         assert start.shape == (2, 3)
         np.testing.assert_allclose(start[0], [1.0, 1.0, 1.0])
-        assert np.isnan(start[1]).all()
+        # Endpoints are derived from the incoming geometry rather than filled.
+        np.testing.assert_allclose(start[1], [6.0, 6.0, 6.0])
 
     def test_integer_column_is_filled_with_a_real_sentinel(
         self, tmp_path: Path,

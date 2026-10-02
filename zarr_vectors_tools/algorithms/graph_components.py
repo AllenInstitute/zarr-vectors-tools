@@ -5,7 +5,8 @@ found by a union-find over the whole edge list at a time (see
 :func:`~zarr_vectors_tools.algorithms._graph_edges.component_roots`), so
 the cost is a handful of numpy passes over the edges rather than a Python
 call per edge.  Memory holds the edge list: two ``int64`` per edge plus the
-reader's own arrays.
+reader's own arrays.  On a skeleton store the edge list includes the parent
+links its links convention implies rather than stores.
 
 ``write_back=True`` persists the component labels via
 :func:`~zarr_vectors_tools._attributes.write_vertex_attribute` under

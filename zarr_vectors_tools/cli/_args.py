@@ -36,6 +36,24 @@ def parse_str_list(s: str) -> list[str]:
     return names
 
 
+def parse_delimiter(s: str) -> str:
+    """A column delimiter as typed: ``,``, ``tab`` / ``\\t``, or ``whitespace`` / ``' '``.
+
+    A space means runs of whitespace, the XYZ layout; ``"\\t"`` typed
+    without the shell's ``$'\\t'`` arrives as a backslash and a ``t``.
+    """
+    lowered = s.lower()
+    if lowered == "whitespace" or (s and not s.strip(" ")):
+        return "whitespace"
+    if lowered == "tab" or s == "\\t":
+        return "\t"
+    if not s:
+        raise argparse.ArgumentTypeError(
+            "expected a delimiter, e.g. ',', 'tab' or 'whitespace'"
+        )
+    return s
+
+
 def parse_shape(s: str) -> tuple[float, ...]:
     """``"100,100,100"`` -> ``(100.0, 100.0, 100.0)`` (spatial chunk/bin size)."""
     vals = parse_float_list(s)
@@ -55,21 +73,33 @@ def parse_num_chunks(s: str) -> int | tuple[int, ...]:
 def build_factors(
     coarsen: list[float] | None,
     sparsity: list[float] | None,
+    *,
+    flags: tuple[str, str] = ("--coarsen", "--sparsity"),
 ) -> list[tuple[float, float]] | None:
     """Zip ``--coarsen``/``--sparsity`` into per-level ``(coarsen, sparsity)`` tuples.
 
-    Returns ``None`` when neither is given (no pyramid requested). Raises when
-    only one is given or their lengths differ.
+    Returns ``None`` when neither is given (no pyramid requested).  When only
+    one is given the other is 1 at every level, i.e. unchanged.  Raises when
+    their lengths differ or a value is below 1: both are "times coarser than
+    the level below", and a fraction would either refine the level or be read
+    as 1 without a word.
     """
     if not coarsen and not sparsity:
         return None
-    coarsen = coarsen or []
-    sparsity = sparsity or []
+    coarsen = coarsen or [1.0] * len(sparsity or [])
+    sparsity = sparsity or [1.0] * len(coarsen)
     if len(coarsen) != len(sparsity):
         raise SystemExit(
-            f"error: --coarsen has {len(coarsen)} entries but --sparsity has "
+            f"error: {flags[0]} has {len(coarsen)} entries but {flags[1]} has "
             f"{len(sparsity)}; they must match (one per coarser pyramid level)"
         )
+    for flag, values in zip(flags, (coarsen, sparsity)):
+        bad = [v for v in values if not math.isfinite(v) or v < 1.0]
+        if bad:
+            raise SystemExit(
+                f"error: {flag} values are 'times coarser than the level "
+                f"below' and must be >= 1; got {', '.join(repr(v) for v in bad)}"
+            )
     return [(float(c), float(s)) for c, s in zip(coarsen, sparsity)]
 
 
@@ -111,6 +141,79 @@ def check_rdp_tolerances(
             f"units; got {', '.join(repr(t) for t in bad)}"
         )
     return [float(t) for t in tolerances]
+
+
+#: The store geometries each pyramid ``--method`` can coarsen.  A method
+#: missing here is let through; its coarsener has the last word.
+_METHOD_GEOMETRIES: dict[str, frozenset[str]] = {
+    "skeleton": frozenset({"skeleton"}),
+    "mesh": frozenset({"mesh"}),
+    "mesh_decimate": frozenset({"mesh"}),
+    "polyline": frozenset({"streamline", "polyline"}),
+    "per_object": frozenset({"point_cloud", "line", "graph", "polyline", "streamline"}),
+    "per_fragment": frozenset({"point_cloud", "polyline", "streamline"}),
+    "graph": frozenset({"graph"}),
+}
+
+#: The store geometry each ingest format writes (precomputed: its skeletons;
+#: a mesh layer is told apart from its ``info``).
+_FORMAT_GEOMETRY: dict[str, str] = {
+    "streamlines": "streamline", "skeleton": "skeleton", "mesh": "mesh",
+    "surface": "mesh", "points": "point_cloud", "lines": "line", "graph": "graph",
+}
+
+
+def pyramid_methods() -> tuple[str, ...]:
+    """``--method`` choices: ``auto`` and every registered coarsener."""
+    from zarr_vectors_tools.multiresolution.coarsen import coarsener_keys
+
+    return ("auto", *coarsener_keys())
+
+
+def check_pyramid_method(
+    method: str | None,
+    geometry: str,
+    factors: list[tuple[float, float]] | None,
+) -> str | None:
+    """Check ``--method`` against the store geometry and the pyramid factors.
+
+    ``geometry`` is a store geometry type (``"mesh"``, ``"skeleton"``, ...)
+    or an ingest format's.  Returns the method to pass to ``build_pyramid``:
+    ``None`` for ``auto``.  Run before any ingest, so a method that cannot
+    apply does not cost a conversion.
+    """
+    if method is None or method == "auto":
+        return None
+    if factors is None:
+        raise SystemExit(
+            "error: --method picks how pyramid levels are built; pass "
+            "--coarsen and --sparsity to build some"
+        )
+    geometry = _FORMAT_GEOMETRY.get(geometry, geometry)
+    fits = _METHOD_GEOMETRIES.get(method)
+    if fits is not None and geometry not in fits:
+        others = sorted(m for m, g in _METHOD_GEOMETRIES.items()
+                        if geometry in g and m in pyramid_methods())
+        raise SystemExit(
+            f"error: --method {method} coarsens {'/'.join(sorted(fits))} "
+            f"stores, not a {geometry} store; use "
+            f"{' or '.join(others) or 'auto'}, or leave --method out to let "
+            f"the store's geometry choose"
+        )
+    if method == "mesh_decimate":
+        # Refused by the coarsener too, but only once the level is reached.
+        if any(s > 1.0 for _c, s in factors):
+            raise SystemExit(
+                "error: --method mesh_decimate simplifies every object and "
+                "drops none; set --sparsity to 1 at every level (--method "
+                "mesh drops objects)"
+            )
+        if any(c <= 1.0 for c, _s in factors):
+            raise SystemExit(
+                "error: with --method mesh_decimate each --coarsen entry is the "
+                "factor to shrink the level's data by, so it must be > 1"
+            )
+    return method
 
 
 @contextmanager
@@ -171,9 +274,9 @@ class Fmt:
 
 FORMAT_REGISTRY: dict[str, Fmt] = {
     "trk":      Fmt("trk", (".trk",), "trk_parallel", "ingest_trk_parallel",
-                    "parallel", "streamlines", inline_pyramid=True),
-    "trx":      Fmt("trx", (".trx",), "trx", "ingest_trx", "streamlines", "streamlines"),
-    "tck":      Fmt("tck", (".tck",), "tck", "ingest_tck", "streamlines", "streamlines"),
+                    "trk", "streamlines", inline_pyramid=True),
+    "trx":      Fmt("trx", (".trx",), "trx", "ingest_trx", "trx", "streamlines"),
+    "tck":      Fmt("tck", (".tck",), "tck", "ingest_tck", "trk", "streamlines"),
     "swc":      Fmt("swc", (".swc",), "swc", "ingest_swc", None, "skeleton"),
     "obj":      Fmt("obj", (".obj",), "obj", "ingest_obj", None, "mesh"),
     "stl":      Fmt("stl", (".stl",), "stl", "ingest_stl", None, "mesh"),
@@ -186,7 +289,9 @@ FORMAT_REGISTRY: dict[str, Fmt] = {
     # ``--format table``.
     "table":    Fmt("table", (), "cell_table", "ingest_table", None, "points"),
     "lines":    Fmt("lines", (), "lines", "ingest_lines_csv", None, "lines"),
-    "edgelist": Fmt("edgelist", (), "edgelist", "ingest_edgelist", "graph", "graph"),
+    # No extra: the edge list is read with pandas.  Only the optional
+    # per-node metrics need networkx, and they name the [graph] extra.
+    "edgelist": Fmt("edgelist", (), "edgelist", "ingest_edgelist", None, "graph"),
     "graphml":  Fmt("graphml", (".graphml",), "graphml", "ingest_graphml", "graph", "graph"),
     # Cortical surfaces.  A subject is a SET of files, so both also accept a
     # directory: resolve_format recognises a FreeSurfer subject (surf/lh.white)
@@ -267,9 +372,10 @@ EXPORT_REGISTRY: dict[str, ExportFmt] = {
             "object_attribute_names", "unit",
         }),
     ),
+    # No object_ids: core's read_mesh cannot select objects yet.
     "obj": ExportFmt(
         "obj", (".obj",), "obj", "export_obj", None, "mesh",
-        _COMMON | {"bbox", "object_ids"},
+        _COMMON | {"bbox"},
     ),
     "ply": ExportFmt(
         "ply", (".ply",), "ply", "export_ply", "ply", "points",

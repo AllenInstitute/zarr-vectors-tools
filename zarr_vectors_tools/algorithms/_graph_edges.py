@@ -10,6 +10,12 @@ row adjacency: ``indptr``, ``indices``, ``weights``.  A
 ``store="duplicate"`` family's records come once per copy, as they do from
 ``read_links``.
 
+A skeleton store (``links_convention =
+"implicit_sequential_with_branches"``) does not store most of its edges:
+consecutive vertices of a fragment are joined implicitly, and the stored
+records only add to or override those.  :func:`read_edges` rebuilds the full
+edge set the way core's ``read_graph`` does (see :func:`_skeleton_edges`).
+
 The kernels here need only numpy.
 
 Global vertex order is ``chunk_local_to_global_offsets``': chunks in their
@@ -79,25 +85,40 @@ class Adjacency:
 def read_edges(
     level_group: Any, *, weight_attr: str | None = None,
 ) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.float64] | None, int]:
-    """``(a, b, weights, n_vertices)`` for every edge record at ``delta=0``.
+    """``(a, b, weights, n_vertices)`` for every edge of the level at ``delta=0``.
 
-    ``a`` and ``b`` are global vertex indices, in ``read_links`` record
-    order.  ``weights`` is the ``weight_attr`` link attribute in the same
-    order, or ``None`` without one, or when its length disagrees with the
-    records (a partial or stale write, whose rows cannot be trusted).
+    ``a`` and ``b`` are global vertex indices.  On a graph store every edge
+    is a stored record and they come in ``read_links`` record order.  On a
+    skeleton store the edges the links convention implies are added, as
+    :func:`_skeleton_edges` describes.  ``weights`` is the ``weight_attr``
+    link attribute in the same order, or ``None`` without one, or when its
+    length disagrees with the records (a partial or stale write, whose rows
+    cannot be trusted).
+
+    Raises:
+        ValueError: If the links are not two-endpoint records, an endpoint
+            names a chunk the level does not list, or ``weight_attr`` is
+            stored on a skeleton store, whose implied edges carry no value
+            for it.
     """
     from zarr_vectors.building import (
         chunk_local_to_global_offsets,
         link_endpoints_to_rows,
+        link_family_policy,
         read_link_arrays,
         read_link_attributes,
     )
+    from zarr_vectors.constants import VERTEX_FRAGMENTS
 
-    from zarr_vectors_tools.algorithms._links import link_prefetch_plan
+    from zarr_vectors_tools.algorithms._links import chunk_key_str, link_prefetch_plan
 
     offsets, chunk_keys, n_vertices = chunk_local_to_global_offsets(level_group)
+    tree = _implies_parents(level_group)
     attrs = (weight_attr,) if weight_attr is not None else ()
-    with level_group.batched_reads(link_prefetch_plan(level_group, chunk_keys, attrs=attrs)):
+    plan = link_prefetch_plan(level_group, chunk_keys, attrs=attrs)
+    if tree:
+        plan.append((VERTEX_FRAGMENTS, [chunk_key_str(cc) for cc in chunk_keys]))
+    with level_group.batched_reads(plan):
         chunks, vi = read_link_arrays(level_group, delta=0)
         weights: npt.NDArray[np.float64] | None = None
         if weight_attr is not None and len(vi):
@@ -109,28 +130,162 @@ def read_edges(
                 weights = None
             if weights is not None and len(weights) != len(vi):
                 weights = None
+        implied = (
+            _implied_parents(level_group, chunk_keys, offsets, n_vertices) if tree else None
+        )
 
     if vi.shape[0] == 0:
-        empty = np.zeros(0, dtype=np.int64)
-        return empty, empty, weights, int(n_vertices)
-    if vi.shape[1] != 2:
-        raise ValueError(
-            f"the graph algorithms read two-endpoint links; this level's links "
-            f"have {vi.shape[1]} endpoints"
-        )
-    rows = np.asarray(link_endpoints_to_rows(chunks, vi, offsets), dtype=np.int64)
-    if (rows < 0).any():
-        # Raised, not dropped: the global offsets are cumulative over the
-        # chunks the presence manifest lists, so a chunk missing from it
-        # shifts every later chunk's vertex numbers too, and the surviving
-        # edges would silently point at the wrong vertices.
-        raise ValueError(
-            f"{int((rows < 0).sum())} link endpoint(s) name a chunk the level's "
-            f"vertices presence manifest does not list, so global vertex numbers "
-            f"cannot be trusted; run zarr_vectors.building.rebuild_presence on the "
-            f"level (a parallel writer that skipped it leaves this state)"
-        )
-    return rows[:, 0].copy(), rows[:, 1].copy(), weights, int(n_vertices)
+        rows = np.zeros((0, 2), dtype=np.int64)
+    else:
+        if vi.shape[1] != 2:
+            raise ValueError(
+                f"the graph algorithms read two-endpoint links; this level's links "
+                f"have {vi.shape[1]} endpoints"
+            )
+        if tree:
+            # A negative endpoint is a "no parent" row, not an edge.
+            stored = (vi >= 0).all(axis=1)
+            chunks, vi = chunks[stored], vi[stored]
+            if weights is not None:
+                weights = weights[stored]
+        rows = np.asarray(link_endpoints_to_rows(chunks, vi, offsets), dtype=np.int64)
+        if (rows < 0).any():
+            # Raised, not dropped: the global offsets are cumulative over the
+            # chunks the presence manifest lists, so a chunk missing from it
+            # shifts every later chunk's vertex numbers too, and the surviving
+            # edges would silently point at the wrong vertices.
+            raise ValueError(
+                f"{int((rows < 0).sum())} link endpoint(s) name a chunk the level's "
+                f"vertices presence manifest does not list, so global vertex numbers "
+                f"cannot be trusted; run zarr_vectors.building.rebuild_presence on the "
+                f"level (a parallel writer that skipped it leaves this state)"
+            )
+    if implied is None:
+        return rows[:, 0].copy(), rows[:, 1].copy(), weights, int(n_vertices)
+
+    policy = link_family_policy(level_group, 0)
+    directed = bool(policy[2]) if policy is not None else False
+    spans = (chunks[:, 0] != chunks[:, 1]).any(axis=1) if len(rows) else np.zeros(0, bool)
+    a, b, record = _skeleton_edges(implied, rows, spans, directed=directed)
+    if weights is not None:
+        if (record < 0).any():
+            raise ValueError(
+                f"link attribute {weight_attr!r} is stored only for this skeleton "
+                f"level's explicit links; the {int((record < 0).sum())} parent links "
+                f"its links convention implies have no value for it"
+            )
+        weights = weights[record]
+    return a, b, weights, int(n_vertices)
+
+
+def _implies_parents(level_group: Any) -> bool:
+    """Whether the store's links convention implies parent links.
+
+    Read from the store root, where core keeps ``links_convention``; the
+    level carries no copy.  ``implicit_sequential_with_branches`` is the one
+    convention core's ``read_graph`` reconstructs edges for.
+    """
+    import zarr
+    from zarr_vectors.constants import LINKS_IMPLICIT_BRANCHES
+
+    group = level_group.zarr_group
+    parent_path = group.path.rsplit("/", 1)[0] if "/" in group.path else ""
+    try:
+        root = zarr.open_group(store=group.store, path=parent_path, mode="r")
+        convention = (root.attrs.get("zarr_vectors") or {}).get("links_convention")
+    except Exception:  # noqa: BLE001 - a bare level: its links are all stored
+        return False
+    return convention == LINKS_IMPLICIT_BRANCHES
+
+
+def _implied_parents(
+    level_group: Any, chunk_keys: list, offsets: dict, n_vertices: int,
+) -> npt.NDArray[np.int64]:
+    """Each vertex's implied parent, as a global index, or -1.
+
+    The implicit-sequential rule: a row's parent is the row before it in the
+    same fragment, and a fragment's first row has none -- the row before it
+    belongs to another fragment.  Rows are placed by the fragment index, so
+    an index that does not tile the chunk is honoured too.
+    """
+    from zarr_vectors.building import read_vertex_fragment_index
+
+    parent = np.full(n_vertices, -1, dtype=np.int64)
+    for i, cc in enumerate(chunk_keys):
+        base = int(offsets[cc])
+        n_rows = (int(offsets[chunk_keys[i + 1]]) if i + 1 < len(chunk_keys) else n_vertices) - base
+        if n_rows <= 0:
+            continue
+        try:
+            fragment_index = read_vertex_fragment_index(level_group, cc)
+        except Exception:  # noqa: BLE001 - no fragment index: no implied links
+            continue
+        ranges = fragment_index.ranges()
+        if ranges is not None:
+            starts, counts = ranges[:, 0].astype(np.int64), ranges[:, 1].astype(np.int64)
+            # Every row after a fragment's first, in one pass.
+            follow = np.maximum(counts - 1, 0)
+            run_start = np.repeat(np.cumsum(follow) - follow, follow)
+            child = np.repeat(starts, follow) + 1 + (
+                np.arange(int(follow.sum()), dtype=np.int64) - run_start
+            )
+            prev = child - 1
+        else:
+            parts = [
+                np.asarray(fragment_index.indices(f), dtype=np.int64)
+                if not fragment_index.is_range(f)
+                else np.arange(*_range_bounds(fragment_index.range(f)), dtype=np.int64)
+                for f in range(fragment_index.num_fragments)
+            ]
+            child = np.concatenate([p[1:] for p in parts]) if parts else np.zeros(0, np.int64)
+            prev = np.concatenate([p[:-1] for p in parts]) if parts else np.zeros(0, np.int64)
+        inside = (child < n_rows) & (prev >= 0) & (prev < n_rows)
+        parent[base + child[inside]] = base + prev[inside]
+    return parent
+
+
+def _range_bounds(start_count: tuple[int, int]) -> tuple[int, int]:
+    start, count = start_count
+    return int(start), int(start) + int(count)
+
+
+def _skeleton_edges(
+    implied: npt.NDArray[np.int64],
+    rows: npt.NDArray[np.int64],
+    spans: npt.NDArray[np.bool_],
+    *,
+    directed: bool,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """``(a, b, record)``: a skeleton level's edges, implied and stored.
+
+    ``rows`` are the stored records as global ``[child, parent]`` pairs and
+    ``spans`` marks those whose endpoints lie in different chunks.  The two
+    skeleton layouts are told apart by the links family's ``directed`` flag:
+
+    * written by ``write_graph`` (SWC ingest; undirected family): every
+      record, cross-chunk ones included, replaces its child's implied
+      parent -- the rule core's ``read_graph`` applies;
+    * written chunk by chunk (precomputed ingest and the skeleton coarsener;
+      directed family): an intra-chunk record attaches a path's first row,
+      which has no implied parent, so it only adds one; a cross-chunk record
+      joins two paths' ends and is added as an edge of its own, re-parenting
+      nothing.
+
+    ``record[i]`` is the stored record edge ``i`` came from, or -1 for an
+    implied edge.  Each vertex's parent edge comes first, ordered by child.
+    """
+    parent = implied.copy()
+    record_of = np.full(len(parent), -1, dtype=np.int64)
+    overrides = ~spans if directed else np.ones(len(rows), dtype=bool)
+    which = np.flatnonzero(overrides)
+    parent[rows[which, 0]] = rows[which, 1]
+    record_of[rows[which, 0]] = which
+
+    child = np.flatnonzero(parent >= 0)
+    extra = np.flatnonzero(~overrides)
+    a = np.concatenate([child, rows[extra, 0]])
+    b = np.concatenate([parent[child], rows[extra, 1]])
+    return a, b, np.concatenate([record_of[child], extra])
 
 
 def build_csr(

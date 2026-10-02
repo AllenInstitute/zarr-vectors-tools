@@ -16,7 +16,7 @@ def _load_trk(input_path: str | Path) -> Any:
     except ImportError as e:
         raise IngestError(
             "nibabel is required for TRK ingest. "
-            "Install with: pip install nibabel"
+            "Install with: pip install 'zarr-vectors-tools[trk]'"
         ) from e
 
     input_path = Path(input_path)

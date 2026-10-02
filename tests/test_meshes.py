@@ -17,7 +17,9 @@ class TestOBJIngest:
 
     def test_triangle_obj(self, tmp_path: Path) -> None:
         obj = tmp_path / "t.obj"
-        obj.write_text("v 0 0 0\nv 10 0 0\nv 5 10 0\nv 5 5 10\nf 1 2 3\nf 1 2 4\nf 2 3 4\nf 1 3 4\n")
+        obj.write_text(
+            "v 0 0 0\nv 10 0 0\nv 5 10 0\nv 5 5 10\nf 1 2 3\nf 1 2 4\nf 2 3 4\nf 1 3 4\n"
+        )
         s = ingest_obj(obj, tmp_path / "m.zv", (100.,100.,100.))
         assert s["vertex_count"] == 4 and s["face_count"] == 4
 
@@ -82,13 +84,15 @@ class TestOBJExport:
 
     def test_export(self, tmp_path: Path) -> None:
         obj = tmp_path / "t.obj"
-        obj.write_text("v 0 0 0\nv 10 0 0\nv 5 10 0\nv 5 5 10\nf 1 2 3\nf 1 2 4\nf 2 3 4\nf 1 3 4\n")
+        obj.write_text(
+            "v 0 0 0\nv 10 0 0\nv 5 10 0\nv 5 5 10\nf 1 2 3\nf 1 2 4\nf 2 3 4\nf 1 3 4\n"
+        )
         ingest_obj(obj, tmp_path / "m.zv", (100.,100.,100.))
         out = tmp_path / "out.obj"
         export_obj(tmp_path / "m.zv", out)
         lines = out.read_text().strip().split("\n")
-        assert len([l for l in lines if l.startswith("v ")]) == 4
-        assert len([l for l in lines if l.startswith("f ")]) == 4
+        assert len([line for line in lines if line.startswith("v ")]) == 4
+        assert len([line for line in lines if line.startswith("f ")]) == 4
 
     def test_round_trip(self, tmp_path: Path) -> None:
         obj = tmp_path / "rt.obj"

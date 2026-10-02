@@ -88,22 +88,11 @@ def coarsen_graph(
     else:
         edge_weights = np.asarray(edge_weights, dtype=np.float64)
 
-    # Remap and aggregate
-    meta_edge_dict: dict[tuple[int, int], float] = {}
-    for i in range(n_edges):
-        ma = int(node_to_meta[edges[i, 0]])
-        mb = int(node_to_meta[edges[i, 1]])
-        if ma == mb:
-            continue  # self-loop
-        key = (min(ma, mb), max(ma, mb))
-        meta_edge_dict[key] = meta_edge_dict.get(key, 0.0) + float(edge_weights[i])
-
-    if meta_edge_dict:
-        meta_edges = np.array(list(meta_edge_dict.keys()), dtype=np.int64)
-        meta_weights = np.array(list(meta_edge_dict.values()), dtype=np.float32)
-    else:
-        meta_edges = np.zeros((0, 2), dtype=np.int64)
-        meta_weights = np.zeros(0, dtype=np.float32)
+    # Remap and aggregate: parallel edges sum their weights.
+    meta_edges, kept, groups = contract_edges(edges, node_to_meta)
+    meta_weights = np.bincount(
+        groups, weights=edge_weights[kept], minlength=len(meta_edges),
+    ).astype(np.float32)
 
     return {
         "positions": meta_pos,
@@ -115,6 +104,51 @@ def coarsen_graph(
         "edge_count": len(meta_edges),
         "reduction_ratio": n_nodes / max(n_meta, 1),
     }
+
+
+def contract_edges(
+    edges: npt.NDArray[np.integer],
+    node_to_meta: npt.NDArray[np.integer],
+    *,
+    directed: bool = False,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.int64]]:
+    """The images of ``edges`` under a node -> metanode map.
+
+    An edge whose two ends land in one metanode disappears (it would be a
+    self-loop), and edges landing on the same metanode pair merge into one.
+    Nothing else is added: every returned edge is the image of at least one
+    input edge, so contracting never joins two connected components.
+
+    Args:
+        edges: ``(M, 2)`` edge list.
+        node_to_meta: ``(N,)`` metanode of each node.
+        directed: Keep endpoint order, so ``a -> b`` and ``b -> a`` stay
+            distinct.  Otherwise each edge is stored ``(min, max)``.
+
+    Returns:
+        ``(meta_edges, kept, groups)``: the ``(E, 2)`` metanode edges, sorted;
+        the indices of the input edges that are not self-loops; and, for each
+        of those, the row of ``meta_edges`` it became -- the grouping a
+        per-edge attribute is aggregated over.
+    """
+    edges = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+    node_to_meta = np.asarray(node_to_meta, dtype=np.int64)
+    ma = node_to_meta[edges[:, 0]]
+    mb = node_to_meta[edges[:, 1]]
+    kept = np.flatnonzero(ma != mb)
+    if kept.size == 0:
+        return (
+            np.zeros((0, 2), dtype=np.int64),
+            kept.astype(np.int64),
+            np.zeros(0, dtype=np.int64),
+        )
+    ma, mb = ma[kept], mb[kept]
+    if not directed:
+        ma, mb = np.minimum(ma, mb), np.maximum(ma, mb)
+    meta_edges, groups = np.unique(
+        np.column_stack([ma, mb]), axis=0, return_inverse=True,
+    )
+    return meta_edges, kept.astype(np.int64), groups.reshape(-1).astype(np.int64)
 
 
 # ===================================================================
