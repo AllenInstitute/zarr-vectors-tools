@@ -76,15 +76,33 @@ is sorted by its metadata first and its name second:
 
 - **Kind.** `POINTSET` with `TRIANGLE` is a surface, `LABEL` a parcellation, anything
   else a map.
-- **Hemisphere.** `AnatomicalStructurePrimary`, else the name (`hemi-L`, `.L.`, `lh.`,
-  `left`). `--hemisphere`, given once, assigns the files that say neither.
+- **Hemisphere.** `AnatomicalStructurePrimary`, on the file or on an array (where
+  `mris_convert` puts it), else the name (`hemi-L`, `.L.`, `lh.`, `left`).
+  `--hemisphere`, given once, assigns the files that say neither.
 - **Name.** The file name without subject, hemisphere, mesh and type parts (a BIDS
   `desc-` wins): `100307.L.MyelinMap_BC.32k_fs_LR.func.gii` gives `MyelinMap_BC`.
 
 `--geometry` defaults to the first present of midthickness, pial, white, smoothwm and
-orig. Positions are stored as the file has them; the declared dataspace is recorded,
-not applied. A map with a different vertex count from its surface is refused: resample
-it first (for example with `wb_command -metric-resample`).
+orig. A map with a different vertex count from its surface is refused: resample it
+first (for example with `wb_command -metric-resample`).
+
+### GIFTI coordinates
+
+A surface file stores positions in its *dataspace* and may carry a matrix,
+`CoordinateSystemTransformMatrix`, to a *transformed space*. FreeSurfer's
+`mris_convert` writes surface RAS positions (dataspace `unknown`) and a translation by
+`c_ras` to `scanner`: read as stored, such a surface sits `c_ras` away from the same
+subject's T1 and tractography.
+
+`--space auto` (default) applies each anatomical surface's matrix when it leads to a
+named space and is not the identity, and records that space; otherwise positions are
+kept and the dataspace is recorded. `scanner` refuses a surface that does not reach
+scanner RAS; `surface` keeps every position as the file stores it. Inflated, spherical
+and flat surfaces are never moved. The summary prints the `space` and, when the
+matrices are one translation into scanner RAS, the `c_ras`; the header keeps every
+matrix applied (`applied_transforms`). To view a surface over the same subject's TRK
+tractogram, convert the TRK with `--apply-affine` so both are in scanner RAS
+([Streamlines → Coordinates](streamlines.md#coordinates)).
 
 ## CIFTI with zvtools attach
 

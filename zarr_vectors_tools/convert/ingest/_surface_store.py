@@ -293,6 +293,7 @@ def write_surface_store(
     from zarr_vectors.constants import GROUPS
     from zarr_vectors.types.meshes import write_mesh
 
+    from zarr_vectors_tools.convert.ingest._axes import declare_axis_unit
     from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
     from zarr_vectors_tools.convert.ingest.attach import attach_attributes
     from zarr_vectors_tools.headers.formats import SurfaceHeader
@@ -383,6 +384,10 @@ def write_surface_store(
             str(output_path), multi, keys=key_column, missing="error",
         )
     stamp_object_columns(output_path)
+    # GIFTI and FreeSurfer positions are millimetres by definition.  Without
+    # the unit a viewer reads the axes as unitless and cannot line the
+    # surface up with the same subject's volumes or tracts.
+    declare_axis_unit(output_path, "millimeter")
 
     # ---- name the objects -------------------------------------------------
     # Objects already ARE hemispheres; a group per hemisphere gives them

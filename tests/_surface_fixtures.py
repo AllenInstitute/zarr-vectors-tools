@@ -68,7 +68,13 @@ def write_surf_gii(
     geometric: str = "Anatomical",
     secondary: str | None = None,
     dataspace: int = 3,
+    xformspace: int = 0,
+    xform=None,
+    array_primary: str | None = None,
 ) -> Path:
+    """A ``.surf.gii``.  ``xformspace``/``xform`` set its transform matrix;
+    ``array_primary`` puts the hemisphere on the POINTSET array, as FreeSurfer's
+    ``mris_convert`` does, rather than on the file."""
     import nibabel as nib
     from nibabel.gifti import GiftiDataArray, GiftiImage
 
@@ -78,11 +84,16 @@ def write_surf_gii(
     meta = {"GeometricType": geometric}
     if secondary:
         meta["AnatomicalStructureSecondary"] = secondary
+    if array_primary:
+        meta["AnatomicalStructurePrimary"] = array_primary
     points = GiftiDataArray(
         np.asarray(vertices, dtype=np.float32), intent="NIFTI_INTENT_POINTSET",
         datatype="NIFTI_TYPE_FLOAT32", meta=meta,
     )
     points.coordsys.dataspace = dataspace
+    points.coordsys.xformspace = xformspace
+    if xform is not None:
+        points.coordsys.xform = np.asarray(xform, dtype=np.float64)
     image.add_gifti_data_array(points)
     image.add_gifti_data_array(GiftiDataArray(
         np.asarray(faces, dtype=np.int32), intent="NIFTI_INTENT_TRIANGLE",
