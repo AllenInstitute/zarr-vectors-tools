@@ -170,11 +170,11 @@ def expand_grid(
         )
     except Exception:  # noqa: BLE001 - the arrays are what a write checks
         pass
-    # Core caches the grid it derives from the root bounds on the level
-    # handle, and sizes any array it creates later (a new link segment, a new
-    # attribute) from that cache.  Left in place it predates this expansion,
-    # and the first write to a new cell through a new array fails.
-    group.__dict__.pop("_derived_native_config", None)
+    # Core sizes an array it creates later (a new link segment, a new
+    # attribute) from the grid it derives from these bounds, and caches that
+    # grid on the level handle.  ``level.store`` hands out a new handle on
+    # every access, so the writes after this one see the grown grid; a
+    # caller must not keep a level group from before the expansion.
 
     return {
         "expanded": True,
@@ -553,10 +553,13 @@ def handle_pyramid(
             rebuild_pyramid_from_level,
         )
 
+        forwarded = (
+            "sparsity_strategy", "sparsity_seed", "compressor", "executor",
+            "cross_level_storage", "cross_level_depth",
+        )
         specs = rebuild_pyramid_from_level(
             dataset.store, 0,
-            sparsity_strategy=build_options.get("sparsity_strategy", "random"),
-            executor=build_options.get("executor"),
+            **{k: build_options[k] for k in forwarded if k in build_options},
         )
         return {"pyramid": "rebuild", "rebuilt_levels": levels, "build": specs}
 
@@ -566,9 +569,18 @@ def handle_pyramid(
         except Exception:  # noqa: BLE001 - already gone is fine
             continue
     if levels:
+        from zarr_vectors_tools.multiresolution.coarsen import (
+            _clear_cross_level_families,
+            _stamp_root_cross_level,
+        )
+
         # remove_resolution_level leaves the level listed in `multiscales`,
         # which is where a viewer reads the level list from.
         write_multiscale_metadata(dataset.store)
+        # Level 0's +N families pointed into the removed levels, and the
+        # root still claimed them.
+        _clear_cross_level_families(dataset.store, from_level=0)
+        _stamp_root_cross_level(dataset.store)
 
     if policy == "drop" or not factors:
         # Reporting "drop" for a rebuild that had nothing to rebuild

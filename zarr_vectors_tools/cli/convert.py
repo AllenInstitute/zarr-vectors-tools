@@ -132,7 +132,7 @@ def _check_method(args, fmt, factors) -> str | None:
         return None
     geometry = fmt.geometry
     if fmt.name == "precomputed":
-        geometry = _precomputed_kind(args.input)
+        geometry = _precomputed_kind(args)
     method = check_pyramid_method(method, geometry, factors)
     inline = {"trk": "polyline", "precomputed": "skeleton"}.get(fmt.name)
     if inline is not None and geometry != "mesh":
@@ -180,7 +180,7 @@ def _check_sparsity_attribute(args, fmt, factors) -> None:
     # TRK and precomputed skeleton layers build their pyramid inside the
     # ingest, whose coarseners take no ranking attribute.
     if fmt.name == "trk" or (
-        fmt.name == "precomputed" and _precomputed_kind(args.input) != "mesh"
+        fmt.name == "precomputed" and _precomputed_kind(args) != "mesh"
     ):
         raise SystemExit(
             f"error: --sparsity-strategy attribute does not apply to "
@@ -230,15 +230,32 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     return 0
 
 
-def _precomputed_kind(source) -> str:
-    """``"mesh"`` or ``"skeleton"``, from the layer's ``info``."""
-    from zarr_vectors_tools.convert.ingest.precomputed import (
-        layer_kind,
-        layer_url,
-        read_layer_info,
-    )
+def _precomputed_kind(args) -> str:
+    """``"mesh"`` or ``"skeleton"``, from the layer's ``info``.
 
-    return layer_kind(read_layer_info(layer_url(source)))
+    Read once per invocation and kept on ``args``: the checks before the
+    ingest and the ingest itself all ask, and for a ``gs://`` or ``https://``
+    layer each read is a fetch.
+    """
+    kind = getattr(args, "_precomputed_kind", None)
+    if kind is not None:
+        return kind
+    try:
+        from zarr_vectors_tools.convert.ingest.precomputed import (
+            layer_kind,
+            layer_url,
+            read_layer_info,
+        )
+
+        kind = layer_kind(read_layer_info(layer_url(args.input)))
+    except ImportError as exc:  # cloud-files
+        raise SystemExit(
+            f"error: reading a precomputed layer needs the precomputed extra "
+            f"({exc}); install it with: "
+            f"pip install 'zarr-vectors-tools[precomputed]'"
+        ) from None
+    args._precomputed_kind = kind
+    return kind
 
 
 def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
@@ -249,13 +266,7 @@ def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
     are checked there, not here.  A mesh layer goes the way of any other
     mesh input, with the pyramid built after it.
     """
-    try:
-        kind = _precomputed_kind(args.input)
-    except ImportError as exc:  # cloud-files
-        raise SystemExit(
-            f"error: precomputed ingest failed ({exc}) — install it with: "
-            f"pip install 'zarr-vectors-tools[{fmt.extra}]'"
-        )
+    kind = _precomputed_kind(args)
     if kind == "mesh":
         _convert_precomputed_meshes(args, fmt, factors, chunk_scale)
         return
@@ -603,7 +614,7 @@ def run(args) -> int:
     ]
     if cross_flags:
         if fmt.name == "trk" or (
-            fmt.name == "precomputed" and _precomputed_kind(args.input) != "mesh"
+            fmt.name == "precomputed" and _precomputed_kind(args) != "mesh"
         ):
             raise SystemExit(
                 f"error: {' / '.join(cross_flags)} do not apply to {fmt.name!r} "

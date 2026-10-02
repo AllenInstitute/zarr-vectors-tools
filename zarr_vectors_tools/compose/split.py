@@ -394,6 +394,7 @@ def _reproduce_pyramid(
         create_resolution_level,
         list_resolution_levels,
         read_level_metadata,
+        read_root_metadata,
         remove_resolution_level,
         write_multiscale_metadata,
     )
@@ -416,8 +417,13 @@ def _reproduce_pyramid(
             record = parent.level(index).store.attrs.get(TOOLS_LEVEL_ATTRS_KEY)
             if record:
                 group.attrs.update({TOOLS_LEVEL_ATTRS_KEY: dict(record)})
+        # The part's own root records the format's default links, not the
+        # ones the parent's pyramid was built with.
+        parent_meta = read_root_metadata(parent.store)
         rebuild_pyramid_from_level(
             root, 0, sparsity_strategy=sparsity_strategy, executor=executor,
+            cross_level_storage=parent_meta.cross_level_storage,
+            cross_level_depth=parent_meta.cross_level_depth,
         )
     except Exception:
         # Leave level 0 alone and no half-seeded level behind it.

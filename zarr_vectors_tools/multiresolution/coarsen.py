@@ -1641,18 +1641,17 @@ def _clear_cross_level_families(root_group, *, from_level: int) -> None:
     """Remove the cross-level families a rebuild from ``from_level`` makes stale.
 
     Rebuilding the levels above ``from_level`` invalidates every family that
-    reaches one of them: the ``+N`` ones at ``from_level`` and anything at a
-    level above it.  The families are rewritten only where new records land,
-    so without this an old pyramid's records (or all of them, when the new
-    one is built with ``cross_level_storage="none"``) survived and pointed at
-    vertices that had moved.
+    reaches one of them: every family at a level above it, and every ``+N``
+    family below or at it that reaches past it (level 0's ``+2`` when the
+    rebuild starts at level 1).  The families are rewritten only where new
+    records land, so without this an old pyramid's records (or all of them,
+    when the new one is built with ``cross_level_storage="none"``) survived
+    and pointed at vertices that had moved.
     """
     for level in list_resolution_levels(root_group):
-        if level < from_level:
-            continue
         level_group = get_resolution_level(root_group, level)
         for delta in list_link_deltas(level_group):
-            if delta > 0 or (delta < 0 and level > from_level):
+            if delta != 0 and (level > from_level or level + delta > from_level):
                 level_group.delete_subtree(links_group_path(delta))
 
 
@@ -2166,6 +2165,92 @@ def _write_cross_level_family(
 # Full pyramid builder
 # ===================================================================
 
+def check_pyramid_request(
+    store_path: str | Path,
+    *,
+    factors: list[tuple[float, float]],
+    chunk_scale_factors: list[int | tuple[int, ...]] | None = None,
+    sparsity_strategy: str = "random",
+    sparsity_attribute: str | None = None,
+    cross_level_depth: int = DEFAULT_CROSS_LEVEL_DEPTH,
+    cross_level_storage: str = DEFAULT_CROSS_LEVEL_STORAGE,
+    coarsen_mode: str = "rdp",
+    method: str | None = None,
+    rdp_tolerances: Sequence[float] | None = None,
+    start_level: int = 0,
+) -> list[float] | None:
+    """Refuse a :func:`build_pyramid` request before anything is written.
+
+    :func:`build_pyramid` runs this first.  A caller that removes an old
+    pyramid to make way for the new one runs it before removing anything, so
+    a request that would be refused leaves the old pyramid where it was.
+
+    Returns the per-level RDP tolerances, checked, or ``None``.
+    """
+    if not 0 <= int(start_level) <= len(factors):
+        raise ValueError(
+            f"start_level must be between 0 and {len(factors)} (the number of "
+            f"levels factors describes), got {start_level}"
+        )
+    if cross_level_storage not in VALID_XLEVEL_STORAGE:
+        raise ValueError(
+            f"cross_level_storage={cross_level_storage!r} not in "
+            f"{sorted(VALID_XLEVEL_STORAGE)}"
+        )
+    if cross_level_depth < -1:
+        raise ValueError(
+            f"cross_level_depth must be ≥ -1 (got {cross_level_depth})"
+        )
+    for i, fac in enumerate(factors):
+        # Both are "times coarser than the level below"; a fraction would
+        # refine a level, or be read as 1 without a word.
+        if (
+            not isinstance(fac, (tuple, list)) or len(fac) != 2
+            or not all(math.isfinite(float(v)) and float(v) >= 1.0 for v in fac)
+        ):
+            raise ValueError(
+                f"factors[{i}] must be a (coarsen_factor, sparsity_factor) "
+                f"pair of numbers >= 1; got {fac!r}"
+            )
+    if chunk_scale_factors is not None and len(chunk_scale_factors) != len(factors):
+        raise ValueError(
+            f"chunk_scale_factors length {len(chunk_scale_factors)} != "
+            f"factors length {len(factors)}",
+        )
+    root_meta = read_root_metadata(open_store(str(store_path), mode="r"))
+    for i, scale in enumerate(chunk_scale_factors or ()):
+        axes = list(scale) if isinstance(scale, (tuple, list)) else [scale]
+        if isinstance(scale, (tuple, list)) and len(axes) != root_meta.sid_ndim:
+            raise ValueError(
+                f"chunk_scale_factors[{i}] has rank {len(axes)}, but the store "
+                f"has {root_meta.sid_ndim} spatial axes; got {scale!r}"
+            )
+        if not all(float(r) == int(r) >= 1 for r in axes):
+            raise ValueError(
+                f"chunk_scale_factors[{i}] must be positive integers per axis, "
+                f"got {scale!r}"
+            )
+    key = method or select_coarsener_key(root_meta)
+    if key not in _COARSENERS:
+        raise ValueError(
+            f"method={key!r} is not a registered coarsener; "
+            f"choose from {coarsener_keys()}"
+        )
+    if sparsity_strategy == "attribute" or sparsity_attribute is not None:
+        _sparsity_attribute_values(store_path, sparsity_strategy, sparsity_attribute)
+    tolerances = validate_rdp_tolerances(
+        rdp_tolerances, n_levels=len(factors), coarsen_mode=coarsen_mode,
+    )
+    if tolerances is not None:
+        # The geometry does not change between levels, so one check here
+        # refuses a store the tolerance cannot apply to before level 1 is
+        # written, rather than after.
+        refusal = _rdp_tolerance_refusal(root_meta, key)
+        if refusal is not None:
+            raise ValueError(f"rdp_tolerances does not apply: {refusal}")
+    return tolerances
+
+
 def build_pyramid(
     store_path: str | Path,
     *,
@@ -2259,49 +2344,19 @@ def build_pyramid(
         (points, graphs, lines) writes any, so other geometries report
         ``0`` and ``"none"``.
     """
-    if not 0 <= int(start_level) <= len(factors):
-        raise ValueError(
-            f"start_level must be between 0 and {len(factors)} (the number of "
-            f"levels factors describes), got {start_level}"
-        )
-    if cross_level_storage not in VALID_XLEVEL_STORAGE:
-        raise ValueError(
-            f"cross_level_storage={cross_level_storage!r} not in "
-            f"{sorted(VALID_XLEVEL_STORAGE)}"
-        )
-    if cross_level_depth < -1:
-        raise ValueError(
-            f"cross_level_depth must be ≥ -1 (got {cross_level_depth})"
-        )
-    for i, fac in enumerate(factors):
-        # Both are "times coarser than the level below"; a fraction would
-        # refine a level, or be read as 1 without a word.
-        if (
-            not isinstance(fac, (tuple, list)) or len(fac) != 2
-            or not all(math.isfinite(float(v)) and float(v) >= 1.0 for v in fac)
-        ):
-            raise ValueError(
-                f"factors[{i}] must be a (coarsen_factor, sparsity_factor) "
-                f"pair of numbers >= 1; got {fac!r}"
-            )
-    if chunk_scale_factors is not None and len(chunk_scale_factors) != len(factors):
-        raise ValueError(
-            f"chunk_scale_factors length {len(chunk_scale_factors)} != "
-            f"factors length {len(factors)}",
-        )
-    tolerances = validate_rdp_tolerances(
-        rdp_tolerances, n_levels=len(factors), coarsen_mode=coarsen_mode,
+    tolerances = check_pyramid_request(
+        store_path,
+        factors=factors,
+        chunk_scale_factors=chunk_scale_factors,
+        sparsity_strategy=sparsity_strategy,
+        sparsity_attribute=sparsity_attribute,
+        cross_level_depth=cross_level_depth,
+        cross_level_storage=cross_level_storage,
+        coarsen_mode=coarsen_mode,
+        method=method,
+        rdp_tolerances=rdp_tolerances,
+        start_level=start_level,
     )
-    if tolerances is not None:
-        # The geometry does not change between levels, so one check here
-        # refuses a store the tolerance cannot apply to before level 1 is
-        # written, rather than after.
-        root_meta = read_root_metadata(open_store(str(store_path), mode="r"))
-        refusal = _rdp_tolerance_refusal(
-            root_meta, method or select_coarsener_key(root_meta),
-        )
-        if refusal is not None:
-            raise ValueError(f"rdp_tolerances does not apply: {refusal}")
 
     # Families reaching a level about to be rebuilt describe vertices that
     # are about to change.

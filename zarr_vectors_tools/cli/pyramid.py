@@ -72,7 +72,10 @@ def _clear_existing_levels(store, *, replace: bool) -> None:
 
 
 def run_pyramid(args) -> int:
-    from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+    from zarr_vectors_tools.multiresolution.coarsen import (
+        build_pyramid,
+        check_pyramid_request,
+    )
 
     factors = build_factors(args.coarsen, args.sparsity)
     if factors is None:
@@ -83,36 +86,42 @@ def run_pyramid(args) -> int:
     tolerances = check_rdp_tolerances(args.rdp_tolerance, factors, args.coarsen_mode)
     if tolerances is not None:
         _refuse_rdp_tolerance_for_store(args.store, method)
-
-    _clear_existing_levels(args.store, replace=args.replace)
-
     if (args.sparsity_strategy == "attribute") != (args.sparsity_attribute is not None):
         raise SystemExit(
             "error: --sparsity-strategy attribute and --sparsity-attribute NAME "
             "go together"
         )
 
-    extra: dict = {}
+    options: dict = {
+        "factors": factors,
+        "chunk_scale_factors": args.chunk_scale,
+        "sparsity_strategy": args.sparsity_strategy,
+        "coarsen_mode": args.coarsen_mode,
+        "rdp_tolerances": tolerances,
+    }
     if args.sparsity_attribute is not None:
-        extra["sparsity_attribute"] = args.sparsity_attribute
+        options["sparsity_attribute"] = args.sparsity_attribute
     if args.cross_level_storage is not None:
-        extra["cross_level_storage"] = args.cross_level_storage
+        options["cross_level_storage"] = args.cross_level_storage
     if args.cross_level_depth is not None:
-        extra["cross_level_depth"] = args.cross_level_depth
+        options["cross_level_depth"] = args.cross_level_depth
     if method is not None:
-        extra["method"] = method
+        options["method"] = method
+
+    # Everything build_pyramid would refuse is refused before --replace
+    # removes the old levels, so a typo does not cost the existing pyramid.
+    try:
+        check_pyramid_request(str(args.store), **options)
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}") from None
+    _clear_existing_levels(args.store, replace=args.replace)
 
     with executor_ctx(args.workers, args.workers_backend) as ex:
         result = build_pyramid(
             str(args.store),
-            factors=factors,
-            chunk_scale_factors=args.chunk_scale,
-            sparsity_strategy=args.sparsity_strategy,
-            coarsen_mode=args.coarsen_mode,
-            rdp_tolerances=tolerances,
             compressor=(None if args.compressor == "none" else args.compressor),
             executor=ex,
-            **extra,
+            **options,
         )
     # The per-level specs name the coarsener that ran; the top-level
     # "method" does not track it.

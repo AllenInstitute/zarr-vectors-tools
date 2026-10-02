@@ -81,7 +81,7 @@ mesh = ["pyfqmr>=0.2", "scipy>=1.10"]
 # Precomputed spatial-index skeleton ingest (`.frags` MapBuffers from a
 # CloudVolume precomputed layer, e.g. flywire). Heavy readers kept out of
 # the core library and gated behind this extra.
-precomputed = ["cloud-volume>=8.0", "mapbuffer>=0.7", "cloud-files>=4.0"]
+precomputed = ["cloud-volume>=8.0", "mapbuffer>=0.7", "cloud-files>=4.0", "scipy>=1.10"]
 # Scale the ingest across worker processes (run_ingest(workers=...) / --workers).
 parallel = ["dask[distributed]>=2024.0"]
 # YAML recipes for `zvtools run`.  TOML and JSON recipes need nothing extra.

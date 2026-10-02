@@ -119,6 +119,28 @@ def test_force_and_from(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert "skipped" not in capsys.readouterr().out
 
 
+def test_a_rerun_overwrites_its_convert_unless_it_resumes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zarr_vectors_tools.cli import convert as _convert
+
+    seen: list[tuple[bool, bool]] = []
+    monkeypatch.setattr(
+        _convert, "run", lambda args: seen.append((args.overwrite, args.resume)) or 0,
+    )
+    for resume in (False, True):
+        seen.clear()
+        options = {"input": "tracts.trk", "output": "tracts.zv"}
+        if resume:
+            options |= {"scratch_dir": "scratch", "resume": True}
+        recipe = _recipe(tmp_path, [{"convert": options}], name=f"r{resume}.json")
+        assert main(["run", str(recipe)]) == 0
+        assert main(["run", str(recipe), "--force"]) == 0
+        # --overwrite on a resumed convert would delete the partial store
+        # --resume is there to continue.
+        assert seen == [(False, resume), (not resume, resume)]
+
+
 class TestSteps:
 
     def test_lists_become_commas_or_repeated_flags(self, tmp_path: Path) -> None:

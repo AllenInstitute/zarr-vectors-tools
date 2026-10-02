@@ -66,6 +66,8 @@ def rebuild_pyramid_from_level(
     sparsity_seed: int | None = None,
     compressor: Any = None,
     executor: Any = None,
+    cross_level_storage: str | None = None,
+    cross_level_depth: int | None = None,
 ) -> list[dict[str, Any]]:
     """Re-coarsen every level above ``source_level`` from scratch.
 
@@ -103,6 +105,16 @@ def rebuild_pyramid_from_level(
             is fixed when its arrays are created, so a refresh without this
             leaves raw levels under a compressed level 0.
         executor: ``map``-like callable for the chunk-local coarseners.
+        cross_level_storage: Cross-level links to write for the rebuilt
+            levels, as :func:`~zarr_vectors_tools.multiresolution.coarsen.build_pyramid`
+            takes it.  ``None`` keeps what the root records.
+        cross_level_depth: Likewise for the link depth.
+
+    Every cross-level family that reaches a rebuilt level is removed first
+    and written again for the new levels, and the root's cross-level stamp
+    is refreshed to what the store then holds: otherwise the old families
+    (``source_level``'s ``+N``, and every lower level's ``+N`` that reaches
+    past it) kept pointing at vertices that had moved.
 
     Returns:
         The list of per-level coarsening summaries.
@@ -122,6 +134,8 @@ def rebuild_pyramid_from_level(
     )
 
     from zarr_vectors_tools.multiresolution.coarsen import (
+        _clear_cross_level_families,
+        _finalize_cross_level_for_store,
         coarsen_level,
         read_coarsening_record,
     )
@@ -265,6 +279,11 @@ def rebuild_pyramid_from_level(
         commit(root, "pre-refresh commit")
 
     url = root.url
+    if cross_level_storage is None:
+        cross_level_storage = root_meta.cross_level_storage
+    if cross_level_depth is None:
+        cross_level_depth = root_meta.cross_level_depth
+    _clear_cross_level_families(root, from_level=source_level)
 
     summaries: list[dict[str, Any]] = []
     for entry in plan:
@@ -290,8 +309,14 @@ def rebuild_pyramid_from_level(
                 None if sparsity_seed is None
                 else int(sparsity_seed) + (lv - 1)
             ),
+            cross_level_storage=cross_level_storage,
             compressor=compressor,
             executor=executor,
         )
         summaries.append(summary)
+    _finalize_cross_level_for_store(
+        url,
+        cross_level_depth=cross_level_depth,
+        cross_level_storage=cross_level_storage,
+    )
     return summaries

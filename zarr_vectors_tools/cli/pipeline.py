@@ -272,8 +272,12 @@ def run_recipe(
             # This step ran before (finished, failed part-way, or is being
             # forced), so what sits at its output is its own earlier result:
             # replace it.  convert and pyramid otherwise refuse an existing
-            # store or pyramid rather than write over it.
+            # store or pyramid rather than write over it.  A convert step
+            # that asks to --resume keeps its partial store instead: adding
+            # --overwrite would delete the work --resume is there to keep.
             flag = {"convert": "--overwrite", "pyramid": "--replace"}.get(command)
+            if command == "convert" and "--resume" in argv:
+                flag = None
             if flag and flag not in argv:
                 run_argv = [*argv, flag]
         try:

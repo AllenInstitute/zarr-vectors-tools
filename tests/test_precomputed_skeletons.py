@@ -314,3 +314,70 @@ def test_coincident_boundary_vertices_become_cross_chunk_edges(tmp_store):
     assert r1["fragment_count"] == 1          # merged via the cross-chunk edge
     n1 = len(r1["positions"])
     assert len(r1["edges"]) == n1 - 1         # single connected tree
+
+
+def _bfs_parents(n, edges):
+    """Reference: root each component at its lowest index, breadth first."""
+    from collections import defaultdict, deque
+
+    adj = defaultdict(list)
+    for a, b in np.asarray(edges, dtype=np.int64).reshape(-1, 2).tolist():
+        if a != b:
+            adj[a].append(b)
+            adj[b].append(a)
+    parent = np.full(n, -1, dtype=np.int64)
+    seen = np.zeros(n, dtype=bool)
+    for seed in range(n):
+        if seen[seed]:
+            continue
+        seen[seed] = True
+        queue = deque([seed])
+        while queue:
+            u = queue.popleft()
+            for w in adj[u]:
+                if not seen[w]:
+                    seen[w] = True
+                    parent[w] = u
+                    queue.append(w)
+    return parent
+
+
+def test_one_search_per_chunk_roots_every_segment_as_its_own_search_did():
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
+        _segment_parents,
+    )
+
+    rng = np.random.default_rng(3)
+    chunk = {}
+    for seg in range(40):
+        n = int(rng.integers(1, 60))
+        # A few trees per segment, listed in any order and orientation.
+        child = np.arange(1, n)
+        edges = np.stack([child, rng.integers(0, np.maximum(child, 1))], axis=1)
+        edges = edges[rng.random(len(edges)) > 0.1]
+        flip = rng.random(len(edges)) < 0.5
+        edges[flip] = edges[flip][:, ::-1]
+        perm = rng.permutation(n)
+        chunk[1000 + seg] = {
+            "vertices": rng.uniform(0, 100, size=(n, 3)),
+            "edges": perm[edges][rng.permutation(len(edges))],
+        }
+
+    parents = _segment_parents(chunk)
+    for seg, piece in chunk.items():
+        np.testing.assert_array_equal(
+            parents[seg], _bfs_parents(len(piece["vertices"]), piece["edges"]),
+        )
+
+
+def test_an_edge_outside_its_segment_is_refused():
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
+        _segment_parents,
+    )
+
+    chunk = {
+        1: {"vertices": np.zeros((2, 3)), "edges": np.array([[0, 2]])},
+        2: {"vertices": np.zeros((2, 3)), "edges": np.array([[0, 1]])},
+    }
+    with pytest.raises(ValueError, match="segment 1"):
+        _segment_parents(chunk)

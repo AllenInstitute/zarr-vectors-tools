@@ -501,56 +501,6 @@ def _write_level_objects(
     return n_faces, manifests
 
 
-def _carry_object_columns(
-    src_group, level_group, present: list[int], n_objects: int,
-) -> None:
-    """Carry the source level's object attributes, and restamp the viewer's columns.
-
-    Every object attribute is copied for the objects with geometry here --
-    a coarse level without ``segment_id`` would have a viewer take each
-    source segment id for a dense object id.  ``vertex_count`` is counted
-    afresh, since it describes the level, and each fragment gets its
-    object's ``segment_id`` when the source level's fragments had one.
-    """
-    from zarr_vectors.building import (
-        create_object_attributes_array,
-        read_object_attributes,
-        write_object_attributes,
-    )
-    from zarr_vectors.constants import FRAGMENT_ATTRIBUTES, OBJECT_ATTRIBUTES
-    from zarr_vectors.exceptions import ArrayError
-
-    from zarr_vectors_tools.convert.ingest._object_columns import (
-        VERTEX_COUNT_ATTR,
-        stamp_level_object_columns,
-    )
-
-    names = (
-        list(src_group[OBJECT_ATTRIBUTES].children())
-        if OBJECT_ATTRIBUTES in src_group else []
-    )
-    keep = np.asarray(present, dtype=np.int64)
-    mask = np.zeros(n_objects, dtype=np.uint8)
-    mask[keep[keep < n_objects]] = 1
-    for name in names:
-        if name == VERTEX_COUNT_ATTR:
-            continue
-        try:
-            data = np.asarray(read_object_attributes(src_group, name))
-        except ArrayError:
-            continue
-        out = np.zeros_like(data)
-        rows = keep[keep < len(data)]
-        out[rows] = data[rows]
-        create_object_attributes_array(level_group, name, dtype=str(data.dtype))
-        write_object_attributes(level_group, name, out, present_mask=mask[:len(out)])
-    stamp_level_object_columns(
-        level_group,
-        vertex_count=VERTEX_COUNT_ATTR in names,
-        segment_id=src_group.array_exists(f"{FRAGMENT_ATTRIBUTES}/segment_id"),
-    )
-
-
 def _tiling_bin(bin_size: float, chunk: float) -> float:
     """``bin_size``, or the nearest whole fraction of ``chunk`` when it is no larger."""
     if bin_size > chunk:
@@ -832,7 +782,11 @@ def coarsen_mesh_decimate_level(
     propagate_groupings(src_group, level_group,
                         surviving_oids=surviving_oids_from(
                             sorted(out), sparsity_factor))
-    _carry_object_columns(src_group, level_group, sorted(manifests), n_src_objects)
+    from zarr_vectors_tools.multiresolution.object_index import carry_object_columns
+
+    # A coarse level without the source's segment_id would have a viewer take
+    # each source segment id for a dense object id.
+    carry_object_columns(src_group, level_group, sorted(manifests), n_src_objects)
 
     achieved = predict_bytes(v_in, f_in) / max(predict_bytes(v_out, f_out), 1)
     return {

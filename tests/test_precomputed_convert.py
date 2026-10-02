@@ -352,3 +352,34 @@ class TestSpatiallyIndexedLayer:
         for segment_id in (11, 22):
             a, b = _read_back(serial, segment_id), _read_back(parallel, segment_id)
             assert np.array_equal(a["positions"], b["positions"])
+
+
+def test_the_command_line_reads_the_layer_kind_once(plain_layer, tmp_path, monkeypatch):
+    # Three checks and the ingest each asked, and each ask was a fetch of
+    # the layer's info -- over the network for a remote layer.
+    import zarr_vectors_tools.convert.ingest.precomputed as precomputed
+
+    reads = []
+    real = precomputed.read_layer_info
+    monkeypatch.setattr(
+        precomputed, "read_layer_info", lambda url: reads.append(url) or real(url),
+    )
+    assert main(["convert", str(plain_layer), str(tmp_path / "out.zv"),
+                 "--chunk-shape", "1000,1000,1000", "--coarsen", "2",
+                 "--sparsity", "1", "--method", "skeleton"]) == 0
+    # One for every check the command line makes, one inside the ingest.
+    assert len(reads) == 2
+
+
+def test_a_missing_reader_is_an_install_hint(tmp_path, monkeypatch):
+    import argparse
+
+    import zarr_vectors_tools.convert.ingest.precomputed as precomputed
+    from zarr_vectors_tools.cli.convert import _precomputed_kind
+
+    def missing(url):
+        raise ImportError("No module named 'cloudfiles'")
+
+    monkeypatch.setattr(precomputed, "read_layer_info", missing)
+    with pytest.raises(SystemExit, match=r"zarr-vectors-tools\[precomputed\]"):
+        _precomputed_kind(argparse.Namespace(input=str(tmp_path)))

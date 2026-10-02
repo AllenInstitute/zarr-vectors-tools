@@ -393,44 +393,6 @@ def coarsen_polylines(
 #   alone cannot supply) is read straight off the source link.
 
 
-def _stamp_segment_ids(level_group: Any) -> int:
-    """Write ``fragment_attributes/segment_id`` = object id for every fragment.
-
-    The ids are the dense object ids, recovered from the level's object
-    manifests, so this needs no cooperation from whatever wrote the level and
-    no pass over the geometry.  The level's ``arrays_present`` is refreshed so
-    a reader gating on it sees the new column.
-
-    Returns:
-        The number of chunks stamped.
-    """
-    from zarr_vectors.building import (
-        create_fragment_attribute_array,
-        read_all_object_manifests,
-        refresh_arrays_present,
-        write_chunk_fragment_attributes,
-    )
-
-    per_chunk: dict[tuple[int, ...], dict[int, int]] = {}
-    for oid, entries in enumerate(read_all_object_manifests(level_group)):
-        for chunk, fragment_index in entries:
-            per_chunk.setdefault(
-                tuple(int(c) for c in chunk), {},
-            )[int(fragment_index)] = int(oid)
-    if not per_chunk:
-        return 0
-    create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
-    for chunk, fragments in per_chunk.items():
-        column = np.zeros(max(fragments) + 1, dtype=np.uint64)
-        for fragment_index, oid in fragments.items():
-            column[fragment_index] = np.uint64(oid)
-        write_chunk_fragment_attributes(
-            level_group, "segment_id", chunk, column, dtype=np.uint64,
-        )
-    refresh_arrays_present(level_group)
-    return len(per_chunk)
-
-
 def _read_polyline_children(
     src,
     child_ccs: list[tuple[int, ...]],
@@ -1339,13 +1301,22 @@ def coarsen_polyline_level(
     # Every fragment boundary must be reconstructable locally, which needs
     # fragment_attributes/segment_id on the source.  Core's write_polylines
     # does not write it, so a store written directly by core gets it here,
-    # from its own object manifests, rather than a refusal.
+    # from its own object manifests, rather than a refusal.  The dense id,
+    # whatever source ids the store has: it is what objects are rebuilt from.
     probe_seg = read_chunk_fragment_attributes(
         src, "segment_id", tuple(int(x) for x in src_vertex_chunks[0]),
         dtype=np.uint64, default=None,
     )
     if probe_seg is None:
-        _stamp_segment_ids(src)
+        from zarr_vectors.building import refresh_arrays_present
+
+        from zarr_vectors_tools.convert.ingest._object_columns import (
+            stamp_level_object_columns,
+        )
+
+        stamp_level_object_columns(src, vertex_count=False, dense_ids=True)
+        # So a reader gating on ``arrays_present`` sees the new column.
+        refresh_arrays_present(src)
 
     # --- Phase 0: sparsity keep-set (O(objects), never O(fragments) unless
     # no cheap per-object signal exists at a coarser source level) ---------
@@ -1631,11 +1602,11 @@ def coarsen_polyline_level(
         write_object_attributes(level_group, aname, out, present_mask=mask)
     if "vertex_count" in src_attr_names:
         # Copied above as level 0's counts; this level's are different.
-        from zarr_vectors_tools.multiresolution.object_index import (
-            recount_object_vertex_counts,
+        from zarr_vectors_tools.convert.ingest._object_columns import (
+            stamp_level_object_columns,
         )
 
-        recount_object_vertex_counts(level_group)
+        stamp_level_object_columns(level_group, segment_id=False, recount=True)
 
     # Phase A wrote the vertices / fragment-attribute cells from separate
     # processes, whose per-array ``nonempty_chunks`` manifest RMWs race and can

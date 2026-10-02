@@ -13,7 +13,7 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.typing import BinShape, ChunkShape
 
-from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_level_object_columns
 
 
 def ingest_swc(
@@ -150,7 +150,6 @@ def ingest_swc(
         dtype=dtype,
     )
     _stamp_tree_ids(output_path)
-    stamp_object_columns(output_path)
 
     if preserve_header:
         try:
@@ -169,22 +168,21 @@ def ingest_swc(
 
 
 def _stamp_tree_ids(store_path: str | Path) -> None:
-    """Write each tree's segment id, and each fragment's object and segment id.
+    """Write each tree's segment id, then the per-object and per-fragment columns.
 
     ``write_graph`` writes neither.  Segment ids run 1..N in object order --
-    0 is background to Neuroglancer -- and the per-fragment columns are
-    recovered from the object manifests the writer just produced, so this
+    0 is background to Neuroglancer -- and each fragment is stamped with its
+    tree's segment id and dense object id (what the skeleton coarsener
+    reads) from the object manifests the writer just produced, so this
     needs no second pass over the geometry.  The store is marked as the
     linked skeleton layout, so a reader holding these segment ids does not
     take it for a precomputed store.
     """
     from zarr_vectors.building import (
-        create_fragment_attribute_array,
         create_object_attributes_array,
         get_resolution_level,
         open_store,
         read_all_object_manifests,
-        write_chunk_fragment_attributes,
         write_object_attributes,
     )
 
@@ -195,25 +193,12 @@ def _stamp_tree_ids(store_path: str | Path) -> None:
 
     root = open_store(str(store_path), mode="r+")
     level0 = get_resolution_level(root, 0)
-    manifests = read_all_object_manifests(level0)
-    per_chunk: dict[tuple[int, ...], dict[int, int]] = {}
-    for oid, entries in enumerate(manifests):
-        for chunk, fragment in entries:
-            per_chunk.setdefault(tuple(int(c) for c in chunk), {})[int(fragment)] = oid
-    for name in ("object_id", "segment_id"):
-        create_fragment_attribute_array(level0, name, dtype="uint64")
-    for chunk, fragments in per_chunk.items():
-        oids = np.zeros(max(fragments) + 1, dtype=np.uint64)
-        for fragment, oid in fragments.items():
-            oids[fragment] = oid
-        write_chunk_fragment_attributes(level0, "object_id", chunk, oids, dtype=np.uint64)
-        write_chunk_fragment_attributes(
-            level0, "segment_id", chunk, oids + np.uint64(1), dtype=np.uint64,
-        )
+    n_objects = len(read_all_object_manifests(level0))
     create_object_attributes_array(level0, "segment_id", dtype="uint64")
     write_object_attributes(
-        level0, "segment_id", np.arange(1, len(manifests) + 1, dtype=np.uint64),
+        level0, "segment_id", np.arange(1, n_objects + 1, dtype=np.uint64),
     )
+    stamp_level_object_columns(level0, object_id=True)
     mark_skeleton_layout(root, LAYOUT_LINKED)
 
 

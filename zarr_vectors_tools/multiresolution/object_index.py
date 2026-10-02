@@ -128,60 +128,6 @@ def shard_rows_by_object(
 VERTEX_COUNT_ATTR = "vertex_count"
 
 
-def recount_object_vertex_counts(level_group, *, dtype=None) -> np.ndarray:
-    """Rewrite ``object_attributes/vertex_count`` from this level's own fragments.
-
-    Coarseners carry a level's object attributes forward unchanged, which is
-    right for a label or a length but not for a vertex count: the copied column
-    still describes level 0, and a reader that budgets objects by it (the
-    Neuroglancer fork's per-object detail does) over-costs every coarse level.
-    Counted from each chunk's fragment index, which is kilobytes per chunk, so
-    no vertices are read.  An object with no geometry at this level (dropped
-    by sparsity) counts 0, a real value rather than a missing one, so every
-    row is marked present.
-
-    Args:
-        level_group: The level just written, opened for writing.
-        dtype: dtype to write; default the existing column's, else uint32.
-
-    Returns:
-        The counts written, one per object.
-    """
-    from zarr_vectors.building import (
-        read_all_object_manifests,
-        read_object_attributes,
-        read_vertex_fragment_index,
-    )
-
-    manifests = read_all_object_manifests(level_group)
-    if dtype is None:
-        try:
-            dtype = np.asarray(read_object_attributes(level_group, VERTEX_COUNT_ATTR)).dtype
-        except Exception:  # noqa: BLE001 - no column yet
-            dtype = np.uint32
-    lengths: dict[ChunkCoords, np.ndarray] = {}
-    counts = np.zeros(len(manifests), dtype=np.int64)
-    for oid, manifest in enumerate(manifests):
-        for cc, fragment in manifest:
-            cc = tuple(int(c) for c in cc)
-            per_fragment = lengths.get(cc)
-            if per_fragment is None:
-                index = read_vertex_fragment_index(level_group, cc)
-                per_fragment = lengths[cc] = np.array(
-                    [index.range(f)[1] if index.is_range(f) else len(index.indices(f))
-                     for f in range(len(index))],
-                    dtype=np.int64,
-                )
-            counts[oid] += int(per_fragment[int(fragment)])
-    out = counts.astype(dtype)
-    create_object_attributes_array(level_group, VERTEX_COUNT_ATTR, dtype=str(out.dtype))
-    write_object_attributes(
-        level_group, VERTEX_COUNT_ATTR, out,
-        present_mask=np.ones(len(out), dtype=np.uint8),
-    )
-    return out
-
-
 def carry_object_columns(
     src_group, level_group, keep_oids, n_objects: int,
 ) -> list[str]:
@@ -226,8 +172,11 @@ def carry_object_columns(
         )
         write_object_attributes(level_group, name, out, present_mask=mask[: len(src)])
         carried.append(name)
-    if VERTEX_COUNT_ATTR in carried:
-        recount_object_vertex_counts(level_group)
-    if src_group.array_exists(f"{FRAGMENT_ATTRIBUTES}/segment_id"):
-        stamp_level_object_columns(level_group, vertex_count=False, segment_id=True)
+    # The carried vertex_count described the level below.
+    stamp_level_object_columns(
+        level_group,
+        vertex_count=VERTEX_COUNT_ATTR in carried,
+        segment_id=src_group.array_exists(f"{FRAGMENT_ATTRIBUTES}/segment_id"),
+        recount=True,
+    )
     return carried

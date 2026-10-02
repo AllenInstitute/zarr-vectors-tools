@@ -658,6 +658,21 @@ class TestPyramidReplace:
         assert _levels(out) == [0, 1]
         assert _multiscale_paths(out) == ["0", "1"]
 
+    @pytest.mark.parametrize("extra, message", [
+        (["--chunk-scale", "2,2"], "chunk_scale_factors length"),
+        (["--sparsity-strategy", "attribute", "--sparsity-attribute", "nope"],
+         "object_attributes/nope"),
+        (["--sparsity-strategy", "attribute"], "go together"),
+    ])
+    def test_a_refused_replace_keeps_the_old_pyramid(self, tmp_path, extra, message):
+        # These used to be refused only after --replace had removed levels.
+        out = self._store(tmp_path)
+        with pytest.raises(SystemExit, match=message):
+            main(["pyramid", str(out), "--coarsen", "4", "--sparsity", "1",
+                  "--cross-level-storage", "none", "--replace", *extra])
+        assert _levels(out) == [0, 1, 2, 3]
+        assert _multiscale_paths(out) == ["0", "1", "2", "3"]
+
 
 def test_convert_refuses_existing_output(tmp_path):
     # Writing into an existing store used to leave its old chunks behind.
@@ -765,9 +780,10 @@ class TestAttributeSparsity:
         with pytest.raises(SystemExit, match="go together"):
             main(["pyramid", str(out), "--coarsen", "1", "--sparsity", "2",
                   "--sparsity-strategy", "attribute"])
-        assert main(["pyramid", str(out), "--coarsen", "1", "--sparsity", "2",
-                     "--sparsity-strategy", "attribute",
-                     "--sparsity-attribute", "no_such_column"]) == 1
+        with pytest.raises(SystemExit, match="object_attributes/no_such_column"):
+            main(["pyramid", str(out), "--coarsen", "1", "--sparsity", "2",
+                  "--sparsity-strategy", "attribute",
+                  "--sparsity-attribute", "no_such_column"])
         assert _levels(out) == [0]
 
 

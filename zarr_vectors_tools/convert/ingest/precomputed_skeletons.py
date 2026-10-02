@@ -218,29 +218,74 @@ def _tree_parents(n: int, edges: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]
     Edges are undirected; each connected component is rooted at its lowest
     index, which is the true root for a skeleton listed root first (an SWC,
     or anything written from one).  An edge closing a cycle is left out.
-    """
-    from collections import deque
 
-    adj: dict[int, list[int]] = defaultdict(list)
-    for a, b in np.asarray(edges, dtype=np.int64).reshape(-1, 2).tolist():
-        if a != b:
-            adj[a].append(b)
-            adj[b].append(a)
-    parent = np.full(n, -1, dtype=np.int64)
-    seen = np.zeros(n, dtype=bool)
-    for seed in range(n):
-        if seen[seed]:
-            continue
-        seen[seed] = True
-        queue = deque([seed])
-        while queue:
-            u = queue.popleft()
-            for w in adj.get(u, ()):
-                if not seen[w]:
-                    seen[w] = True
-                    parent[w] = u
-                    queue.append(w)
+    One breadth-first search for the whole forest, in compiled code: a hub
+    vertex ``n`` is joined to each component's root, so the search enters
+    every component at its root and nowhere else.  It runs ahead of a
+    second traversal in :func:`split_components`, and a Python search here
+    was as much interpreter work as that one.  The search costs a few
+    hundred microseconds to set up, so :func:`_segment_parents` makes one
+    call for a whole chunk rather than one per segment.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import breadth_first_order, connected_components
+
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    e = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+    e = e[e[:, 0] != e[:, 1]]
+    graph = coo_matrix(
+        (np.ones(len(e), dtype=np.int32), (e[:, 0], e[:, 1])), shape=(n, n),
+    ).tocsr()
+    _, labels = connected_components(graph, directed=False)
+    # A component's first vertex in index order is its lowest.
+    _, roots = np.unique(labels, return_index=True)
+    rows = np.concatenate([e[:, 0], np.full(len(roots), n, dtype=np.int64)])
+    cols = np.concatenate([e[:, 1], roots.astype(np.int64)])
+    forest = coo_matrix(
+        (np.ones(len(rows), dtype=np.int32), (rows, cols)), shape=(n + 1, n + 1),
+    ).tocsr()
+    _, predecessors = breadth_first_order(
+        forest, n, directed=False, return_predecessors=True,
+    )
+    parent = predecessors[:n].astype(np.int64)
+    parent[(parent < 0) | (parent == n)] = -1
     return parent
+
+
+def _segment_parents(
+    chunk: dict[int, dict[str, npt.NDArray]],
+) -> dict[int, npt.NDArray[np.int64]]:
+    """:func:`_tree_parents` for every segment of a chunk, in one search.
+
+    The segments are laid end to end, each one's edges shifted by its first
+    vertex, which keeps every component's lowest index its lowest; the
+    parents come back in each segment's own numbering.
+    """
+    spans: list[tuple[int, int, int]] = []
+    blocks: list[npt.NDArray[np.int64]] = []
+    start = 0
+    for seg_id, piece in chunk.items():
+        n = len(piece["vertices"])
+        edges = np.asarray(
+            piece.get("edges", np.zeros((0, 2))), dtype=np.int64,
+        ).reshape(-1, 2)
+        if edges.size and (int(edges.min()) < 0 or int(edges.max()) >= n):
+            raise ValueError(
+                f"segment {seg_id} has an edge to a vertex outside its "
+                f"{n} vertices"
+            )
+        blocks.append(edges + start)
+        spans.append((seg_id, start, n))
+        start += n
+    parent = _tree_parents(
+        start, np.concatenate(blocks) if blocks else np.zeros((0, 2), np.int64),
+    )
+    out: dict[int, npt.NDArray[np.int64]] = {}
+    for seg_id, first, n in spans:
+        own = parent[first:first + n]
+        out[seg_id] = np.where(own >= 0, own - first, -1)
+    return out
 
 
 def pieces_from_chunk(
@@ -280,6 +325,7 @@ def pieces_from_chunk(
     out: dict[ChunkCoords, list[dict[str, Any]]] = defaultdict(list)
     cross: list[tuple[int, int]] = []
     gid = int(gid_start)
+    parents = _segment_parents(chunk) if fixed_cell is None else {}
     for seg_id, piece in chunk.items():
         verts = np.asarray(piece["vertices"], dtype=np.float32)
         n = len(verts)
@@ -309,7 +355,7 @@ def pieces_from_chunk(
             continue
 
         chunk_of = np.floor(verts / cs).astype(np.int64)
-        parent = _tree_parents(n, edges)
+        parent = parents[seg_id]
         child = np.flatnonzero(parent >= 0)
         tree = np.stack([child, parent[child]], axis=1)
         same = np.all(chunk_of[tree[:, 0]] == chunk_of[tree[:, 1]], axis=1)
