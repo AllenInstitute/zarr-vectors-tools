@@ -52,7 +52,7 @@ class TestCsvExport:
         export_csv(str(store), str(out), attribute_names=["intensity"])
 
         lines = out.read_text().splitlines()
-        assert lines[0] == "dim0,dim1,dim2,intensity"
+        assert lines[0] == "x,y,z,intensity"
         rows = np.array(
             [[float(v) for v in line.split(",")] for line in lines[1:]],
         )

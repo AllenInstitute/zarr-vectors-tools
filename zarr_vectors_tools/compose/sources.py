@@ -161,6 +161,15 @@ class SourceInfo:
     headers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     """Format headers to carry across, keyed by format name."""
 
+    bounds_exact: bool = True
+    """Whether :attr:`bounds` is the data's extent or only a box around it.
+
+    A subset of a store reports the whole store's box, and a rotated box
+    is larger than the rotated data, so neither can be the reason to
+    refuse a merge: when such a box overhangs the target, the merge
+    measures the data first.
+    """
+
     def describe(self) -> str:
         objects = "?" if self.object_count is None else f"{self.object_count:,}"
         vertices = "?" if self.vertex_count is None else f"{self.vertex_count:,}"
@@ -212,6 +221,16 @@ class Source(ABC):
     def info(self) -> SourceInfo:
         """What this source holds.  Cheap; safe to call repeatedly."""
 
+    @property
+    def name(self) -> str:
+        """A short name for this source: its file or store name, no extension.
+
+        What a carried header is filed under and what a part made by
+        ``split --by provenance`` is called.  :attr:`SourceInfo.label`
+        stays the full origin, for errors and the provenance record.
+        """
+        return short_name(self.info.label)
+
     @abstractmethod
     def iter_batches(
         self,
@@ -244,6 +263,39 @@ class Source(ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.info.describe()})"
+
+
+_STORE_SUFFIXES = frozenset({".zv", ".zarrvectors", ".zarr"})
+
+
+def short_name(label: str) -> str:
+    """``label`` cut down to a file-name stem.
+
+    Labels are written for error messages — ``"b.trk (trk)"``,
+    ``"file:///data/a.zv[level 0]"``.  This drops the format and level
+    annotations, the directory, and a store or geometry-format extension,
+    leaving ``"b"`` and ``"a"``.  Any other dot is kept, so a label such as
+    ``"label_2.5"`` is not truncated at it.
+    """
+    import re
+
+    text = re.sub(r"\s*\([^()]*\)\s*$", "", str(label)).strip()
+    text = re.sub(r"\s*\[level \d+\]\s*$", "", text)
+    text = text.rstrip("/").rsplit("/", 1)[-1]
+    suffix = Path(text).suffix.lower()
+    if suffix and (suffix in _STORE_SUFFIXES or _is_format_extension(suffix)):
+        text = text[: -len(suffix)]
+    return text or "source"
+
+
+def _is_format_extension(suffix: str) -> bool:
+    from zarr_vectors_tools.compose.readers import _EXTENSIONS
+
+    if suffix in _EXTENSIONS:
+        return True
+    from zarr_vectors_tools.cli._args import FORMAT_REGISTRY
+
+    return any(suffix in fmt.exts for fmt in FORMAT_REGISTRY.values())
 
 
 def _batched(
@@ -289,6 +341,11 @@ class StoreSource(Source):
     ``read_chunk_attributes(g, name, cc)[fi]`` is the column for the
     fragment ``read_chunk_vertices(g, cc)[fi]`` holds.  Same manifest,
     same order, so they cannot drift.
+
+    **Bounds.**  :attr:`~SourceInfo.bounds` is the store's declared box,
+    which for a subset (``objects=``) or under a ``transform`` is only a box
+    around what is emitted.  Pass ``bounds=`` — the measured extent, after
+    any transform — when it is known; it is then reported as exact.
     """
 
     def __init__(
@@ -301,6 +358,7 @@ class StoreSource(Source):
         with_vertex_attributes: bool = True,
         with_object_attributes: bool = True,
         label: str | None = None,
+        bounds: tuple[Sequence[float], Sequence[float]] | None = None,
     ) -> None:
         import zarr_vectors as zv
 
@@ -310,7 +368,14 @@ class StoreSource(Source):
         self._transform = as_transform(transform)
         self._want_vertex_attrs = bool(with_vertex_attributes)
         self._want_object_attrs = bool(with_object_attributes)
+        self._explicit_label = label
         self._label = label or f"{self._dataset.url}[level {level}]"
+        self._bounds = (
+            None if bounds is None else (
+                tuple(float(v) for v in bounds[0]),
+                tuple(float(v) for v in bounds[1]),
+            )
+        )
         self._explicit_objects = (
             None if objects is None else np.asarray(objects, dtype=np.int64)
         )
@@ -322,6 +387,12 @@ class StoreSource(Source):
     @property
     def dataset(self) -> Any:
         return self._dataset
+
+    @property
+    def name(self) -> str:
+        if self._explicit_label:
+            return short_name(self._explicit_label)
+        return short_name(str(self._dataset.url))
 
     def object_ids(self) -> npt.NDArray[np.int64]:
         """The ids this source will emit, in emission order."""
@@ -341,15 +412,23 @@ class StoreSource(Source):
         return self._info
 
     def _read_info(self) -> SourceInfo:
-        try:
-            lo, hi = self._dataset.bounds
-            bounds: tuple[tuple[float, ...], tuple[float, ...]] | None = (
-                tuple(float(v) for v in lo), tuple(float(v) for v in hi),
-            )
-        except Exception:  # noqa: BLE001 - a store may declare none
-            bounds = None
-        if bounds is not None and self._transform is not None:
-            bounds = _transform_box(bounds, self._transform)
+        bounds: tuple[tuple[float, ...], tuple[float, ...]] | None
+        if self._bounds is not None:
+            bounds, exact = self._bounds, True
+        else:
+            try:
+                lo, hi = self._dataset.bounds
+                bounds = (
+                    tuple(float(v) for v in lo), tuple(float(v) for v in hi),
+                )
+            except Exception:  # noqa: BLE001 - a store may declare none
+                bounds = None
+            if bounds is not None and self._transform is not None:
+                bounds = _transform_box(bounds, self._transform)
+            # The store's box is the extent of the whole store, untransformed.
+            # A subset of its objects, or a rotation of it, fits inside that
+            # box without filling it.
+            exact = self._explicit_objects is None and self._transform is None
 
         headers: dict[str, dict[str, Any]] = {}
         try:
@@ -378,6 +457,7 @@ class StoreSource(Source):
             ),
             group_names=tuple(self._level.groups.names()),
             headers=headers,
+            bounds_exact=exact,
         )
 
     def groups(self) -> Mapping[str, npt.NDArray[np.int64]]:
@@ -656,6 +736,8 @@ class GeometrySource(Source):
                 object_attributes=tuple(sorted(geom.object_attributes)),
                 group_names=tuple(sorted(geom.groups)),
                 headers=dict(geom.headers),
+                # A rotated box is larger than the rotated data.
+                bounds_exact=self._transform is None,
             )
         return self._info
 

@@ -198,7 +198,8 @@ class TestEmSkeletons:
     ) -> None:
         layer = tmp_path / "layer"
         summary = export_precomputed(em_store, layer, level=1)
-        assert summary["properties"] == ["label", "length_nm"]
+        # vertex_count: the per-object count every store with objects carries.
+        assert summary["properties"] == ["label", "length_nm", "vertex_count"]
 
         info = _json(layer, "info")
         assert info["type"] == "segmentation"
@@ -515,6 +516,8 @@ class TestMeshes:
         inline = _json(layer, "mesh/segment_properties/info")["inline"]
         assert inline["properties"] == [
             {"id": "label", "type": "label", "values": ["first", "second"]},
+            {"id": "vertex_count", "type": "number", "data_type": "uint32",
+             "values": [3, 3]},
         ]
 
     def test_draco_stores_are_refused(self, tmp_path: Path) -> None:

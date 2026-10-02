@@ -1,6 +1,6 @@
 .. zarr-vectors-tools documentation master file
 
-.. image:: zarr-vectors.png
+.. image:: zarr-vectors-tools.png
    :width: 55%
    :align: center
    :alt: zarr-vectors-tools

@@ -1,6 +1,6 @@
 """Export zarr vectors streamlines to TrackVis TRK format.
 
-Requires ``nibabel``: ``pip install nibabel``.
+Requires ``nibabel``: ``pip install 'zarr-vectors-tools[trk]'``.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def export_trk(
     except ImportError as e:
         raise ExportError(
             "nibabel is required for TRK export. "
-            "Install with: pip install nibabel"
+            "Install with: pip install 'zarr-vectors-tools[trk]'"
         ) from e
 
     data, skipped = read_streamline_level(

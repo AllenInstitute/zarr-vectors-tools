@@ -26,6 +26,7 @@ def split_components(
     edges: npt.NDArray[np.integer],
     attributes: dict[str, npt.NDArray] | None = None,
     vertex_ids: npt.NDArray[np.integer] | None = None,
+    roots: npt.NDArray[np.integer] | None = None,
 ) -> list[dict[str, Any]]:
     """Split a vertex set + undirected edges into rooted-tree pieces.
 
@@ -35,6 +36,12 @@ def split_components(
     edge row).  Components are returned in ascending order of their
     lowest-index member.
 
+    With ``roots``, a component holding one of those vertices is rooted
+    there instead, and those components come first, in the order of their
+    root.  A caller whose edges already form a rooted forest passes its
+    roots to keep each tree's orientation; BFS from the true root orients
+    every edge as the forest does.
+
     Args:
         positions: ``(N, D)`` vertex positions.
         edges: ``(M, 2)`` undirected edges (any orientation).
@@ -43,6 +50,7 @@ def split_components(
             re-indexing; each piece gets ``"vertex_ids"`` aligned to its
             local vertex order, so callers can locate a specific input
             vertex (e.g. a cross-chunk endpoint) within its component.
+        roots: Optional vertices to root components at, in ascending order.
 
     Returns:
         List of ``{"positions", "edges", "attributes"[, "vertex_ids"]}``
@@ -73,7 +81,10 @@ def split_components(
 
     visited = np.zeros(n, dtype=bool)
     pieces: list[dict[str, Any]] = []
-    for seed in range(n):
+    seeds: Any = range(n)
+    if roots is not None:
+        seeds = [*(int(r) for r in np.asarray(roots).ravel()), *range(n)]
+    for seed in seeds:
         if visited[seed]:
             continue
         order: list[int] = []

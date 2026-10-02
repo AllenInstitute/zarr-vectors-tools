@@ -96,22 +96,20 @@ class TestMeshSummary:
 
     def test_unit_cube_cross_chunk(self, tmp_path: Path) -> None:
         """Cube whose every face straddles 3 chunks (cube on unit grid,
-        chunks at 0.5): every triangle becomes a cross-chunk face under
-        upstream's all-three-vertices-share-a-chunk rule. The summary
-        algorithm intentionally excludes cross-chunk faces from face/area
-        accumulation but counts their boundary edges in
-        ``excluded_cross_face_edges``."""
+        chunks at 0.5): each vertex has a chunk of its own, so every
+        triangle spans chunks.  They are all counted, as on one chunk."""
         v, f = _unit_cube()
         store = tmp_path / "cube_chunked.zv"
         write_mesh(str(store), v, f, chunk_shape=(0.5, 0.5, 0.5))
 
         result = compute_mesh_summary(store)
         assert result["vertex_count"] == 8
-        # All 12 faces are cross-chunk; intra-chunk pass contributes nothing.
-        assert result["face_count"] == 0
-        assert result["surface_area"] == 0.0
-        # But cross-chunk face-boundary edges DO get tallied.
-        assert result["excluded_cross_face_edges"] > 0
+        assert result["face_count"] == 12
+        assert abs(result["surface_area"] - 6.0) < 1e-5
+        assert abs(result["volume"] - 1.0) < 1e-5
+        assert result["edge_count"] == 18
+        assert result["euler_characteristic"] == 2
+        assert result["excluded_cross_face_edges"] == 0
 
 class TestPerObject:
 

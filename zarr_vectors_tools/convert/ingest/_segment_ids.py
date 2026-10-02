@@ -11,17 +11,19 @@ expensive part has already succeeded.
 
 The ids are the dense object ids, recovered from the object manifests the
 writer just produced, so this needs no cooperation from the writer and no
-second pass over the geometry.
+second pass over the geometry.  The work is
+:func:`~zarr_vectors_tools.convert.ingest._object_columns.stamp_object_columns`'s;
+this is the name the streamline ingests call it by.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 
 
-def stamp_segment_ids(store_path: str | Path, *, level: int = 0) -> int:
+def stamp_segment_ids(store_path: str | Path, *, level: int = 0) -> bool:
     """Write ``fragment_attributes/segment_id`` for every fragment at ``level``.
 
     Args:
@@ -29,36 +31,9 @@ def stamp_segment_ids(store_path: str | Path, *, level: int = 0) -> int:
         level: Resolution level whose manifests define the mapping.
 
     Returns:
-        The number of chunks stamped.
+        Whether the column was written (a level that already has one, or
+        has no objects, is left as it is).
     """
-    from zarr_vectors.building import (
-        create_fragment_attribute_array,
-        get_resolution_level,
-        open_store,
-        read_all_object_manifests,
-        write_chunk_fragment_attributes,
-    )
-
-    level_group = get_resolution_level(
-        open_store(str(store_path), mode="r+"), level,
-    )
-    manifests = read_all_object_manifests(level_group)
-
-    per_chunk: dict[tuple[int, ...], dict[int, int]] = {}
-    for oid, entries in enumerate(manifests):
-        for chunk, fragment_index in entries:
-            per_chunk.setdefault(
-                tuple(int(c) for c in chunk), {},
-            )[int(fragment_index)] = int(oid)
-    if not per_chunk:
-        return 0
-
-    create_fragment_attribute_array(level_group, "segment_id", dtype="uint64")
-    for chunk, fragments in per_chunk.items():
-        column = np.zeros(max(fragments) + 1, dtype=np.uint64)
-        for fragment_index, oid in fragments.items():
-            column[fragment_index] = np.uint64(oid)
-        write_chunk_fragment_attributes(
-            level_group, "segment_id", chunk, column, dtype=np.uint64,
-        )
-    return len(per_chunk)
+    return stamp_object_columns(
+        store_path, level=level, vertex_count=False, dense_ids=True,
+    )["segment_id"]

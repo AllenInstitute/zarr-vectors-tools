@@ -343,8 +343,10 @@ def test_rdp_coarsen_factor_above_one_still_simplifies(tmp_path):
 
 @pytest.mark.slow
 def test_serial_matches_process_pool_executor(tmp_path):
-    a = tmp_path / "serial.zv"
-    b = tmp_path / "parallel.zv"
+    # Same store name in separate directories: core names the root OME node
+    # after the store, so differently named stores can never be identical.
+    a = tmp_path / "serial" / "store.zv"
+    b = tmp_path / "parallel" / "store.zv"
     lines_a = _random_walk_streamlines(seed=42, n=10, npts=30)
     lines_b = [x.copy() for x in lines_a]
     write_polylines(str(a), lines_a, chunk_shape=(60.0, 60.0, 60.0))

@@ -65,3 +65,44 @@ def encode_column(series) -> tuple[np.ndarray, list[str] | None]:
     # Strings and mixed object columns -> factorise into codes + labels.
     codes, uniques = pd.factorize(series, use_na_sentinel=True)
     return np.asarray(codes, dtype=np.int32), [str(u) for u in uniques]
+
+
+def dictionary_meta(categories: list[str], *, ordered: bool = False) -> dict:
+    """The array metadata that marks a column of codes as categorical.
+
+    The dictionary-encoding convention core writes for string attributes
+    (``encoding``, ``categories``, ``ordered``, ``_FillValue``), and what the
+    Neuroglancer viewer reads to show a code's label rather than its number.
+    ``_FillValue`` is always -1: the pandas missing-code convention, which is
+    also what a staged attach fills unmatched rows of a code column with.
+    """
+    return {
+        "encoding": "dictionary",
+        "categories": [str(c) for c in categories],
+        "ordered": bool(ordered),
+        "_FillValue": -1,
+    }
+
+
+def is_ordered(series) -> bool:
+    """Whether a table column is an ordered ``pandas.Categorical``."""
+    return bool(getattr(series.dtype, "ordered", False))
+
+
+def mark_dictionary_encoded(store_path, level: int, columns: dict[str, dict]) -> None:
+    """Stamp :func:`dictionary_meta` onto attribute arrays already written.
+
+    Core's point writer dictionary-encodes only the string columns it is
+    handed, and sorts their categories as it does.  The table ingesters
+    hand it codes instead -- in the source's category order, which the
+    h5ad header and every staged attach rely on -- so the metadata that
+    makes those codes categorical is added here, after the write.
+    """
+    if not columns:
+        return
+    from zarr_vectors.building import VERTEX_ATTRIBUTES, get_resolution_level, open_store
+
+    level_group = get_resolution_level(open_store(str(store_path), mode="r+"), level)
+    for name, extra in columns.items():
+        # Merged into the array's own attributes; nothing else is touched.
+        level_group.write_array_meta(f"{VERTEX_ATTRIBUTES}/{name}", extra)

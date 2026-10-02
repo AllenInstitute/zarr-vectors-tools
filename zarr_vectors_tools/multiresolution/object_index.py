@@ -122,3 +122,61 @@ def shard_rows_by_object(
             nxt = int(np.searchsorted(oids, oids[nxt], side="right"))
         cuts.append(nxt)
     return [rows[a:b] for a, b in zip(cuts[:-1], cuts[1:])]
+
+
+#: The object attribute a viewer budgets each object by, per level.
+VERTEX_COUNT_ATTR = "vertex_count"
+
+
+def carry_object_columns(
+    src_group, level_group, keep_oids, n_objects: int,
+) -> list[str]:
+    """Carry a level's per-object columns to the coarser level just written.
+
+    Every ``object_attributes`` column is copied, in its own dtype, for the
+    objects the level kept (the rest are marked absent); ``vertex_count`` is
+    then recounted from this level's fragments, and the fragment
+    ``segment_id`` a viewer colours and picks by is stamped when the source
+    level had one.  Without these a coarse level could not be budgeted per
+    object, and its fragments would be coloured by their chunk-local index.
+
+    Returns:
+        The object attribute names carried.
+    """
+    from zarr_vectors.building import read_object_attributes
+    from zarr_vectors.constants import FRAGMENT_ATTRIBUTES, OBJECT_ATTRIBUTES
+
+    from zarr_vectors_tools.convert.ingest._object_columns import (
+        stamp_level_object_columns,
+    )
+
+    names = (
+        list(src_group[OBJECT_ATTRIBUTES].children())
+        if OBJECT_ATTRIBUTES in src_group else []
+    )
+    kept = np.asarray(sorted(int(o) for o in keep_oids), dtype=np.int64)
+    mask = np.zeros(int(n_objects), dtype=np.uint8)
+    mask[kept[kept < n_objects]] = 1
+    carried: list[str] = []
+    for name in names:
+        try:
+            src = np.asarray(read_object_attributes(src_group, name))
+        except Exception:  # noqa: BLE001 - unreadable column: leave it out
+            continue
+        out = np.zeros_like(src)
+        rows = kept[kept < len(src)]
+        out[rows] = src[rows]
+        create_object_attributes_array(
+            level_group, name, dtype=str(src.dtype),
+            num_channels=int(np.prod(src.shape[1:])) if src.ndim > 1 else 1,
+        )
+        write_object_attributes(level_group, name, out, present_mask=mask[: len(src)])
+        carried.append(name)
+    # The carried vertex_count described the level below.
+    stamp_level_object_columns(
+        level_group,
+        vertex_count=VERTEX_COUNT_ATTR in carried,
+        segment_id=src_group.array_exists(f"{FRAGMENT_ATTRIBUTES}/segment_id"),
+        recount=True,
+    )
+    return carried

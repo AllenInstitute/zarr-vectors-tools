@@ -1,21 +1,19 @@
 """Streaming surface area / volume / Euler characteristic for mesh stores.
 
-Loads each chunk's intra-chunk faces, accumulates per-face area and
-signed-tetrahedron volume, and tallies edge incidence for the Euler
-characteristic. Cross-chunk *edges* are read once from the global
-cross-chunk array; cross-chunk *faces* (records of arity >= 3) are
-treated as boundary chains for the edge dedup set but their per-face
-area / volume contributions are excluded — the returned dict reports
-the excluded edge count so callers can quantify the gap.
+Streams the level chunk by chunk.  Each chunk's own faces contribute their
+area, signed-tetrahedron volume and edges as the chunk is read.  Faces whose
+corners lie in more than one chunk are read once, up front, from the link
+family's cross-chunk cells; their corner positions are collected as the
+chunks stream past and they are added at the end (see
+:class:`~zarr_vectors_tools.algorithms._mesh_faces.SpanningFaces`).  The
+result does not depend on the chunk shape.
 
-``per_object=True`` walks the object manifests instead of the chunk
-grid: for each object, every fragment it owns contributes its area /
-volume / face / vertex counts. Cross-chunk faces still cannot be
-attributed (no spec mapping from a cross-chunk record back to an
-object), so per-object totals are intra-fragment only.
+``per_object=True`` walks the object manifests instead of the chunk grid:
+every face is credited to the object owning its first corner.
 
-Works on triangle meshes today. Quad / polygon support requires
-fan-triangulation; not implemented in v0.
+Faces of four or more corners are split into a fan of triangles for area and
+volume, and counted once as faces, with their boundary edges, for the Euler
+characteristic.
 """
 
 from __future__ import annotations
@@ -29,7 +27,6 @@ from zarr_vectors.building import (
     list_chunk_keys,
     open_store,
     read_all_object_manifests,
-    read_chunk_links,
     read_chunk_vertices,
     read_root_metadata,
     read_vertex_fragment_index,
@@ -43,8 +40,15 @@ from zarr_vectors.typing import ChunkCoords
 from zarr_vectors_tools.algorithms._links import (
     chunk_key_str,
     link_prefetch_plan,
-    read_cross_links,
-    require_link_width,
+)
+from zarr_vectors_tools.algorithms._mesh_faces import (
+    SpanningFaces,
+    chunk_faces,
+    chunk_positions,
+    face_width,
+    fan,
+    polygon_edges,
+    triangle_area_volume,
 )
 
 
@@ -61,30 +65,29 @@ def compute_mesh_summary(
         level: Resolution level to summarise.
         per_object: When True, the returned dict gains a ``per_object``
             list keyed by ``object_id`` with the same area / volume /
-            face / vertex stats restricted to each object's fragments.
-            Cross-chunk faces are excluded from per-object totals; the
-            global keys still reflect the whole-store streaming pass.
+            face / vertex stats restricted to each object.
 
     Returns:
         Dict with keys:
-          - ``surface_area`` (float): sum of per-face triangle areas.
+          - ``surface_area`` (float): sum of face areas.
           - ``volume`` (float): signed-tetrahedron sum; meaningful only
             for closed meshes with consistent winding.
-          - ``face_count`` (int): triangles contributing to the sum.
-            Cross-chunk faces are excluded; see ``excluded_cross_face_edges``.
-          - ``vertex_count`` (int): from level metadata.
-          - ``edge_count`` (int): deduplicated edges (intra + cross).
-          - ``euler_characteristic`` (int): ``V - E + F``. Accurate only
-            when the store has no cross-chunk faces.
-          - ``excluded_cross_face_edges`` (int): number of cross-chunk
-            face-boundary edges contributed to the dedup set but whose
-            per-face area / volume could not be attributed.
+          - ``face_count`` (int): stored faces; a quad counts once.
+          - ``vertex_count`` (int): vertices at the level.
+          - ``edge_count`` (int): distinct face-boundary edges.
+          - ``euler_characteristic`` (int): ``V - E + F``.
+          - ``excluded_cross_face_edges`` (int): always 0, since every face
+            is counted; kept for callers that read it.
           - ``per_object`` (list[dict], only when ``per_object=True``):
             one dict per object_id with ``object_id``, ``surface_area``,
             ``volume``, ``face_count``, ``vertex_count``.
 
     Raises:
         FileNotFoundError: If the store cannot be opened.
+        NotImplementedError: If the level holds no faces of three or more
+            corners (a graph or skeleton level).
+        ValueError: If a face spanning chunks names a vertex the level does
+            not hold.
     """
     root = open_store(str(store_path))
     root_meta = read_root_metadata(root)
@@ -94,11 +97,9 @@ def compute_mesh_summary(
     vmeta = level_group.read_array_meta("vertices")
     vertex_dtype = np.dtype(vmeta.get("dtype", "float32"))
 
-    # Called for the check, not the value: a non-triangle store must fail
-    # here rather than silently produce areas from mis-read rows.
-    require_link_width(
-        level_group, 3, what="compute_mesh_summary v0 (triangle meshes only)",
-    )
+    # A non-mesh store must fail here rather than silently produce areas
+    # from mis-read rows.
+    width = face_width(level_group, what="compute_mesh_summary")
 
     chunk_keys = list_chunk_keys(level_group)
     chunk_key_strs = [chunk_key_str(cc) for cc in chunk_keys]
@@ -113,105 +114,63 @@ def compute_mesh_summary(
     # An edge is ``((chunk, local), (chunk, local))``.  Two edges can only
     # be the same edge if they name the same chunk pair, so the global
     # dedup the Euler characteristic needs decomposes into one dedup per
-    # chunk (edges inside it) plus one over the records that span chunks.
-    # That is what lets the per-chunk half stay as a NumPy array of index
-    # pairs -- 16 bytes an edge against the ~600 a set of nested tuples
-    # cost, which at a hundred million faces is the difference between a
-    # few gigabytes and not finishing.
+    # chunk (edges inside it) plus one over the edges between chunks, which
+    # only the spanning faces have.  That is what lets the per-chunk half
+    # stay as a NumPy array of index pairs, 16 bytes an edge.
     #
-    # The spanning records are read FIRST so that a cross-chunk face's
-    # two corners that happen to share a chunk join that chunk's own dedup
-    # pass rather than needing a second global set.
+    # A spanning face's two corners can share a chunk, and that edge may
+    # also belong to one of the chunk's own faces, so those pairs join that
+    # chunk's dedup pass.
     edge_count = 0
-    spanning_edges: set[tuple[tuple, tuple]] = set()
-    same_chunk_from_records: dict[ChunkCoords, list[tuple[int, int]]] = {}
-    excluded_cross_face_edges = 0
-
-    def _edge_key(a: tuple, b: tuple) -> tuple[tuple, tuple]:
-        return (a, b) if a <= b else (b, a)
 
     with level_group.batched_reads([
         (VERTICES, chunk_key_strs),
         (VERTEX_FRAGMENTS, chunk_key_strs),
         *link_prefetch_plan(level_group, chunk_keys),
     ]):
-        # Cross-only: the per-chunk loop below consumes every intra record
-        # via read_chunk_links, so the whole-family read_links would
-        # double-count them here.
-        try:
-            cross_links = read_cross_links(level_group, delta=0)
-        except Exception:
-            cross_links = []
-        # Records may have 2 endpoints (a cross-chunk edge) or 3+ (a
-        # cross-chunk face).  Each contributes (len - 1) consecutive edges.
-        for record in cross_links:
-            eps = [(tuple(chunk), int(vi)) for chunk, vi in record]
-            if len(eps) < 2:
-                continue
-            for k in range(len(eps) - 1):
-                a, b = eps[k], eps[k + 1]
-                excluded_cross_face_edges += 1
-                if a[0] == b[0]:
-                    same_chunk_from_records.setdefault(a[0], []).append(
-                        (a[1], b[1]),
-                    )
-                else:
-                    spanning_edges.add(_edge_key(a, b))
+        spanning = SpanningFaces(level_group)
+        same_chunk_from_spanning, spanning_edges = spanning.edges()
 
         for chunk_key in chunk_keys:
-            try:
-                vgroups = read_chunk_vertices(
-                    level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
-                )
-            except Exception:
+            local_positions = chunk_positions(
+                level_group, chunk_key, dtype=vertex_dtype, ndim=ndim,
+            )
+            if local_positions is None:
                 continue
-
-            if not vgroups:
-                continue
-
-            local_positions = np.concatenate(vgroups, axis=0)
             vertex_count += len(local_positions)
-
-            try:
-                link_groups = read_chunk_links(level_group, chunk_key)
-            except Exception:
-                link_groups = []
+            spanning.collect(chunk_key, local_positions)
 
             chunk_pairs: list[np.ndarray] = []
-            for faces in link_groups:
-                if len(faces) == 0:
-                    continue
+            for faces in chunk_faces(level_group, chunk_key, width):
                 face_count += len(faces)
+                triangles, _ = fan(faces)
+                area, vol = triangle_area_volume(
+                    local_positions[triangles[:, 0]],
+                    local_positions[triangles[:, 1]],
+                    local_positions[triangles[:, 2]],
+                )
+                surface_area += float(area.sum())
+                volume += float(vol.sum())
+                chunk_pairs.append(polygon_edges(faces))
 
-                v0 = local_positions[faces[:, 0]]
-                v1 = local_positions[faces[:, 1]]
-                v2 = local_positions[faces[:, 2]]
-
-                cross = np.cross(v1 - v0, v2 - v0)
-                surface_area += float(np.linalg.norm(cross, axis=1).sum() * 0.5)
-                volume += float(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum() / 6.0)
-
-                chunk_pairs.append(np.concatenate([
-                    faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]],
-                ], axis=0))
-
-            from_records = same_chunk_from_records.pop(tuple(chunk_key), None)
-            if from_records:
-                chunk_pairs.append(np.asarray(from_records, dtype=np.int64))
+            from_spanning = same_chunk_from_spanning.pop(tuple(chunk_key), None)
+            if from_spanning is not None:
+                chunk_pairs.append(from_spanning)
             if chunk_pairs:
-                pairs = np.concatenate(chunk_pairs, axis=0).astype(np.int64)
-                # Undirected: sort each row so (a, b) and (b, a) dedup.
-                pairs.sort(axis=1)
-                edge_count += int(len(np.unique(pairs, axis=0)))
+                edge_count += _distinct_pairs(chunk_pairs)
 
-    # Any chunk that held only record-derived edges (no intra faces of its
-    # own) never reached the loop above.
-    for leftover in same_chunk_from_records.values():
-        pairs = np.asarray(leftover, dtype=np.int64)
-        pairs.sort(axis=1)
-        edge_count += int(len(np.unique(pairs, axis=0)))
+    edge_count += spanning_edges
 
-    edge_count += len(spanning_edges)
+    if len(spanning):
+        # Also covers a corner in a chunk the loop never read, whose edges
+        # are still waiting in same_chunk_from_spanning.
+        spanning.require_complete()
+        a, b, c, _slots, _source = spanning.triangles()
+        area, vol = triangle_area_volume(a, b, c)
+        surface_area += float(area.sum())
+        volume += float(vol.sum())
+        face_count += len(spanning)
+
     euler = vertex_count - edge_count + face_count
 
     result: dict[str, Any] = {
@@ -221,15 +180,23 @@ def compute_mesh_summary(
         "vertex_count": vertex_count,
         "edge_count": edge_count,
         "euler_characteristic": euler,
-        "excluded_cross_face_edges": excluded_cross_face_edges,
+        "excluded_cross_face_edges": 0,
     }
 
     if per_object:
         result["per_object"] = _compute_per_object(
-            level_group, vertex_dtype=vertex_dtype, ndim=ndim,
+            level_group, vertex_dtype=vertex_dtype, ndim=ndim, width=width,
         )
 
     return result
+
+
+def _distinct_pairs(parts: list[np.ndarray]) -> int:
+    """Distinct undirected pairs among ``parts``' ``(K, 2)`` rows."""
+    pairs = np.concatenate(parts, axis=0).astype(np.int64)
+    # Undirected: sort each row so (a, b) and (b, a) dedup.
+    pairs.sort(axis=1)
+    return int(len(np.unique(pairs, axis=0)))
 
 
 def _compute_per_object(
@@ -237,6 +204,7 @@ def _compute_per_object(
     *,
     vertex_dtype: np.dtype,
     ndim: int,
+    width: int,
 ) -> list[dict[str, Any]]:
     """Attribute area / volume / counts to objects, from the fragment index.
 
@@ -256,9 +224,11 @@ def _compute_per_object(
       index at all -- it does not, so every face in a chunk was credited to
       whichever object owned fragment 0 and every other object reported zero.
 
-    A face whose corners span two objects (which a well-formed mesh store
-    does not produce, since objects partition faces) is credited to the
-    object owning its first corner.
+    A face is credited to the object owning its first corner -- which also
+    settles a face whose corners span two objects, which a well-formed mesh
+    store does not produce, since objects partition faces.  A face whose
+    corners lie in different chunks is credited the same way, once every
+    chunk has been read.
     """
     manifests = read_all_object_manifests(level_group)
     if not manifests:
@@ -282,11 +252,30 @@ def _compute_per_object(
     faces_per_object = np.zeros(n_objects, dtype=np.int64)
     verts_per_object = np.zeros(n_objects, dtype=np.int64)
 
+    def credit(oid_per_face, triangles_of, a, b, c) -> None:
+        """Add faces' areas and volumes, given as triangles, to their objects."""
+        face_area, face_volume = triangle_area_volume(a, b, c)
+        oid_per_triangle = oid_per_face[triangles_of]
+        area[:] += np.bincount(
+            oid_per_triangle, weights=face_area, minlength=n_objects,
+        )[:n_objects]
+        volume[:] += np.bincount(
+            oid_per_triangle, weights=face_volume, minlength=n_objects,
+        )[:n_objects]
+        faces_per_object[:] += np.bincount(
+            oid_per_face, minlength=n_objects,
+        )[:n_objects].astype(np.int64)
+
     with level_group.batched_reads([
         (VERTICES, referenced_chunk_strs),
         (VERTEX_FRAGMENTS, referenced_chunk_strs),
         *link_prefetch_plan(level_group, referenced_chunks),
     ]):
+        spanning = SpanningFaces(level_group)
+        # The object owning each spanning face's corners, filled in as their
+        # chunks are read; -1 for a corner no object owns.
+        corner_owner = np.full(len(spanning) * spanning.width, -1, dtype=np.int64)
+
         for chunk in referenced_chunks:
             try:
                 fragment_index = read_vertex_fragment_index(level_group, chunk)
@@ -322,21 +311,17 @@ def _compute_per_object(
                     row_owner[idx] = oid
                     verts_per_object[oid] += idx.size
 
-            try:
-                link_groups = read_chunk_links(level_group, chunk)
-            except Exception:
-                continue
-            usable = [
-                np.asarray(g, dtype=np.int64) for g in link_groups
-                if np.asarray(g).ndim == 2 and np.asarray(g).shape[1] == 3
-                and len(g)
-            ]
+            spanning.collect(chunk, positions)
+            corners = spanning.corners_in(chunk)
+            if corners is not None:
+                slots, corner_rows = corners
+                ok = (corner_rows >= 0) & (corner_rows < n_rows)
+                corner_owner[slots[ok]] = row_owner[corner_rows[ok]]
+
+            usable = chunk_faces(level_group, chunk, width)
             if not usable:
                 continue
             faces = np.concatenate(usable, axis=0)
-            # Cross-chunk faces name rows this chunk does not hold; they have
-            # no object attribution in the format and are excluded here, as
-            # they are from the chunk-level totals.
             inside = np.all((faces >= 0) & (faces < n_rows), axis=1)
             faces = faces[inside]
             if len(faces) == 0:
@@ -347,24 +332,21 @@ def _compute_per_object(
             if not keep.any():
                 continue
             faces = faces[keep]
-            oid_per_face = oid_per_face[keep]
+            triangles, triangles_of = fan(faces)
+            credit(
+                oid_per_face[keep], triangles_of,
+                positions[triangles[:, 0]], positions[triangles[:, 1]],
+                positions[triangles[:, 2]],
+            )
 
-            v0 = positions[faces[:, 0]]
-            v1 = positions[faces[:, 1]]
-            v2 = positions[faces[:, 2]]
-            cross = np.cross(v1 - v0, v2 - v0)
-            face_area = np.linalg.norm(cross, axis=1) * 0.5
-            face_volume = np.einsum("ij,ij->i", v0, np.cross(v1, v2)) / 6.0
-
-            area += np.bincount(
-                oid_per_face, weights=face_area, minlength=n_objects,
-            )[:n_objects]
-            volume += np.bincount(
-                oid_per_face, weights=face_volume, minlength=n_objects,
-            )[:n_objects]
-            faces_per_object += np.bincount(
-                oid_per_face, minlength=n_objects,
-            )[:n_objects].astype(np.int64)
+    if len(spanning):
+        oid_per_face = corner_owner.reshape(len(spanning), spanning.width)[:, 0]
+        keep = np.flatnonzero((oid_per_face >= 0) & spanning.complete())
+        if keep.size:
+            a, b, c, _slots, source = spanning.triangles(keep)
+            # credit() indexes faces by position in ``keep``.
+            position_in_keep = np.searchsorted(keep, source)
+            credit(oid_per_face[keep], position_in_keep, a, b, c)
 
     return [
         {

@@ -1,10 +1,11 @@
 """Ingest streamlines from TRX files into zarr vectors.
 
-Requires ``trx-python``: ``pip install trx-python``.
+Requires ``trx-python``: ``pip install 'zarr-vectors-tools[trx]'``.
 
 TRX is the closest format to zarr vectors for streamlines — it uses
 separate arrays for positions, offsets, per-vertex data (dpv),
-per-streamline data (dps), groups, and per-group data (dpg).
+per-streamline data (dps), groups, and per-group data (dpg).  Positions are
+RAS millimetres by definition, and the store's axes say so.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from zarr_vectors.types.polylines import write_polylines
 from zarr_vectors.typing import BinShape, ChunkShape
 
 from zarr_vectors_tools.convert.ingest._attribute_widths import record_vertex_attribute_widths
-from zarr_vectors_tools.convert.ingest._segment_ids import stamp_segment_ids
+from zarr_vectors_tools.convert.ingest._axes import declare_axis_unit
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 
 
 def ingest_trx(
@@ -72,7 +74,7 @@ def ingest_trx(
     except ImportError as e:
         raise IngestError(
             "trx-python is required for TRX ingest. "
-            "Install with: pip install trx-python"
+            "Install with: pip install 'zarr-vectors-tools[trx]'"
         ) from e
 
     input_path = Path(input_path)
@@ -109,7 +111,7 @@ def ingest_trx(
             # entry per streamline -- which np.asarray refuses, so every file
             # with per-vertex data failed here.  Its flat buffer is (V, C).
             dpv = trx.data_per_vertex[key]
-            dpv_data = np.asarray(getattr(dpv, "_data", dpv), dtype=np.float32)
+            dpv_data = _stored_dtype(getattr(dpv, "_data", dpv))
             if dpv_data.ndim == 2 and dpv_data.shape[1] == 1:
                 dpv_data = dpv_data[:, 0]
             # Split by streamline offsets
@@ -125,9 +127,12 @@ def ingest_trx(
     if hasattr(trx, "data_per_streamline") and trx.data_per_streamline:
         object_attributes = {}
         for key in trx.data_per_streamline:
-            object_attributes[key] = np.asarray(
-                trx.data_per_streamline[key], dtype=np.float32
-            )
+            # trx-python hands even a one-value dps back as (S, 1); stored
+            # that way it is a one-channel column, not a per-streamline scalar.
+            values = _stored_dtype(trx.data_per_streamline[key])
+            if values.ndim == 2 and values.shape[1] == 1:
+                values = values[:, 0]
+            object_attributes[key] = values
 
     # Extract groups.  Row i of the groupings array is the i-th TRX group;
     # its name is written onto that array after the store exists, below.
@@ -222,9 +227,11 @@ def ingest_trx(
     )
     # The pyramid needs a per-fragment segment id, and core's writer does
     # not produce one -- without this the ingest succeeds and the coarsening
-    # step refuses the store it just wrote.  See ingest._segment_ids.
-    stamp_segment_ids(output_path)
+    # step refuses the store it just wrote.  Each streamline's vertex_count
+    # comes with it; see ingest._object_columns.
+    stamp_object_columns(output_path)
     record_vertex_attribute_widths(output_path, vertex_attributes)
+    declare_axis_unit(output_path, "millimeter")
     if group_names:
         _write_group_names(output_path, group_names)
     _write_header(output_path, trx, group_attributes)
@@ -233,6 +240,24 @@ def ingest_trx(
     if group_names:
         result["group_names"] = list(group_names)
     return result
+
+
+def _stored_dtype(values: Any) -> np.ndarray:
+    """A dpv/dps array in the dtype the store keeps: the file's own.
+
+    Integers stay integers -- a ``uint32`` vertex count or an ``int64`` id
+    went in exact and must come out exact, and float32 holds integers only
+    to 2**24.  ``float16`` (a TRX option for compact dpv) widens to
+    float32, which the viewer reads, and booleans to uint8.
+    """
+    array = np.asarray(values)
+    if array.dtype == np.float16:
+        return array.astype(np.float32)
+    if array.dtype == np.bool_:
+        return array.astype(np.uint8)
+    if array.dtype.kind not in "iuf":
+        return array.astype(np.float32)
+    return array
 
 
 def _group_attributes(trx: Any, group_names: list[str]) -> dict[str, np.ndarray] | None:

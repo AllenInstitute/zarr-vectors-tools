@@ -1,9 +1,15 @@
 """Ingest point clouds from CSV/XYZ text files into Zarr Vectors.
 
 Supports:
-- XYZ files (3 columns: x, y, z)
+- XYZ files (3 columns: x, y, z), whitespace- or comma-separated
 - CSV with header row (columns identified by name)
 - CSV without header (first D columns are coordinates, rest are attributes)
+
+Whether the first row is a header is read from the row itself (a row that
+is not all numbers is a header), and so is the delimiter (a comma if the
+row has one, otherwise runs of whitespace), unless the caller says.  The
+position columns' names are kept in the store's CSV header, so a CSV
+export writes the header the file came with.
 
 Optional enrichments (all default off):
 
@@ -13,8 +19,9 @@ Optional enrichments (all default off):
 - ``normalise`` — centre + scale positions to ``[-1, 1]``; offset and scale
   are stored in the CSV header for round-trip export.
 - ``knn_distance_k`` — write ``attributes["knn_distance"]`` (requires scipy).
-- ``per_object_vertex_count`` — write ``object_attributes["vertex_count"]``
-  when ``object_ids`` is supplied.
+
+With ``object_ids``, each object's ``vertex_count`` and each fragment's
+``segment_id`` are written too (see :mod:`._object_columns`).
 """
 
 from __future__ import annotations
@@ -26,6 +33,11 @@ import numpy as np
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
+
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+
+#: ``delimiter`` value meaning "runs of spaces or tabs", the usual XYZ layout.
+WHITESPACE = "whitespace"
 
 # Lower-cased column name → canonical role.
 _POSITION_PATTERNS = {
@@ -65,6 +77,42 @@ def _auto_detect(col_names: list[str], ndim: int) -> tuple[list[str], list[str]]
     return [str(c) for c in pos_cols], attr_cols
 
 
+def is_whitespace_delimiter(delimiter: str | None) -> bool:
+    """Whether ``delimiter`` means runs of whitespace rather than one character.
+
+    A literal space counts: no point file separates its columns by exactly
+    one space and means two spaces to be an empty column between them.
+    """
+    return delimiter == WHITESPACE or (
+        delimiter is not None and delimiter != "" and delimiter.strip(" ") == ""
+    )
+
+
+def _split(line: str, delimiter: str | None) -> list[str]:
+    fields = line.split() if delimiter is None else line.split(delimiter)
+    return [f.strip().strip('"').strip("'") for f in fields]
+
+
+def _first_row(path: Path) -> tuple[int, str]:
+    """``(line index, text)`` of the first line that is not blank or a ``#`` comment."""
+    with open(path) as handle:
+        for index, line in enumerate(handle):
+            text = line.strip()
+            if text and not text.startswith("#"):
+                return index, text
+    raise IngestError(f"no data rows in '{path}'")
+
+
+def _is_header(fields: list[str]) -> bool:
+    """A row that is not all numbers names the columns."""
+    for field in fields:
+        try:
+            float(field)
+        except ValueError:
+            return True
+    return False
+
+
 def ingest_csv(
     input_path: str | Path,
     output_path: str | Path,
@@ -72,8 +120,8 @@ def ingest_csv(
     *,
     bin_shape: BinShape | None = None,
     ndim: int = 3,
-    delimiter: str = ",",
-    has_header: bool = True,
+    delimiter: str | None = None,
+    has_header: bool | None = None,
     position_columns: list[str] | list[int] | None = None,
     attribute_columns: list[str] | list[int] | None = None,
     dtype: str = "float32",
@@ -84,7 +132,7 @@ def ingest_csv(
     drop_duplicates: bool = False,
     normalise: bool = False,
     knn_distance_k: int | None = None,
-    per_object_vertex_count: bool = False,
+    per_object_vertex_count: bool | None = None,
 ) -> dict[str, Any]:
     """Ingest a CSV or XYZ file into a Zarr Vectors point cloud store.
 
@@ -93,8 +141,11 @@ def ingest_csv(
         output_path: Path for output Zarr Vectors store.
         chunk_shape: Spatial chunk size per dimension.
         ndim: Number of spatial dimensions (default 3).
-        delimiter: Column delimiter (default ``,``).
-        has_header: Whether the first row is a header.
+        delimiter: Column delimiter.  ``None`` (default) reads it from the
+            first row: a comma if it has one, otherwise whitespace.
+            ``"whitespace"`` (or a space) splits on runs of spaces and tabs.
+        has_header: Whether the first row is a header.  ``None`` (default)
+            decides from the row: a header is a row that is not all numbers.
         position_columns: Column names or indices for positions.
             Default: first *ndim* columns (or auto-detected when
             ``auto_detect_columns=True``).
@@ -117,9 +168,9 @@ def ingest_csv(
         knn_distance_k: If an int, compute each point's mean Euclidean
             distance to its k nearest neighbours and store as
             ``attributes["knn_distance"]``. Requires ``scipy``.
-        per_object_vertex_count: If True and ``object_ids`` is provided,
-            write per-object vertex counts to
-            ``object_attributes["vertex_count"]``.
+        per_object_vertex_count: Write per-object vertex counts to
+            ``object_attributes["vertex_count"]``.  ``None`` (default):
+            whenever ``object_ids`` is given; ``True`` requires it.
 
     Returns:
         Summary dict from :func:`~zarr_vectors.types.points.write_points`,
@@ -132,22 +183,31 @@ def ingest_csv(
     if not input_path.exists():
         raise IngestError(f"Input file not found: {input_path}")
 
+    try:
+        first_line, first_text = _first_row(input_path)
+    except (OSError, UnicodeDecodeError) as e:
+        raise IngestError(f"Failed to read CSV '{input_path}': {e}") from e
+    if delimiter is None:
+        split_on = "," if "," in first_text else None
+    elif is_whitespace_delimiter(delimiter):
+        split_on = None
+    else:
+        split_on = delimiter
+    if has_header is None:
+        has_header = _is_header(_split(first_text, split_on))
+
     col_names: list[str] = []
     try:
         if has_header:
-            with open(input_path) as f:
-                header_line = f.readline().strip()
-            col_names = [c.strip() for c in header_line.split(delimiter)]
+            col_names = _split(first_text, split_on)
 
             data = np.loadtxt(
                 input_path,
-                delimiter=delimiter,
-                skiprows=1 + skip_rows,
+                delimiter=split_on,
+                skiprows=first_line + 1 + skip_rows,
                 dtype=np.float64,
+                ndmin=2,
             )
-
-            if data.ndim == 1:
-                data = data.reshape(1, -1)
 
             if position_columns is None and auto_detect_columns:
                 detected_pos, detected_attr = _auto_detect(col_names, ndim)
@@ -180,12 +240,11 @@ def ingest_csv(
         else:
             data = np.loadtxt(
                 input_path,
-                delimiter=delimiter,
+                delimiter=split_on,
                 skiprows=skip_rows,
                 dtype=np.float64,
+                ndmin=2,
             )
-            if data.ndim == 1:
-                data = data.reshape(1, -1)
 
             if position_columns is None:
                 pos_idx = list(range(ndim))
@@ -242,17 +301,10 @@ def ingest_csv(
         from zarr_vectors_tools.convert.ingest._point_enrichments import compute_knn_distance
         attributes["knn_distance"] = compute_knn_distance(positions, knn_distance_k)
 
-    object_attributes: dict[str, np.ndarray] | None = None
-    if per_object_vertex_count:
-        if object_ids is None:
-            raise IngestError(
-                "per_object_vertex_count requires object_ids to be supplied."
-            )
-        from zarr_vectors_tools.convert.ingest._point_enrichments import (
-            compute_per_object_vertex_count,
+    if per_object_vertex_count and object_ids is None:
+        raise IngestError(
+            "per_object_vertex_count requires object_ids to be supplied."
         )
-        _, counts = compute_per_object_vertex_count(object_ids)
-        object_attributes = {"vertex_count": counts}
 
     write_kwargs: dict[str, Any] = {
         "chunk_shape": chunk_shape,
@@ -262,37 +314,35 @@ def ingest_csv(
     }
     if object_ids is not None:
         write_kwargs["object_ids"] = object_ids
-    if object_attributes is not None:
-        write_kwargs["object_attributes"] = object_attributes
 
     result = write_points(str(output_path), positions, **write_kwargs)
+    if object_ids is not None:
+        stamp_object_columns(
+            output_path, vertex_count=per_object_vertex_count is not False,
+        )
     result.update(enrichment_summary)
 
-    if normalise_offset is not None:
-        try:
-            from zarr_vectors_tools.headers.formats import CSVHeader
-            from zarr_vectors_tools.headers.registry import HeaderRegistry
+    try:
+        from zarr_vectors_tools.headers.formats import CSVHeader
+        from zarr_vectors_tools.headers.registry import HeaderRegistry
 
-            existing_pos_names = position_columns if (
-                position_columns and isinstance(position_columns[0], str)
-            ) else ["x", "y", "z"][:ndim]
-            existing_attr_names = attribute_columns if (
-                attribute_columns
-                and len(attribute_columns)
-                and isinstance(attribute_columns[0], str)
-            ) else []
-
-            csv_header = CSVHeader(
-                column_names=col_names,
-                delimiter=delimiter,
-                position_columns=list(existing_pos_names),
-                attribute_columns=list(existing_attr_names),
-                has_header_row=has_header,
-                normalise_offset=normalise_offset.tolist(),
-                normalise_scale=normalise_scale,
-            )
-            HeaderRegistry(str(output_path)).add("csv", csv_header)
-        except Exception:
-            pass  # header preservation is best-effort
+        # Names only when the file had them: a headerless file's columns
+        # are numbers, and an export then falls back to the store's axes.
+        csv_header = CSVHeader(
+            column_names=col_names,
+            delimiter=WHITESPACE if split_on is None else split_on,
+            position_columns=[col_names[i] for i in pos_idx] if col_names else [],
+            attribute_columns=[
+                col_names[i] for i in attr_idx if i < len(col_names)
+            ] if col_names else [],
+            has_header_row=bool(has_header),
+            normalise_offset=(
+                None if normalise_offset is None else normalise_offset.tolist()
+            ),
+            normalise_scale=normalise_scale,
+        )
+        HeaderRegistry(str(output_path)).add("csv", csv_header)
+    except Exception:
+        pass  # header preservation is best-effort
 
     return result

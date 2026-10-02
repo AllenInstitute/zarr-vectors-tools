@@ -21,7 +21,9 @@ from zarr_vectors_tools.headers.registry import HeaderRegistry
 
 from ._args import (
     EXPORT_REGISTRY,
+    FORMAT_REGISTRY,
     build_factors,
+    check_pyramid_method,
     check_rdp_tolerances,
     executor_ctx,
     load_export_func,
@@ -32,18 +34,27 @@ from ._args import (
 )
 
 
-def _maybe_overwrite(output, overwrite: bool) -> None:
+def _maybe_overwrite(output, overwrite: bool, *, resume: bool = False) -> None:
     """Remove an existing output store when ``--overwrite`` is set.
 
     Only deletes a directory that looks like a zarr store (has ``zarr.json`` or
     ``.zattrs``) — including a partial store from a failed ingest, whose root is
     created before level-0 data — so an unrelated directory is never wiped.
+    Without ``--overwrite`` an existing output is refused: the ingesters write
+    into it, and the old chunks they do not touch would survive alongside the
+    new data.  ``resume`` is the exception, since continuing into the store an
+    interrupted run left is what it is for.
     """
     p = Path(output)
     if not p.exists():
         return
     if not overwrite:
-        return  # the ingester's own "Store already exists" error still fires
+        if resume:
+            return
+        raise SystemExit(
+            f"error: {output} already exists; pass --overwrite to replace it, "
+            f"or choose another OUTPUT"
+        )
     if p.is_dir():
         looks_like_store = (p / "zarr.json").exists() or (p / ".zattrs").exists()
         if not looks_like_store:
@@ -59,14 +70,14 @@ def _maybe_overwrite(output, overwrite: bool) -> None:
 def _print_summary(action: str, summary: dict) -> None:
     print(action)
     for k in (
-        "streamline_count", "vertex_count", "object_count",
+        "streamline_count", "line_count", "vertex_count", "object_count",
         "chunk_count", "cross_chunk_link_count", "chunk_shape", "bounds",
         "spatial_key", "n_obs", "n_vars", "obs_columns_stored", "genes_stored",
         "columns_stored", "dropped_na", "key_column",
         # export-side counters
         "node_count", "root_count", "face_count", "attributes_carried",
         "object_attributes_carried", "groups_carried", "attributes_skipped",
-        "object_count", "file_count", "surfaces", "skipped", "warnings",
+        "file_count", "surfaces", "skipped", "warnings",
         "edge_count", "properties", "unit", "unit_assumed",
         # cortical surfaces
         "hemispheres", "geometry", "space", "c_ras", "scalars", "labels",
@@ -91,6 +102,10 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
         extra["cross_level_storage"] = args.cross_level_storage
     if getattr(args, "cross_level_depth", None) is not None:
         extra["cross_level_depth"] = args.cross_level_depth
+    if getattr(args, "sparsity_attribute", None) is not None:
+        extra["sparsity_attribute"] = args.sparsity_attribute
+    if getattr(args, "method", None) is not None:
+        extra["method"] = args.method
 
     with executor_ctx(args.workers, args.workers_backend) as ex:
         result = build_pyramid(
@@ -104,6 +119,76 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
             **extra,
         )
     print(f"  pyramid: {result.get('levels_created', '?')} coarser level(s) built")
+
+
+def _check_method(args, fmt, factors) -> str | None:
+    """``--method`` as ``build_pyramid`` takes it, refused where it cannot apply.
+
+    TRK and precomputed skeleton layers build their pyramid inside the
+    ingest, each with the one coarsener that fits it.
+    """
+    method = getattr(args, "method", None)
+    if method is None or method == "auto":
+        return None
+    geometry = fmt.geometry
+    if fmt.name == "precomputed":
+        geometry = _precomputed_kind(args)
+    method = check_pyramid_method(method, geometry, factors)
+    inline = {"trk": "polyline", "precomputed": "skeleton"}.get(fmt.name)
+    if inline is not None and geometry != "mesh":
+        if method != inline:
+            raise SystemExit(
+                f"error: --method {method} does not apply to {fmt.name!r} "
+                f"input: its pyramid is built inside the ingest, by the "
+                f"{inline} coarsener; convert without --coarsen/--sparsity, then "
+                f"run 'zvtools pyramid STORE ... --method {method}'"
+            )
+        return None
+    if args.rdp_tolerance is not None and method != "polyline":
+        raise SystemExit(
+            f"error: --rdp-tolerance applies to the polyline coarsener, which "
+            f"simplifies by distance; --method {method} has no tolerance"
+        )
+    return method
+
+
+def _check_sparsity_attribute(args, fmt, factors) -> None:
+    """Refuse ``--sparsity-strategy attribute`` where the pyramid cannot take it.
+
+    Checked before the ingest, since the pyramid is the last step and a
+    mismatch would otherwise fail after the conversion ran.
+    """
+    strategy = getattr(args, "sparsity_strategy", None)
+    name = getattr(args, "sparsity_attribute", None)
+    if strategy != "attribute" and name is None:
+        return
+    if name is None:
+        raise SystemExit(
+            "error: --sparsity-strategy attribute needs --sparsity-attribute "
+            "NAME, the object attribute to rank objects by"
+        )
+    if strategy != "attribute":
+        raise SystemExit(
+            f"error: --sparsity-attribute only applies with --sparsity-strategy "
+            f"attribute, not {strategy!r}"
+        )
+    if factors is None:
+        raise SystemExit(
+            "error: --sparsity-attribute ranks objects for pyramid levels; pass "
+            "--coarsen and --sparsity to build some"
+        )
+    # TRK and precomputed skeleton layers build their pyramid inside the
+    # ingest, whose coarseners take no ranking attribute.
+    if fmt.name == "trk" or (
+        fmt.name == "precomputed" and _precomputed_kind(args) != "mesh"
+    ):
+        raise SystemExit(
+            f"error: --sparsity-strategy attribute does not apply to "
+            f"{fmt.name!r} input: its pyramid is built inside the ingest, which "
+            f"cannot rank by an attribute; convert without --coarsen/--sparsity, "
+            f"then run 'zvtools pyramid STORE ... --sparsity-strategy attribute "
+            f"--sparsity-attribute {name}'"
+        )
 
 
 def _convert_trk(args, factors, chunk_scale) -> int:
@@ -145,15 +230,32 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     return 0
 
 
-def _precomputed_kind(source) -> str:
-    """``"mesh"`` or ``"skeleton"``, from the layer's ``info``."""
-    from zarr_vectors_tools.convert.ingest.precomputed import (
-        layer_kind,
-        layer_url,
-        read_layer_info,
-    )
+def _precomputed_kind(args) -> str:
+    """``"mesh"`` or ``"skeleton"``, from the layer's ``info``.
 
-    return layer_kind(read_layer_info(layer_url(source)))
+    Read once per invocation and kept on ``args``: the checks before the
+    ingest and the ingest itself all ask, and for a ``gs://`` or ``https://``
+    layer each read is a fetch.
+    """
+    kind = getattr(args, "_precomputed_kind", None)
+    if kind is not None:
+        return kind
+    try:
+        from zarr_vectors_tools.convert.ingest.precomputed import (
+            layer_kind,
+            layer_url,
+            read_layer_info,
+        )
+
+        kind = layer_kind(read_layer_info(layer_url(args.input)))
+    except ImportError as exc:  # cloud-files
+        raise SystemExit(
+            f"error: reading a precomputed layer needs the precomputed extra "
+            f"({exc}); install it with: "
+            f"pip install 'zarr-vectors-tools[precomputed]'"
+        ) from None
+    args._precomputed_kind = kind
+    return kind
 
 
 def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
@@ -164,13 +266,7 @@ def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
     are checked there, not here.  A mesh layer goes the way of any other
     mesh input, with the pyramid built after it.
     """
-    try:
-        kind = _precomputed_kind(args.input)
-    except ImportError as exc:  # cloud-files
-        raise SystemExit(
-            f"error: precomputed ingest failed ({exc}) — install it with: "
-            f"pip install 'zarr-vectors-tools[{fmt.extra}]'"
-        )
+    kind = _precomputed_kind(args)
     if kind == "mesh":
         _convert_precomputed_meshes(args, fmt, factors, chunk_scale)
         return
@@ -323,10 +419,12 @@ def run_export(args) -> int:
         args.coarsen or args.sparsity or args.rdp_tolerance is not None
         or getattr(args, "cross_level_storage", None) is not None
         or getattr(args, "cross_level_depth", None) is not None
+        or getattr(args, "method", "auto") != "auto"
     ):
         raise SystemExit(
-            "error: --coarsen / --sparsity / --rdp-tolerance / --cross-level-* "
-            "build pyramid levels; to export an existing one pass --level N"
+            "error: --coarsen / --sparsity / --method / --rdp-tolerance / "
+            "--cross-level-* build pyramid levels; to export an existing one "
+            "pass --level N"
         )
 
     kwargs: dict[str, Any] = {"level": args.level}
@@ -349,19 +447,23 @@ def run_export(args) -> int:
             half = len(value) // 2
             value = (tuple(value[:half]), tuple(value[half:]))
         kwargs[keyword] = value
-    # Format-specific options that have a default, so "was it set?" is a
-    # comparison rather than a None check.
-    if args.delimiter != ",":
+    # Format-specific options with no _EXPORT_OPTIONS entry.
+    if args.delimiter is not None:
         if "delimiter" in fmt.accepts:
             kwargs["delimiter"] = args.delimiter
         else:
             rejected.append("--delimiter")
     if rejected:
+        # Name the flags the format does take, not the exporter's keywords
+        # (some of which, like ``binary``, have no flag at all).
+        flag_for = {kw: flag for kw, flag in _EXPORT_OPTIONS.values()}
+        flag_for["delimiter"] = "--delimiter"
+        takes = sorted(flag_for[kw] for kw in fmt.accepts if kw in flag_for)
         raise SystemExit(
             f"error: {', '.join(sorted(rejected))} "
             f"{'do' if len(rejected) > 1 else 'does'} not apply to "
             f"{fmt.name!r} export (it takes: "
-            f"{', '.join(sorted(fmt.accepts - {'level', 'chunks'})) or 'no options'})"
+            f"{', '.join(['--level', *takes])})"
         )
 
     export = load_export_func(fmt)
@@ -433,7 +535,10 @@ def run(args) -> int:
         "--position-columns": ({"table"}, getattr(args, "position_columns", None) is not None),
         "--key-column": ({"table"}, getattr(args, "key_column", None) is not None),
         "--column": ({"table"}, bool(getattr(args, "columns", None))),
-        "--delimiter": ({"table"}, getattr(args, "delimiter", ",") != ","),
+        "--delimiter": ({"csv", "table"}, getattr(args, "delimiter", None) is not None),
+        "--split-objects": ({"obj"}, bool(getattr(args, "split_objects", False))),
+        "--no-merge-vertices": ({"stl"}, bool(getattr(args, "no_merge_vertices", False))),
+        "--merge-tolerance": ({"stl"}, getattr(args, "merge_tolerance", None) is not None),
         "--object-id-column": ({"h5ad", "table"},
                                getattr(args, "object_id_column", None) is not None),
         "--drop-na": ({"h5ad", "table"}, bool(getattr(args, "drop_na", False))),
@@ -452,6 +557,24 @@ def run(args) -> int:
         "--lod": ({"precomputed"}, getattr(args, "lod", None) is not None),
         "--drop-interior-below": ({"precomputed"},
                                   bool(getattr(args, "drop_interior_below", 0))),
+        # trk sizes its grid from --num-chunks and has no sub-binning; every
+        # other format takes an explicit --chunk-shape instead.
+        "--chunk-shape": (set(FORMAT_REGISTRY) - {"trk"},
+                          getattr(args, "chunk_shape", None) is not None),
+        "--bin-shape": (set(FORMAT_REGISTRY) - {"trk"},
+                        getattr(args, "bin_shape", None) is not None),
+        "--num-chunks": ({"trk"}, getattr(args, "num_chunks", None) is not None),
+        "--n-parts": ({"trk"}, getattr(args, "n_parts", None) is not None),
+        # Only the trk ingest writes through a session codec; the others
+        # would store raw whatever was asked for.
+        "--compressor": ({"trk"}, getattr(args, "compressor", "none") != "none"),
+        "--compute-length": ({"trk", "trx", "tck", "lines"},
+                             bool(getattr(args, "compute_length", False))),
+        "--compute-endpoints": ({"trk", "trx", "tck"},
+                                bool(getattr(args, "compute_endpoints", False))),
+        "--knn-distance-k": ({"ply", "las", "csv", "h5ad"},
+                             getattr(args, "knn_distance_k", None) is not None),
+        "--nodes": ({"edgelist"}, getattr(args, "nodes", None) is not None),
         # Only a streamline store is coarsened by Douglas-Peucker.  Skeletons
         # (swc, precomputed) decimate by stride, and points, meshes, lines
         # and graphs bin, so a tolerance there would be silently meaningless.
@@ -472,6 +595,12 @@ def run(args) -> int:
         raise SystemExit(
             "error: --position-columns X,Y[,Z] is required for --format table"
         )
+    if (getattr(args, "no_merge_vertices", False)
+            and getattr(args, "merge_tolerance", None) is not None):
+        raise SystemExit(
+            "error: --merge-tolerance sets how close vertices must be to weld; "
+            "with --no-merge-vertices none are welded"
+        )
 
     # Cross-level links are written by the post-ingest pyramid.  TRK and
     # precomputed input build their pyramid inside the ingest, with coarseners
@@ -485,7 +614,7 @@ def run(args) -> int:
     ]
     if cross_flags:
         if fmt.name == "trk" or (
-            fmt.name == "precomputed" and _precomputed_kind(args.input) != "mesh"
+            fmt.name == "precomputed" and _precomputed_kind(args) != "mesh"
         ):
             raise SystemExit(
                 f"error: {' / '.join(cross_flags)} do not apply to {fmt.name!r} "
@@ -498,11 +627,15 @@ def run(args) -> int:
                 f"--coarsen and --sparsity to build some"
             )
 
-    # Before the ingest: the pyramid is the last step, so a tolerance list
-    # that does not fit it would otherwise fail after the conversion ran.
-    check_rdp_tolerances(args.rdp_tolerance, factors, args.coarsen_mode)
+    _check_sparsity_attribute(args, fmt, factors)
 
-    _maybe_overwrite(args.output, args.overwrite)
+    # Before the ingest: the pyramid is the last step, so a tolerance list
+    # or a method that does not fit it would otherwise fail after the
+    # conversion ran.
+    check_rdp_tolerances(args.rdp_tolerance, factors, args.coarsen_mode)
+    args.method = _check_method(args, fmt, factors)
+
+    _maybe_overwrite(args.output, args.overwrite, resume=bool(getattr(args, "resume", False)))
 
     # The "length" pyramid strategy ranks by per-object length, which must be
     # computed at ingest; auto-enable it for streamlines so the pyramid step
@@ -522,19 +655,44 @@ def run(args) -> int:
     else:
         if args.chunk_shape is None:
             raise SystemExit(f"error: --chunk-shape X,Y,Z is required for format {fmt.name!r}")
+        if args.bin_shape is not None:
+            # Core requires whole bins per chunk; caught here because a
+            # mismatch otherwise surfaces mid-write as an out-of-grid chunk.
+            uneven = [
+                (c, b) for c, b in zip(args.chunk_shape, args.bin_shape)
+                if b <= 0 or abs(c / b - round(c / b)) > 1e-9
+            ]
+            if len(args.bin_shape) != len(args.chunk_shape) or uneven:
+                raise SystemExit(
+                    f"error: --chunk-shape must be a whole multiple of "
+                    f"--bin-shape on every axis; got chunk "
+                    f"{','.join(f'{c:g}' for c in args.chunk_shape)} and bin "
+                    f"{','.join(f'{b:g}' for b in args.bin_shape)}"
+                )
 
         ingest = load_ingest_func(fmt)
         kwargs: dict = {"bin_shape": args.bin_shape, "dtype": args.dtype}
         if fmt.geometry == "streamlines":  # trx / tck
             kwargs["compute_length"] = args.compute_length
             kwargs["compute_endpoints"] = args.compute_endpoints
-        if fmt.geometry == "points" and args.knn_distance_k is not None:  # ply / las / csv
+        if fmt.name == "lines":
+            kwargs["compute_length"] = args.compute_length
+        if args.knn_distance_k is not None:  # ply / las / csv / h5ad
             kwargs["knn_distance_k"] = args.knn_distance_k
+        if fmt.name == "csv":
+            # None: read the delimiter and the header off the first row.
+            kwargs["delimiter"] = args.delimiter
+        if fmt.name == "obj":
+            kwargs["auto_object_id"] = args.split_objects
+        if fmt.name == "stl":
+            kwargs["merge_vertices"] = not args.no_merge_vertices
+            if args.merge_tolerance is not None:
+                kwargs["merge_tolerance"] = args.merge_tolerance
         if fmt.name == "table":
             kwargs["position_columns"] = args.position_columns
             kwargs["key_column"] = args.key_column
             kwargs["columns"] = args.columns
-            kwargs["delimiter"] = args.delimiter
+            kwargs["delimiter"] = args.delimiter or ","
             kwargs["object_id_column"] = args.object_id_column
             if args.drop_na:
                 kwargs["drop_na"] = True

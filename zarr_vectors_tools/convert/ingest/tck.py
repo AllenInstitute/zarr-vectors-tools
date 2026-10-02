@@ -1,6 +1,6 @@
 """Ingest streamlines from MRtrix TCK files into zarr vectors.
 
-Requires ``nibabel``: ``pip install nibabel``.
+Requires ``nibabel``: ``pip install 'zarr-vectors-tools[trk]'``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.polylines import write_polylines
 from zarr_vectors.typing import BinShape, ChunkShape
 
-from zarr_vectors_tools.convert.ingest._segment_ids import stamp_segment_ids
+from zarr_vectors_tools.convert.ingest._axes import declare_axis_unit
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 
 
 def ingest_tck(
@@ -30,7 +31,8 @@ def ingest_tck(
     """Ingest a TCK file into a zarr vectors streamline store.
 
     TCK files store streamlines in scanner (RAS) millimetre coordinates
-    with no per-vertex attributes — only positions.
+    with no per-vertex attributes — only positions.  The store's axes
+    record the millimetres.
 
     Args:
         input_path: Path to the input .tck file.
@@ -56,7 +58,7 @@ def ingest_tck(
     except ImportError as e:
         raise IngestError(
             "nibabel is required for TCK ingest. "
-            "Install with: pip install nibabel"
+            "Install with: pip install 'zarr-vectors-tools[trk]'"
         ) from e
 
     input_path = Path(input_path)
@@ -125,7 +127,9 @@ def ingest_tck(
     )
     # The pyramid needs a per-fragment segment id, and core's writer does
     # not produce one -- without this the ingest succeeds and the coarsening
-    # step refuses the store it just wrote.  See ingest._segment_ids.
-    stamp_segment_ids(output_path)
+    # step refuses the store it just wrote.  Each streamline's vertex_count
+    # comes with it; see ingest._object_columns.
+    stamp_object_columns(output_path)
+    declare_axis_unit(output_path, "millimeter")
     result.update(enrichment_summary)
     return result

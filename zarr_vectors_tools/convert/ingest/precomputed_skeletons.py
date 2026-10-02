@@ -39,8 +39,14 @@ from zarr_vectors.building import rebuild_presence
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_level_object_columns
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
 from zarr_vectors_tools.multiresolution.skeleton_graph import split_components
+from zarr_vectors_tools.multiresolution.skeleton_layout import (
+    LAYOUT_LINKED,
+    LAYOUT_SPLIT,
+    mark_skeleton_layout,
+)
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
     coarsen_skeleton_level,
@@ -206,6 +212,82 @@ class InMemoryFragsReader:
 # Extract → per-zarr-chunk pieces
 # ===================================================================
 
+def _tree_parents(n: int, edges: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]:
+    """Each vertex's parent (-1 at a root) once the skeleton is rooted.
+
+    Edges are undirected; each connected component is rooted at its lowest
+    index, which is the true root for a skeleton listed root first (an SWC,
+    or anything written from one).  An edge closing a cycle is left out.
+
+    One breadth-first search for the whole forest, in compiled code: a hub
+    vertex ``n`` is joined to each component's root, so the search enters
+    every component at its root and nowhere else.  It runs ahead of a
+    second traversal in :func:`split_components`, and a Python search here
+    was as much interpreter work as that one.  The search costs a few
+    hundred microseconds to set up, so :func:`_segment_parents` makes one
+    call for a whole chunk rather than one per segment.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import breadth_first_order, connected_components
+
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    e = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+    e = e[e[:, 0] != e[:, 1]]
+    graph = coo_matrix(
+        (np.ones(len(e), dtype=np.int32), (e[:, 0], e[:, 1])), shape=(n, n),
+    ).tocsr()
+    _, labels = connected_components(graph, directed=False)
+    # A component's first vertex in index order is its lowest.
+    _, roots = np.unique(labels, return_index=True)
+    rows = np.concatenate([e[:, 0], np.full(len(roots), n, dtype=np.int64)])
+    cols = np.concatenate([e[:, 1], roots.astype(np.int64)])
+    forest = coo_matrix(
+        (np.ones(len(rows), dtype=np.int32), (rows, cols)), shape=(n + 1, n + 1),
+    ).tocsr()
+    _, predecessors = breadth_first_order(
+        forest, n, directed=False, return_predecessors=True,
+    )
+    parent = predecessors[:n].astype(np.int64)
+    parent[(parent < 0) | (parent == n)] = -1
+    return parent
+
+
+def _segment_parents(
+    chunk: dict[int, dict[str, npt.NDArray]],
+) -> dict[int, npt.NDArray[np.int64]]:
+    """:func:`_tree_parents` for every segment of a chunk, in one search.
+
+    The segments are laid end to end, each one's edges shifted by its first
+    vertex, which keeps every component's lowest index its lowest; the
+    parents come back in each segment's own numbering.
+    """
+    spans: list[tuple[int, int, int]] = []
+    blocks: list[npt.NDArray[np.int64]] = []
+    start = 0
+    for seg_id, piece in chunk.items():
+        n = len(piece["vertices"])
+        edges = np.asarray(
+            piece.get("edges", np.zeros((0, 2))), dtype=np.int64,
+        ).reshape(-1, 2)
+        if edges.size and (int(edges.min()) < 0 or int(edges.max()) >= n):
+            raise ValueError(
+                f"segment {seg_id} has an edge to a vertex outside its "
+                f"{n} vertices"
+            )
+        blocks.append(edges + start)
+        spans.append((seg_id, start, n))
+        start += n
+    parent = _tree_parents(
+        start, np.concatenate(blocks) if blocks else np.zeros((0, 2), np.int64),
+    )
+    out: dict[int, npt.NDArray[np.int64]] = {}
+    for seg_id, first, n in spans:
+        own = parent[first:first + n]
+        out[seg_id] = np.where(own >= 0, own - first, -1)
+    return out
+
+
 def pieces_from_chunk(
     chunk: dict[int, dict[str, npt.NDArray]],
     *,
@@ -220,20 +302,30 @@ def pieces_from_chunk(
     For each segment, edges that cross a zarr-chunk boundary are split out
     as **cross-chunk edges** (rather than dropped): each such edge's two
     endpoints get a global id and the edge is recorded so the level-0
-    writer can store it in ``cross_chunk_links``.  The coarsener later
-    uses those links to merge the object's pieces once both endpoints
-    land in the same coarser chunk.  Intra-chunk connectivity is split
-    into rooted components, one fragment per component.
+    writer can store it in ``cross_chunk_links``.  Intra-chunk
+    connectivity is split into rooted components, one fragment per
+    component.
+
+    Without ``fixed_cell`` this writes the linked layout
+    (:data:`~zarr_vectors_tools.multiresolution.skeleton_layout.LAYOUT_LINKED`):
+    every vertex once, and a cross-chunk edge whose record stands for its
+    child's parent.  So each segment is rooted as a whole first, each piece
+    is rooted at its vertex whose parent sits in another chunk, and each
+    cross edge is ``(child gid, parent gid)``.  A skeletonizer promises
+    neither a vertex order nor an edge orientation, and rooting each piece
+    at its lowest index instead gave a piece two parents wherever the two
+    disagreed.
 
     Returns ``(by_chunk, cross_edges, next_gid)`` where ``cross_edges``
-    is a list of ``(gid_a, gid_b)`` and each emitted piece carries an
-    ``"anchors"`` map ``{gid: local_vertex_index}`` for its endpoints.
+    is a list of ``(gid_child, gid_parent)`` and each emitted piece carries
+    an ``"anchors"`` map ``{gid: local_vertex_index}`` for its endpoints.
     """
     cs = np.asarray(chunk_shape_nm, dtype=np.float64)
     off = None if origin is None else np.asarray(origin, dtype=np.float64)
     out: dict[ChunkCoords, list[dict[str, Any]]] = defaultdict(list)
     cross: list[tuple[int, int]] = []
     gid = int(gid_start)
+    parents = _segment_parents(chunk) if fixed_cell is None else {}
     for seg_id, piece in chunk.items():
         verts = np.asarray(piece["vertices"], dtype=np.float32)
         n = len(verts)
@@ -263,13 +355,15 @@ def pieces_from_chunk(
             continue
 
         chunk_of = np.floor(verts / cs).astype(np.int64)
-        if len(edges) > 0:
-            same = np.all(chunk_of[edges[:, 0]] == chunk_of[edges[:, 1]], axis=1)
-            intra = edges[same]
-            crossing = edges[~same]
-        else:
-            intra = edges
-            crossing = np.zeros((0, 2), np.int64)
+        parent = parents[seg_id]
+        child = np.flatnonzero(parent >= 0)
+        tree = np.stack([child, parent[child]], axis=1)
+        same = np.all(chunk_of[tree[:, 0]] == chunk_of[tree[:, 1]], axis=1)
+        intra = tree[same]
+        crossing = tree[~same]
+        # Each piece's root: the segment's root, or the child end of the
+        # crossing edge into it.
+        tops = np.union1d(np.flatnonzero(parent < 0), crossing[:, 0])
 
         # Global ids for crossing endpoints (one per distinct vertex).
         gmap: dict[int, int] = {}
@@ -278,7 +372,9 @@ def pieces_from_chunk(
                 gmap[int(v)] = gid
                 gid += 1
 
-        comps = split_components(verts, intra, attrs, vertex_ids=np.arange(n))
+        comps = split_components(
+            verts, intra, attrs, vertex_ids=np.arange(n), roots=tops,
+        )
         for comp in comps:
             cpos = comp["positions"]
             if len(cpos) == 0:
@@ -497,6 +593,28 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
     }
 
 
+def stamp_level_vertex_count(level_group: Any) -> int:
+    """Record a level's vertex count in its metadata, and return it.
+
+    The per-chunk skeleton writer leaves the level's ``vertex_count`` at 0,
+    and a viewer budgets levels by it.  Summed from each chunk's fragment
+    index, which is kilobytes per chunk, not from the vertices.
+    """
+    from zarr_vectors.building import (
+        chunk_vertex_count,
+        list_chunk_keys,
+        update_level_metadata,
+    )
+    from zarr_vectors.constants import VERTICES
+
+    total = sum(
+        chunk_vertex_count(level_group, tuple(int(c) for c in cc))
+        for cc in list_chunk_keys(level_group, VERTICES)
+    )
+    update_level_metadata(level_group, vertex_count=int(total))
+    return int(total)
+
+
 def _match_coincident_links(boundary: list) -> list:
     """Coordinator: match the per-chunk boundary-vertex records into
     cross-chunk links.  Groups by ``(segment_id, coord)`` and, for each group
@@ -604,6 +722,13 @@ def run_ingest(
         attribute_dtypes=attribute_dtypes, backend=backend,
         coordinate_offset=coord_off,
     )
+    # Aligned, each .frag is one chunk and igneous's copy of each face vertex
+    # (face + half a voxel) is in both: the split layout, which exporters
+    # read by segment id.  Not aligned, pieces_from_chunk cuts each .frag on
+    # the zarr grid with [child, parent] records between distinct vertices:
+    # the linked layout.  Through this handle, which the ingest writes the
+    # root through from here on.
+    mark_skeleton_layout(root, LAYOUT_SPLIT if align else LAYOUT_LINKED)
     np_attr_dtypes = {n: np.dtype(attribute_dtypes[n]) for n in attribute_names}
     origin_voxel = np.rint(grid_origin / np.asarray(info.resolution_nm)).astype(np.int64)
     csv = np.asarray(info.chunk_size_voxels, dtype=np.int64)
@@ -734,6 +859,8 @@ def run_ingest(
         _t2 = _time.perf_counter()
         oid_of = build_object_index(lg, records, ndim=ndim)
         sk.finalize_skeleton_store(root)
+        stamp_level_vertex_count(lg)
+        stamp_level_object_columns(lg)
         _phase["l0_object_index"] = _time.perf_counter() - _t2
 
         summary: dict[str, Any] = {

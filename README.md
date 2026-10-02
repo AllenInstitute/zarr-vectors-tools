@@ -1,7 +1,7 @@
 > [!NOTE]
 > This package is under development and will change. It will also be migrated to another location once completed.
 
-<img src="assets/zarr-vectors.png" alt="zarr-vectors" width="60%" />
+<img src="assets/zarr-vectors-tools.png" alt="Zarr Vectors Tools" width="60%" />
 
 # zarr-vectors-tools
 

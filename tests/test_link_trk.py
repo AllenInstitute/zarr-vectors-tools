@@ -8,10 +8,9 @@ from pathlib import Path
 import numpy as np
 from nibabel.streamlines import Field, Tractogram
 from nibabel.streamlines.trk import TrkFile
+from zarr_vectors.types.polylines import read_polylines
 
 from zarr_vectors_tools.convert.ingest.linc_trk import ingest_linc_trk
-
-from zarr_vectors.types.polylines import read_polylines
 
 
 def _write_linc_trk(path: Path) -> None:
@@ -25,7 +24,9 @@ def _write_linc_trk(path: Path) -> None:
     ]
 
     label_ids = np.array([34, 34, 35, 35], dtype=np.int32)
-    label_ids_points = np.array([ [[34], [34]], [[34], [34]], [[35], [35]], [[35], [35]] ], dtype=np.int32)
+    label_ids_points = np.array(
+        [[[34], [34]], [[34], [34]], [[35], [35]], [[35], [35]]], dtype=np.int32,
+    )
 
     header = {
         Field.VOXEL_TO_RASMM: np.eye(4, dtype=np.float32),
@@ -49,7 +50,7 @@ def test_linc_trk_groups(tmp_path: Path) -> None:
 
     source = tmp_path / "gpihb.trk"
     _write_linc_trk(source)
-    
+
     lut = tmp_path / "labels.txt"
     lut.write_text(
         "# ID Name R G B A\n"
@@ -71,8 +72,8 @@ def test_linc_trk_groups(tmp_path: Path) -> None:
     )
 
     assert summary["group_count"] == 2
-    
+
     result = read_polylines(str(store), group_ids=[35])
-    
+
     assert result["object_ids"] == [2, 3]
     assert np.all(result["vertex_attributes"]["label_id"] == 35)

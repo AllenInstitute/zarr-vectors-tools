@@ -24,13 +24,16 @@ moment it changes.  See :mod:`zarr_vectors_tools.compose._carry`.
 into: incoming geometry is assigned to the target's existing cells, which
 is what keeps the write proportional to what is added rather than to what
 is already there.  Geometry that lands outside those cells is checked for
-up front, against the shape the arrays were *allocated* with rather than
+up front, against the grid the arrays were *allocated* with rather than
 the bounds they declare — the two can disagree, and it is the allocation
-a write is checked against.  ``on_out_of_bounds="expand"`` then grows the
+a write is checked against.  That grid need not start at coordinate 0:
+each array records the chunk coordinate of its first cell
+(``chunk_grid_origin``), so a store over negative coordinates is as
+mergeable as any other.  ``on_out_of_bounds="expand"`` then grows the
 grid upwards, which costs nothing because a chunk key is an absolute cell
 index and adding cells at the top leaves every existing key meaning what
-it meant.  Downwards is refused: that moves the origin, and moving the
-origin renumbers every chunk already written.
+it meant.  Downwards is refused: that moves the first cell, and every
+cell already written is stored relative to it.
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ import numpy.typing as npt
 from zarr_vectors.exceptions import IngestError, StoreError
 
 from zarr_vectors_tools.compose._carry import (
+    _fill_for_dtype,
     append_object_attributes,
     carry_headers,
     expand_grid,
@@ -100,8 +104,13 @@ def plan_merge(
         fits = None
         if exists and info.bounds is not None and grid_box is not None:
             fits = _fits(info.bounds, grid_box)
+            if not fits and not info.bounds_exact:
+                # Only a box around the data overhangs; the data may not.
+                # Finding out means reading it, which planning does not do.
+                fits = None
         entries.append({
             "label": info.label,
+            "name": source.name,
             "kind": info.kind,
             "objects": info.object_count,
             "vertices": info.vertex_count,
@@ -174,7 +183,8 @@ def merge_stores(
             invalidates.  See
             :func:`~zarr_vectors_tools.compose._carry.handle_pyramid`.
         pyramid_factors: Per-level ``(coarsen, sparsity)`` for a rebuild.
-            Inferred from the existing levels when omitted.
+            When omitted, each existing coarse level is rebuilt with the
+            parameters it records.
         groups: Carry each source's named object groups across.
         group_prefix: Namespace incoming group names — a single string
             applied to all, or ``{source_label: prefix}``.  Without it, a
@@ -187,8 +197,9 @@ def merge_stores(
             drops the offending objects and counts them;  ``"expand"``
             grows the grid upwards to cover them, which is safe because
             chunk keys are absolute and adding cells at the top renumbers
-            nothing.  Geometry needing *negative* cells is always refused
-            — moving the origin would renumber every chunk in the store.
+            nothing.  Geometry below the grid's first cell is always
+            refused — moving that cell would renumber every cell in the
+            store.
         max_objects: Objects per write batch.
         max_vertices: Vertices per write batch.
         progress: Print per-batch progress.
@@ -205,6 +216,22 @@ def merge_stores(
     opened = [open_source(s, **dict(source_options or {})) for s in sources]
     if not opened:
         raise IngestError("merge_stores needs at least one source")
+    # A merge moves objects.  A point cloud written without object ids has
+    # vertices but no objects, so it would merge as nothing and report
+    # success; refuse it before the target is touched.
+    objectless = [
+        s.info.label for s in opened
+        if not s.info.object_count and (s.info.vertex_count or 0) > 0
+    ]
+    if objectless:
+        for source in opened:
+            source.close()
+        raise IngestError(
+            f"{', '.join(objectless)}: has vertices but no objects, and a merge "
+            f"moves objects. Convert the points with object ids first (zvtools "
+            f"convert FILE STORE --format table --object-id-column NAME ...), "
+            f"then merge that store"
+        )
 
     try:
         dataset, created = _open_or_create_target(
@@ -264,6 +291,8 @@ def merge_stores(
         summary["provenance_recorded"] = record_provenance(dataset, {
             "operation": "merge",
             "sources": [entry["label"] for entry in summary["sources"]],
+            # What ``split --by provenance`` names each part after.
+            "names": [entry["name"] for entry in summary["sources"]],
             "id_offsets": [entry["id_offset"] for entry in summary["sources"]],
             "objects_added": summary["objects_added"],
         })
@@ -296,37 +325,51 @@ def _merge_one(
 ) -> dict[str, Any]:
     info = source.info
     base_count = int(len(level.objects))
-    target_bounds = dataset.bounds
     target_object_attrs = tuple(level.attribute_names("object"))
     target_vertex_attrs, skipped_attrs = _vertex_attribute_plan(
         level, info.vertex_attributes, base_count,
     )
     cell_shape = tuple(float(v) for v in level.scale)
 
-    expansion: dict[str, Any] = {}
-    if on_out_of_bounds == "expand" and info.bounds is not None:
-        expansion = expand_grid(
-            dataset, level, _cells_for(info.bounds[1], level.scale),
-        )
-
-    grid_box = _grid_box(*allocated_grid(level))
+    origin, shape, cell_size = allocated_grid(level)
+    extent = info.bounds
     if (
-        info.bounds is not None
+        extent is not None
+        and not info.bounds_exact
+        and on_out_of_bounds != "skip"
+        and shape
+        and not _fits(extent, _grid_box(origin, shape, cell_size))
+    ):
+        # Only a box around the data overhangs (a subset of a store, a
+        # rotation).  Measure the data before refusing or growing anything,
+        # so a refusal still comes before the first write and an expansion
+        # is sized to what is really there.
+        extent = _measure_extent(source, max_objects, max_vertices)
+
+    expansion: dict[str, Any] = {}
+    if on_out_of_bounds == "expand" and extent is not None:
+        expansion = expand_grid(
+            dataset, level, _cells_for(extent[1], cell_size),
+            lower=_first_cells(extent[0], cell_size),
+            extent=extent,
+        )
+        origin, shape, cell_size = allocated_grid(level)
+
+    grid_box = _grid_box(origin, shape, cell_size)
+    if (
+        extent is not None
         and grid_box is not None
-        and not _fits(info.bounds, grid_box)
+        and not _fits(extent, grid_box)
         and on_out_of_bounds == "raise"
     ):
         raise StoreError(
             f"{info.label} does not fit the target's grid.\n"
-            f"  source extent {_fmt(info.bounds)}\n"
+            f"  source extent {_fmt(extent)}\n"
             f"  grid covers   {_fmt(grid_box)}\n"
-            f"  target bounds {_fmt(target_bounds)}\n"
-            f"  overhang      {_overhang(info.bounds, grid_box)}\n"
-            "A merge writes onto the target's existing cells and cannot grow "
-            "them. Either transform the source into the target's frame (pass "
-            "a Source with transform=), rebuild the target over bounds that "
-            "cover both, or pass on_out_of_bounds='skip' to drop what does "
-            "not fit."
+            f"  target bounds {_fmt(_declared_bounds(dataset))}\n"
+            f"  overhang      {_overhang(extent, grid_box)}\n"
+            "A merge writes onto the target's existing cells. "
+            + _OUT_OF_BOUNDS_HELP + _EXPAND_HELP
         )
 
     remap: dict[int, int] = {}
@@ -335,56 +378,56 @@ def _merge_one(
     vertices = 0
     skipped = 0
     empty = 0
-
-    grid_shape, cell_size = allocated_grid(level)
+    written_lo: npt.NDArray[Any] | None = None
+    written_hi: npt.NDArray[Any] | None = None
+    vertex_specs: dict[str, tuple[np.dtype, tuple[int, ...]]] = {}
 
     for batch_no, batch in enumerate(
         source.iter_batches(max_objects=max_objects, max_vertices=max_vertices)
     ):
-        keep, offenders = _grid_mask(batch.parts, grid_shape, cell_size)
+        keep, offenders = _grid_mask(batch.parts, origin, shape, cell_size)
         if not keep.all():
             if on_out_of_bounds == "expand":
-                # Expansion grows the grid upward only -- the cell origin is
-                # fixed at coordinate 0 by ``floor(p / cell)`` -- so anything
-                # still outside cannot be accommodated.  Dropping it here
-                # would be "skip" behaviour under a flag that promised to
-                # make room.
-                negative = [o for o in offenders if any(c < 0 for c in o)]
+                # Expansion grows the grid upward only, so anything still
+                # outside lies below the grid's first cell (or the source's
+                # declared bounds understated it).  Dropping it here would be
+                # "skip" behaviour under a flag that promised to make room.
+                below = [
+                    o for o in offenders
+                    if any(c < f for c, f in zip(o, origin))
+                ]
                 why = (
-                    "negative cell coordinates, which no expansion can reach: "
-                    "the grid's origin is fixed at coordinate 0"
-                    if negative else
+                    "cells below the grid's first cell, which no expansion "
+                    "can add"
+                    if below else
                     "cells beyond the grid even after expansion"
                 )
                 raise StoreError(
                     f"{info.label}: {int((~keep).sum())} object(s) in batch "
                     f"{batch_no} land in {why}.\n"
                     f"  first offender lands in cell "
-                    f"{(negative or offenders)[0]}\n"
-                    f"  grid          {list(grid_shape)} cells of "
-                    f"{list(cell_size)}\n"
-                    f"  target bounds {_fmt(target_bounds)}\n"
-                    "Transform the source into the target's frame (pass a "
-                    "Source with transform=), rebuild the target over bounds "
-                    "that cover both, or pass on_out_of_bounds='skip' to drop "
-                    "what does not fit."
+                    f"{(below or offenders)[0]}\n"
+                    f"  grid          {_fmt_grid(origin, shape, cell_size)}\n"
+                    f"  target bounds {_fmt(_declared_bounds(dataset))}\n"
+                    + _OUT_OF_BOUNDS_HELP
                 )
             if on_out_of_bounds == "raise":
                 bad = int((~keep).sum())
                 raise StoreError(
                     f"{info.label}: {bad} object(s) in batch {batch_no} land "
                     f"outside the target's allocated grid.\n"
-                    f"  grid          {list(grid_shape)} cells of {list(cell_size)}\n"
-                    f"  covering      {_fmt(_grid_box(grid_shape, cell_size))}\n"
+                    f"  grid          {_fmt_grid(origin, shape, cell_size)}\n"
+                    f"  covering      {_fmt(_grid_box(origin, shape, cell_size))}\n"
                     f"  first offender lands in cell {offenders[0] if offenders else '?'}\n"
-                    f"  target bounds {_fmt(target_bounds)}\n"
-                    "Transform the source into the target's frame (pass a "
-                    "Source with transform=), rebuild the target over bounds "
-                    "that cover both, or pass on_out_of_bounds='skip'."
+                    f"  target bounds {_fmt(_declared_bounds(dataset))}\n"
+                    + _OUT_OF_BOUNDS_HELP + _EXPAND_HELP
                 )
             skipped += int((~keep).sum())
 
         _ensure_attribute_arrays(level, batch.vertex_attributes, target_vertex_attrs)
+        for name in target_vertex_attrs:
+            if name not in vertex_specs:
+                vertex_specs[name] = _vertex_attribute_spec(level, name)
         with dataset.editing() as plan:
             session = plan.session
             _preload_attributes(
@@ -410,7 +453,7 @@ def _merge_one(
                     vertices=part,
                     attrs=_vertex_attrs_for(
                         batch.vertex_attributes, start, cursor,
-                        length, target_vertex_attrs,
+                        length, target_vertex_attrs, vertex_specs,
                     ),
                 )
                 remap[int(batch.object_ids[i])] = int(ref.object_id)
@@ -427,6 +470,16 @@ def _merge_one(
             values = np.asarray(column)[written]
             if len(values):
                 object_columns.setdefault(name, []).append(values)
+        kept_parts = [p for p, w in zip(batch.parts, written) if w]
+        for name, values in _derived_columns(
+            info.kind, kept_parts, target_object_attrs, batch.object_attributes,
+        ).items():
+            object_columns.setdefault(name, []).append(values)
+        if kept_parts:
+            lo = np.min([np.min(p, axis=0) for p in kept_parts], axis=0)
+            hi = np.max([np.max(p, axis=0) for p in kept_parts], axis=0)
+            written_lo = lo if written_lo is None else np.minimum(written_lo, lo)
+            written_hi = hi if written_hi is None else np.maximum(written_hi, hi)
 
         if progress:
             print(
@@ -434,6 +487,9 @@ def _merge_one(
                 f"{vertices:,} vertices",
                 flush=True,
             )
+
+    if written_lo is not None and written_hi is not None:
+        _cover_in_declared_bounds(dataset, written_lo, written_hi)
 
     columns: dict[str, npt.NDArray[Any]] = {
         name: np.concatenate(chunks, axis=0) for name, chunks in object_columns.items()
@@ -459,9 +515,7 @@ def _merge_one(
                 remap=remap, prefix=group_prefix,
             )
 
-    headers_written = carry_headers(
-        dataset, info.headers, label=_slug(info.label),
-    )
+    headers_written = carry_headers(dataset, info.headers, label=source.name)
 
     totals["objects_added"] += added
     totals["vertices_added"] += vertices
@@ -469,6 +523,7 @@ def _merge_one(
 
     return {
         "label": info.label,
+        "name": source.name,
         "kind": info.kind,
         "id_offset": base_count,
         "objects_added": added,
@@ -481,6 +536,79 @@ def _merge_one(
         "groups": groups_written,
         "headers": headers_written,
     }
+
+
+# What to do about geometry outside the target's grid.  Named for both
+# audiences: the CLI flag and the keyword are the same option, and an error
+# that names only one sends the other reader looking for it.
+_OUT_OF_BOUNDS_HELP = (
+    "Move the source into the target's frame (--transform FILE, or a Source "
+    "built with transform=), rebuild the target over bounds that cover both, "
+    "or drop the objects that do not fit (--on-out-of-bounds skip / "
+    "on_out_of_bounds='skip')."
+)
+_EXPAND_HELP = (
+    " Geometry above the grid can instead be made room for "
+    "(--on-out-of-bounds expand / on_out_of_bounds='expand')."
+)
+
+
+def _measure_extent(
+    source: Source, max_objects: int, max_vertices: int,
+) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
+    """The extent of what ``source`` actually emits, by reading it once."""
+    lo: npt.NDArray[Any] | None = None
+    hi: npt.NDArray[Any] | None = None
+    for batch in source.iter_batches(max_objects=max_objects, max_vertices=max_vertices):
+        box = batch.bounds()
+        if box is None:
+            continue
+        lo = box[0] if lo is None else np.minimum(lo, box[0])
+        hi = box[1] if hi is None else np.maximum(hi, box[1])
+    if lo is None or hi is None:
+        return None
+    return tuple(float(v) for v in lo), tuple(float(v) for v in hi)
+
+
+# Per-object columns an ingester derives from the geometry on request
+# (``--compute-length``, ``--compute-endpoints``, a points table's vertex
+# count).  A source that lacks one would otherwise be filled with NaN, and
+# the coarseners read a NaN ``length`` as a dead object: every incoming
+# streamline left out of every coarser level, whatever the strategy.
+# ``length``, ``start`` and ``end`` are the path's, so only kinds that are
+# paths (a line is a two-vertex one) get them.
+_PATH_KINDS = frozenset({"streamline", "polyline", "line"})
+
+
+def _derived_columns(
+    kind: str,
+    parts: Sequence[npt.NDArray[Any]],
+    target_names: Sequence[str],
+    present: Mapping[str, Any],
+) -> dict[str, npt.NDArray[Any]]:
+    """Compute the derivable columns the target has and the source lacks."""
+    wanted = [n for n in target_names if n not in present]
+    if not wanted or not parts:
+        return {}
+    from zarr_vectors_tools.convert.ingest._polyline_enrichments import (
+        compute_endpoints,
+        compute_lengths,
+    )
+
+    polylines = [np.asarray(p, dtype=np.float64) for p in parts]
+    out: dict[str, npt.NDArray[Any]] = {}
+    if kind in _PATH_KINDS:
+        if "length" in wanted:
+            out["length"] = compute_lengths(polylines)
+        if "start" in wanted or "end" in wanted:
+            start, end = compute_endpoints(polylines)
+            if "start" in wanted:
+                out["start"] = start
+            if "end" in wanted:
+                out["end"] = end
+    if "vertex_count" in wanted:
+        out["vertex_count"] = np.asarray([len(p) for p in parts], dtype=np.int64)
+    return out
 
 
 def _vertex_attribute_plan(
@@ -625,27 +753,52 @@ def _preload_attributes(
         session._ensure_attrs_loaded(session._builder(0, cc), names)
 
 
+def _vertex_attribute_spec(level: Any, name: str) -> tuple[np.dtype, tuple[int, ...]]:
+    """The dtype and per-vertex shape of a vertex attribute on disk.
+
+    Read from the array's metadata, so it costs nothing per object.
+    """
+    try:
+        meta = level.store.read_array_meta(f"vertex_attributes/{name}") or {}
+    except Exception:  # noqa: BLE001 - an unreadable array gets the default
+        meta = {}
+    dtype = np.dtype(meta.get("dtype", "float32"))
+    row_shape = tuple(int(s) for s in (meta.get("row_shape") or ()))
+    return dtype, row_shape
+
+
 def _vertex_attrs_for(
     columns: Mapping[str, npt.NDArray[Any]],
     start: int,
     stop: int,
     length: int,
     required: Sequence[str],
+    specs: Mapping[str, tuple[np.dtype, tuple[int, ...]]] | None = None,
 ) -> dict[str, npt.NDArray[Any]] | None:
     """One object's slice of every vertex attribute the target carries.
 
-    Names the target has and the source lacks are filled with NaN rather
-    than omitted.  Omitting them would leave that attribute's fragment
-    list one short for every chunk the new object touches, and since a
-    fragment is addressed by *index* the mismatch does not raise — it
-    silently pairs each subsequent object's attribute values with the
-    wrong object's vertices.
+    Names the target has and the source lacks are filled rather than
+    omitted.  Omitting them would leave that attribute's fragment list one
+    short for every chunk the new object touches, and since a fragment is
+    addressed by *index* the mismatch does not raise — it silently pairs
+    each subsequent object's attribute values with the wrong object's
+    vertices.
+
+    The filler takes the target column's dtype and width from ``specs``:
+    NaN for floats, the type's minimum for signed and maximum for unsigned
+    integers, as for object attributes.  A float NaN cast into an integer
+    column came out as the type's minimum or as 0 depending on the type,
+    with a RuntimeWarning per object, and 0 reads as a real label.
     """
     out: dict[str, npt.NDArray[Any]] = {}
     for name in required:
         column = columns.get(name)
         if column is None:
-            out[name] = np.full(length, np.nan, dtype=np.float32)
+            dtype, row_shape = (specs or {}).get(name, (np.dtype(np.float32), ()))
+            out[name] = np.full(
+                (length, *row_shape), _fill_for_dtype(dtype, float("nan")),
+                dtype=dtype,
+            )
         else:
             out[name] = np.asarray(column)[start:stop]
     for name, column in columns.items():
@@ -687,8 +840,8 @@ def _open_or_create_target(
 
     if not create:
         raise StoreError(
-            f"{target} does not exist. Pass create=True to make it, sized from "
-            "the sources' combined extent."
+            f"{target} does not exist. Pass --create (create=True) to make it, "
+            "sized from the sources' combined extent."
         )
 
     union = bounds or _union_bounds(sources)
@@ -699,27 +852,64 @@ def _open_or_create_target(
         )
     size = cell_size or _default_cell_size(sources, union)
     kind = require_geometry_match(sources, None)
+    compression, subcells = _inherited_layout(sources)
     schema = Schema(
         ndim=len(union[0]),
         bounds=(tuple(union[0]), tuple(union[1])),
         kind=kind,
-        layout=Layout(cell_size=tuple(float(v) for v in size)),
+        layout=Layout(
+            cell_size=tuple(float(v) for v in size),
+            compression=compression,
+            subcells=subcells,
+        ),
     )
-    dataset = zv.create(str(target), schema=schema)
+    # Each array records the chunk coordinate of its first cell, so a grid
+    # created over these bounds covers them wherever they start; no cells
+    # need adding afterwards.
+    return zv.create(str(target), schema=schema), True
 
-    # A created store's grid is sized from the *extent* of its bounds,
-    # while a chunk key is ``floor(p / cell)`` — an index from the
-    # coordinate origin.  The two agree only when the lower corner is
-    # zero.  For bounds starting at, say, y=29 with 21-unit cells, the
-    # allocation is five cells and the top of the data indexes cell five,
-    # which is one past the end: the very first write fails with a
-    # chunk-coordinate error that names neither the axis nor the cause.
-    # Growing to cover the absolute indices closes the gap at creation.
-    expand_grid(
-        dataset, dataset.level(0),
-        _cells_for(union[1], tuple(float(v) for v in size)),
-    )
-    return dataset, True
+
+def _inherited_layout(sources: Sequence[Source]) -> tuple[str | None, int]:
+    """Codec and bins per cell for a created target.
+
+    Taken from the first source that is a store, so a split part is stored
+    like its parent.  Both matter beyond looks: the zarr-vectors
+    Neuroglancer viewer cannot read compressed chunk arrays, and a level's
+    coarsening is measured in bins, so a part whose bins differ from the
+    parent's rebuilds a different pyramid from the same factors.  Without a
+    store source the defaults are ``convert``'s: uncompressed, one bin per
+    cell.  (Core's own defaults are zstd and four bins per cell.)
+    """
+    for source in sources:
+        dataset = getattr(source, "dataset", None)
+        if dataset is None:
+            continue
+        compression: str | None = None
+        try:
+            codecs = dataset.level(0).store.zarr_group["vertices"].compressors
+            names = [type(c).__name__.lower() for c in codecs]
+            compression = next(
+                (n for n in ("zstd", "blosc") if any(n in c for c in names)), None,
+            )
+        except Exception:  # noqa: BLE001 - an unreadable codec is no reason to fail
+            pass
+        subcells = 1
+        try:
+            from zarr_vectors.building import read_root_metadata
+
+            meta = read_root_metadata(dataset.store)
+            ratios = {
+                round(float(c) / float(b), 6)
+                for c, b in zip(meta.chunk_shape, meta.effective_bin_shape)
+            }
+            if len(ratios) == 1:
+                ratio = ratios.pop()
+                if ratio >= 1 and float(ratio).is_integer():
+                    subcells = int(ratio)
+        except Exception:  # noqa: BLE001
+            pass
+        return compression, subcells
+    return None, 1
 
 
 def _union_bounds(
@@ -761,7 +951,7 @@ def _default_cell_size(
 
 
 def _cells_for(upper: Sequence[float], cell: Sequence[float]) -> tuple[int, ...]:
-    """How many cells per axis are needed to hold coordinates up to ``upper``.
+    """One past the highest chunk coordinate holding coordinates up to ``upper``.
 
     ``floor(u / c) + 1``, not ``ceil(u / c)``: a coordinate that lands
     exactly on a cell boundary belongs to the cell *above* it, so ceil is
@@ -773,21 +963,26 @@ def _cells_for(upper: Sequence[float], cell: Sequence[float]) -> tuple[int, ...]
     )
 
 
+def _first_cells(lower: Sequence[float], cell: Sequence[float]) -> tuple[int, ...]:
+    """The chunk coordinate holding ``lower``, per axis."""
+    return tuple(int(np.floor(float(v) / float(c))) for v, c in zip(lower, cell))
+
+
 def _grid_box(
-    shape: Sequence[int], cell: Sequence[float],
+    origin: Sequence[int], shape: Sequence[int], cell: Sequence[float],
 ) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
     """The physical region an allocated grid covers.
 
-    ``floor(p / cell)`` puts the grid's lower corner at the coordinate
-    origin, not at the store's declared minimum — so a store whose bounds
-    start above zero still has cells numbered from zero, and the region it
-    can hold runs ``0 .. shape * cell``.
+    A chunk key is ``floor(p / cell)``, an absolute cell index, and an
+    array's first cell is the chunk coordinate it records as its origin —
+    so the grid covers ``origin * cell .. (origin + shape) * cell``, which
+    starts below zero for a store over negative coordinates.
     """
     if not shape:
         return None
     return (
-        tuple(0.0 for _ in shape),
-        tuple(float(s) * float(c) for s, c in zip(shape, cell)),
+        tuple(float(o) * float(c) for o, c in zip(origin, cell)),
+        tuple(float(o + s) * float(c) for o, s, c in zip(origin, shape, cell)),
     )
 
 
@@ -795,45 +990,67 @@ def _fits(
     inner: tuple[Sequence[float], Sequence[float]],
     outer: tuple[Sequence[float], Sequence[float]],
 ) -> bool:
+    """Whether ``inner`` lies in the grid region ``outer``.
+
+    Strict at the top: a coordinate exactly on the region's upper edge
+    belongs to the cell above it, which the grid does not have.
+    """
     lo_i = np.asarray(inner[0], dtype=np.float64)
     hi_i = np.asarray(inner[1], dtype=np.float64)
     lo_o = np.asarray(outer[0], dtype=np.float64)
     hi_o = np.asarray(outer[1], dtype=np.float64)
-    return bool((lo_i >= lo_o).all() and (hi_i <= hi_o).all())
+    return bool((lo_i >= lo_o).all() and (hi_i < hi_o).all())
 
 
-def allocated_grid(level: Any) -> tuple[tuple[int, ...], tuple[float, ...]]:
-    """The cell grid a level's arrays were actually allocated with.
+def allocated_grid(
+    level: Any,
+) -> tuple[tuple[int, ...], tuple[int, ...], tuple[float, ...]]:
+    """``(origin, shape, cell)`` of the grid a level's arrays were allocated with.
 
-    Not the same thing as the declared bounds divided by the cell size,
+    ``origin`` is the chunk coordinate of the first cell, which each array
+    records (``chunk_grid_origin``: ``floor(min_corner / cell)`` of the
+    bounds it was created over, absent for zero).  Reading the grid as
+    starting at zero refused every store with data below coordinate 0 —
+    not even a copy of itself could be merged into it.
+
+    The shape is not the declared bounds divided by the cell size either,
     and the difference is not academic: a store created with bounds
-    ``0..10`` and 3-unit cells declares a ``4x4x4`` grid and
-    ``level_grid_layout`` agrees, while the ``vertices`` array on disk can
-    be ``4x3x4`` because the writer sized it from the extent of the data
-    it happened to be given.  A write to the missing cell then fails deep
-    inside the storage layer with a chunk-coordinate error that says
-    nothing about which object caused it.
-
-    The allocation is what a write is actually checked against, so it is
-    what this module checks against too.
+    ``0..10`` and 3-unit cells declares a ``4x4x4`` grid while the
+    ``vertices`` array on disk can be ``4x3x4``, because the writer sized it
+    from the extent of the data it happened to be given.  A write to the
+    missing cell then fails deep inside the storage layer with a
+    chunk-coordinate error that says nothing about which object caused it.
+    The allocation is what a write is checked against, so it is what this
+    module checks against too.
     """
     cell = tuple(float(v) for v in level.scale)
+    origin: tuple[int, ...] = ()
+    shape: tuple[int, ...] = ()
     try:
-        # The array's own shape, not ``read_array_meta`` -- that returns
-        # the array's *attributes* (nonempty_chunks, dtype, encoding) and
-        # has no shape key at all, so reading it here would silently fall
-        # through to the declared grid and defeat the whole check.
-        shape = tuple(int(s) for s in level.store.zarr_group["vertices"].shape)
+        # The array's own grid, not ``read_array_meta`` -- that returns the
+        # array's *attributes* (nonempty_chunks, dtype, encoding) and has no
+        # shape key at all, so reading it here would silently fall through
+        # to the declared grid and defeat the whole check.
+        found = level.store.chunk_grid_bounds("vertices")
     except Exception:  # noqa: BLE001 - nothing allocated yet
-        shape = ()
+        found = None
+    if found is not None:
+        raw_origin, raw_shape = found
+        shape = tuple(int(s) for s in raw_shape)
+        origin = (
+            tuple(int(o) for o in raw_origin) if raw_origin else (0,) * len(shape)
+        )
     if not shape:
         grid = level.grid
         shape = tuple(int(s) for s in getattr(grid, "shape", ()) or ())
-    return shape, cell
+        anchor = tuple(int(a) for a in getattr(grid, "anchor", ()) or ())
+        origin = anchor if len(anchor) == len(shape) else (0,) * len(shape)
+    return origin, shape, cell
 
 
 def _grid_mask(
     parts: Sequence[npt.NDArray[Any]],
+    origin: Sequence[int],
     shape: Sequence[int],
     cell: Sequence[float],
 ) -> tuple[npt.NDArray[np.bool_], list[tuple[int, ...]]]:
@@ -847,24 +1064,90 @@ def _grid_mask(
     The chunk arithmetic is ``floor(p / cell)``, which is what
     ``assign_chunks`` does and therefore what the writer will do.
     Re-deriving it any other way risks disagreeing by one cell at a
-    boundary, which is precisely where these failures happen.
+    boundary, which is precisely where these failures happen.  Offenders
+    are reported as those absolute chunk coordinates.
     """
     keep = np.ones(len(parts), dtype=bool)
     offenders: list[tuple[int, ...]] = []
     if not shape:
         return keep, offenders
-    extent = np.asarray(shape, dtype=np.int64)
+    first = np.asarray(origin, dtype=np.int64)
+    stop = first + np.asarray(shape, dtype=np.int64)
     size = np.asarray(cell, dtype=np.float64)
     for i, part in enumerate(parts):
         arr = np.asarray(part, dtype=np.float64)
         if arr.size == 0:
             continue
         coords = np.floor(arr / size).astype(np.int64)
-        bad = (coords < 0).any(axis=1) | (coords >= extent).any(axis=1)
+        bad = (coords < first).any(axis=1) | (coords >= stop).any(axis=1)
         if bad.any():
             keep[i] = False
             offenders.append(tuple(int(c) for c in coords[bad][0]))
     return keep, offenders
+
+
+def _fmt_grid(
+    origin: Sequence[int], shape: Sequence[int], cell: Sequence[float],
+) -> str:
+    return (
+        f"{list(shape)} cells of {list(cell)}, first cell {list(origin)}"
+    )
+
+
+def _declared_bounds(
+    dataset: Any,
+) -> tuple[tuple[float, ...], tuple[float, ...]] | None:
+    """The target's declared bounds, read fresh from its root metadata.
+
+    Not ``dataset.bounds``, which is read once per handle: a merge of two
+    sources would otherwise grow the bounds for the first and then, for the
+    second, overwrite them from the stale copy.
+    """
+    from zarr_vectors.building import read_root_metadata
+
+    try:
+        bounds = read_root_metadata(dataset.store).bounds
+    except Exception:  # noqa: BLE001
+        bounds = None
+    if not bounds:
+        return None
+    return (
+        tuple(float(v) for v in bounds[0]),
+        tuple(float(v) for v in bounds[1]),
+    )
+
+
+def _cover_in_declared_bounds(
+    dataset: Any, lo: npt.NDArray[Any], hi: npt.NDArray[Any],
+) -> None:
+    """Widen the target's declared bounds to cover what was just written.
+
+    A merge may write anywhere in the allocated grid, which reaches past
+    the declared bounds to the edges of the outer cells; bounds left as
+    they were would no longer contain the data.  Never moves the grid:
+    what was written lies in allocated cells, so the bounds it implies
+    start in the same first cell.
+    """
+    from zarr_vectors.building import update_root_metadata
+
+    current = _declared_bounds(dataset)
+    new_lo = np.asarray(lo, dtype=np.float64)
+    new_hi = np.asarray(hi, dtype=np.float64)
+    if current is not None:
+        new_lo = np.minimum(new_lo, np.asarray(current[0], dtype=np.float64))
+        new_hi = np.maximum(new_hi, np.asarray(current[1], dtype=np.float64))
+        if (
+            np.array_equal(new_lo, np.asarray(current[0], dtype=np.float64))
+            and np.array_equal(new_hi, np.asarray(current[1], dtype=np.float64))
+        ):
+            return
+    try:
+        update_root_metadata(
+            dataset.store,
+            bounds=[[float(v) for v in new_lo], [float(v) for v in new_hi]],
+        )
+    except Exception:  # noqa: BLE001 - the data is written; bounds are advisory
+        pass
 
 
 def _overhang(
@@ -880,7 +1163,9 @@ def _overhang(
     return f"below min by {np.round(below, 3).tolist()}, above max by {np.round(above, 3).tolist()}"
 
 
-def _fmt(box: tuple[Sequence[float], Sequence[float]]) -> str:
+def _fmt(box: tuple[Sequence[float], Sequence[float]] | None) -> str:
+    if box is None:
+        return "none declared"
     lo = np.round(np.asarray(box[0], dtype=np.float64), 3).tolist()
     hi = np.round(np.asarray(box[1], dtype=np.float64), 3).tolist()
     return f"{lo} -> {hi}"
@@ -892,11 +1177,6 @@ def _prefix_for(spec: str | Mapping[str, str] | None, source: Source) -> str:
     if isinstance(spec, str):
         return spec
     return str(spec.get(source.info.label, ""))
-
-
-def _slug(label: str) -> str:
-    keep = [c if (c.isalnum() or c in "-_.") else "-" for c in str(label)]
-    return "".join(keep).strip("-")[:48] or "source"
 
 
 def _refresh_level_metadata(dataset: Any, level: Any, fallback: int) -> int:

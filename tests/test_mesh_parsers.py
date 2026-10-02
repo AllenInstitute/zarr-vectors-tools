@@ -221,6 +221,10 @@ def _capture_ingest(monkeypatch: pytest.MonkeyPatch, module: Any, call: Any) -> 
 
     monkeypatch.setattr(module, "write_mesh", fake_write_mesh)
     monkeypatch.setattr(registry_module, "HeaderRegistry", FakeRegistry)
+    # Nothing is written, so there is no store to stamp attribute widths on.
+    if hasattr(module, "record_vertex_attribute_widths"):
+        monkeypatch.setattr(module, "record_vertex_attribute_widths", lambda *a, **k: None)
+    monkeypatch.setattr(module, "stamp_object_columns", lambda *a, **k: None)
     call()
     return captured
 

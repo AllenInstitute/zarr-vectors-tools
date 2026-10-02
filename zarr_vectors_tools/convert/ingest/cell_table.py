@@ -14,7 +14,8 @@ ways that matter for staged imports:
   rather than by row position. Identifiers stay usable even when they do
   not fit a numeric column — the atlas's are 39-digit values.
 - **Mixed column types.** It reads through pandas, so string and
-  categorical metadata columns come through as codes plus labels, where
+  categorical metadata columns come through as dictionary-encoded codes
+  (the array carries its labels, so a viewer shows them), where
   ``csv_points``' ``numpy.loadtxt`` path requires everything be numeric.
 - **A header.** Column labels and categories are recorded so
   :func:`~zarr_vectors_tools.convert.export.h5ad.export_h5ad` can reconstitute the
@@ -35,7 +36,14 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
 
-from zarr_vectors_tools.convert.ingest._tabular import encode_column, sanitise_name
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+from zarr_vectors_tools.convert.ingest._tabular import (
+    dictionary_meta,
+    encode_column,
+    is_ordered,
+    mark_dictionary_encoded,
+    sanitise_name,
+)
 from zarr_vectors_tools.convert.ingest.attach import (
     DEFAULT_KEY_ATTRIBUTE,
     attach_attributes,
@@ -48,21 +56,25 @@ from zarr_vectors_tools.convert.ingest.attach import (
 DEFAULT_MAX_INDEX = 200_000
 
 
-def _read_table(path: Path, delimiter: str, columns: list[str] | None):
+def _read_table(path: Path, delimiter: str | None, columns: list[str] | None):
     """Read a delimited table with pandas, keeping only what is needed."""
     import pandas as pd
 
+    from zarr_vectors_tools.convert.ingest.csv_points import is_whitespace_delimiter
+
+    # "whitespace" (or a space) is runs of spaces and tabs, as for csv input.
+    sep = r"\s+" if is_whitespace_delimiter(delimiter) else (delimiter or ",")
     try:
         return pd.read_csv(
             path,
-            sep=delimiter,
+            sep=sep,
             usecols=columns,
             low_memory=False,
         )
     except ValueError as e:
         # usecols raises when a name is absent; re-read the header so the
         # error can name what was actually available.
-        available = list(pd.read_csv(path, sep=delimiter, nrows=0).columns)
+        available = list(pd.read_csv(path, sep=sep, nrows=0).columns)
         raise IngestError(
             f"failed to read '{path.name}': {e}. Available columns: {available}"
         ) from e
@@ -103,8 +115,12 @@ def ingest_table(
             key; pass ``[]`` for none.
         bin_shape: Optional intra-chunk sub-binning.
         dtype: Dtype for position data.
-        delimiter: Column delimiter.
+        delimiter: Column delimiter; ``"whitespace"`` splits on runs of
+            spaces and tabs.
         object_id_column: Column grouping rows into Zarr Vectors objects.
+            Each object's ``vertex_count`` and each fragment's
+            ``segment_id`` are written with them (see
+            :mod:`._object_columns`).
         drop_na: Drop rows whose coordinates contain NaN. On by default —
             coordinate tables routinely carry unregistered rows, and NaN
             coordinates cannot be assigned to a chunk.
@@ -179,6 +195,7 @@ def ingest_table(
     names_kept: list[str] = []
     attrs_kept: list[str] = []
     categories: dict[str, list[str]] = {}
+    dictionary: dict[str, dict] = {}
     dtypes: dict[str, str] = {}
 
     for column in selected:
@@ -190,6 +207,9 @@ def ingest_table(
         dtypes[str(column)] = str(frame[column].dtype)
         if levels is not None:
             categories[str(column)] = levels
+            dictionary[attr_name] = dictionary_meta(
+                levels, ordered=is_ordered(frame[column]),
+            )
 
     identifiers: np.ndarray | None = None
     if key_column:
@@ -226,6 +246,9 @@ def ingest_table(
         write_kwargs["object_ids"] = object_ids
 
     result = write_points(str(output_path), positions, **write_kwargs)
+    if object_ids is not None:
+        stamp_object_columns(output_path)
+    mark_dictionary_encoded(output_path, 0, dictionary)
 
     inline_index = bool(
         preserve_index and identifiers is not None and len(positions) <= max_index
@@ -250,6 +273,7 @@ def ingest_table(
             ),
             object_id_column=object_id_column,
             object_id_categories=object_id_categories,
+            position_names=[str(c) for c in position_columns],
         )
         HeaderRegistry(str(output_path)).add("h5ad", header)
     except Exception:
@@ -341,6 +365,7 @@ def attach_table(
     used_names: set[str] = set()
     obs_map: dict[str, str] = {}
     categories: dict[str, list[str]] = {}
+    dictionary: dict[str, dict] = {}
     dtypes: dict[str, str] = {}
 
     for column in selected:
@@ -351,6 +376,9 @@ def attach_table(
         dtypes[str(column)] = str(frame[column].dtype)
         if levels is not None:
             categories[str(column)] = levels
+            dictionary[attr_name] = dictionary_meta(
+                levels, ordered=is_ordered(frame[column]),
+            )
 
     result = attach_attributes(
         store_path,
@@ -365,6 +393,7 @@ def attach_table(
         progress=progress,
     )
 
+    mark_dictionary_encoded(store_path, level, dictionary)
     register_attached(
         store_path, obs_names=obs_map, categories=categories, dtypes=dtypes
     )

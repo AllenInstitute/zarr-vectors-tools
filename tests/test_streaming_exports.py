@@ -60,7 +60,7 @@ def test_csv_rows_are_the_whole_level_read(store: Path, tmp_path: Path) -> None:
     out = tmp_path / "p.csv"
     export_csv(str(store), str(out), attribute_names=["rgb"], vertex_budget=100)
     lines = out.read_text().splitlines()
-    assert lines[0] == "dim0,dim1,dim2,rgb_0,rgb_1,rgb_2"
+    assert lines[0] == "x,y,z,rgb_0,rgb_1,rgb_2"
     rows = np.array([[float(v) for v in line.split(",")] for line in lines[1:]])
     expected = read_points(str(store), attribute_names=["rgb"])
     np.testing.assert_allclose(rows[:, :3], expected["positions"], atol=1e-5)

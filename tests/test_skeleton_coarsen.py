@@ -318,8 +318,10 @@ def test_pyramid_parallel_executor_matches_serial(tmp_path):
     """A parallel (multi-process) executor must produce a byte-identical store
     to the serial default — the coordinator plans deterministically and each
     worker writes disjoint chunk files."""
-    a = str(tmp_path / "serial.zv")
-    b = str(tmp_path / "parallel.zv")
+    # Same store name in separate directories: core names the root OME node
+    # after the store, so differently named stores can never be identical.
+    a = str(tmp_path / "serial" / "store.zv")
+    b = str(tmp_path / "parallel" / "store.zv")
     _build_random_skeleton_store(a, n_seg=40, seed=11)
     _build_random_skeleton_store(b, n_seg=40, seed=11)
     args = dict(strides=[2, 2], chunk_scale_factors=[2, 2],

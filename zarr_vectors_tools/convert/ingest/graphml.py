@@ -1,6 +1,6 @@
 """Ingest graphs from GraphML files into zarr vectors.
 
-Requires ``networkx``: ``pip install networkx``.
+Requires ``networkx``: ``pip install 'zarr-vectors-tools[graph]'``.
 Node positions must be stored as node attributes (e.g. ``x``, ``y``, ``z``).
 """
 
@@ -13,6 +13,8 @@ import numpy as np
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.typing import BinShape, ChunkShape
+
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 
 
 def ingest_graphml(
@@ -56,7 +58,7 @@ def ingest_graphml(
     except ImportError as e:
         raise IngestError(
             "networkx is required for GraphML ingest. "
-            "Install with: pip install networkx"
+            "Install with: pip install 'zarr-vectors-tools[graph]'"
         ) from e
 
     input_path = Path(input_path)
@@ -147,6 +149,7 @@ def ingest_graphml(
         link_attributes=edge_attributes if edge_attributes else None,
         dtype=dtype,
     )
+    stamp_object_columns(output_path)
 
     if compute_summary:
         try:

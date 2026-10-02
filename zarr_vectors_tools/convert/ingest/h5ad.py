@@ -9,7 +9,9 @@ That embedding becomes the Zarr Vectors point cloud: one point per cell.
 Everything else rides along as per-vertex attributes:
 
 - ``obs`` columns.  Numeric columns are stored as-is; categorical/string
-  columns are stored as integer codes with their labels recorded in the
+  columns are stored as integer codes, dictionary-encoded (the array
+  carries its labels, which is what lets a viewer show them), with the
+  labels also recorded in the
   :class:`~zarr_vectors_tools.headers.formats.H5ADHeader` so export can
   rebuild the ``pandas.Categorical``.
 - Selected genes.  Expression is a wide matrix (often 20k+ columns) and a
@@ -37,7 +39,14 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.points import write_points
 from zarr_vectors.typing import BinShape, ChunkShape
 
-from zarr_vectors_tools.convert.ingest._tabular import encode_column, sanitise_name
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+from zarr_vectors_tools.convert.ingest._tabular import (
+    dictionary_meta,
+    encode_column,
+    is_ordered,
+    mark_dictionary_encoded,
+    sanitise_name,
+)
 from zarr_vectors_tools.convert.ingest.attach import (
     DEFAULT_KEY_ATTRIBUTE,
     attach_attributes,
@@ -110,7 +119,7 @@ def ingest_h5ad(
     preserve_obs_index: bool = True,
     max_obs_index: int = DEFAULT_MAX_OBS_INDEX,
     knn_distance_k: int | None = None,
-    per_object_vertex_count: bool = False,
+    per_object_vertex_count: bool | None = None,
 ) -> dict[str, Any]:
     """Ingest an AnnData ``.h5ad`` file into a Zarr Vectors point cloud store.
 
@@ -155,8 +164,11 @@ def ingest_h5ad(
             keep store metadata small. Reported as ``obs_index_stored``.
         knn_distance_k: If an int, store each cell's mean distance to its
             k nearest neighbours as ``knn_distance``. Requires ``scipy``.
-        per_object_vertex_count: With ``object_id_column``, also store
-            per-object cell counts as ``object_attributes["vertex_count"]``.
+        per_object_vertex_count: Store per-object cell counts as
+            ``object_attributes["vertex_count"]``.  ``None`` (default):
+            whenever ``object_id_column`` is set; ``True`` requires it.
+            With objects, each fragment's ``segment_id`` is written too
+            (see :mod:`._object_columns`).
 
     Returns:
         Summary dict from :func:`~zarr_vectors.types.points.write_points`,
@@ -215,6 +227,12 @@ def ingest_h5ad(
 
     positions = coords[:, used_columns].astype(np.dtype(dtype))
     ndim = positions.shape[1]
+    # An obsm entry may be a DataFrame, whose column names are the axes'.
+    frame_columns = getattr(adata.obsm[key], "columns", None)
+    position_names = (
+        None if frame_columns is None
+        else [str(frame_columns[c]) for c in used_columns]
+    )
 
     if len(tuple(chunk_shape)) != ndim:
         raise IngestError(
@@ -228,6 +246,7 @@ def ingest_h5ad(
     obs_names_kept: list[str] = []
     obs_attrs_kept: list[str] = []
     categories: dict[str, list[str]] = {}
+    dictionary: dict[str, dict] = {}
     source_dtypes: dict[str, str] = {}
 
     if obs_columns is None:
@@ -256,6 +275,9 @@ def ingest_h5ad(
         source_dtypes[column] = str(adata.obs[column].dtype)
         if cats is not None:
             categories[column] = cats
+            dictionary[attr_name] = dictionary_meta(
+                cats, ordered=is_ordered(adata.obs[column]),
+            )
 
     gene_names_kept: list[str] = []
     gene_attrs_kept: list[str] = []
@@ -340,18 +362,10 @@ def ingest_h5ad(
 
         attributes["knn_distance"] = compute_knn_distance(positions, knn_distance_k)
 
-    object_attributes: dict[str, np.ndarray] | None = None
-    if per_object_vertex_count:
-        if object_ids is None:
-            raise IngestError(
-                "per_object_vertex_count requires object_id_column to be set."
-            )
-        from zarr_vectors_tools.convert.ingest._point_enrichments import (
-            compute_per_object_vertex_count,
+    if per_object_vertex_count and object_ids is None:
+        raise IngestError(
+            "per_object_vertex_count requires object_id_column to be set."
         )
-
-        _, counts = compute_per_object_vertex_count(object_ids)
-        object_attributes = {"vertex_count": counts}
 
     # ---- write -----------------------------------------------------------
     write_kwargs: dict[str, Any] = {
@@ -362,10 +376,13 @@ def ingest_h5ad(
     }
     if object_ids is not None:
         write_kwargs["object_ids"] = object_ids
-    if object_attributes is not None:
-        write_kwargs["object_attributes"] = object_attributes
 
     result = write_points(str(output_path), positions, **write_kwargs)
+    if object_ids is not None:
+        stamp_object_columns(
+            output_path, vertex_count=per_object_vertex_count is not False,
+        )
+    mark_dictionary_encoded(output_path, 0, dictionary)
 
     # ---- header ----------------------------------------------------------
     inline_index = preserve_obs_index and n_obs <= max_obs_index
@@ -390,6 +407,7 @@ def ingest_h5ad(
             obs_index=([str(i) for i in adata.obs_names] if inline_index else None),
             object_id_column=object_id_column,
             object_id_categories=object_id_categories,
+            position_names=position_names,
         )
         HeaderRegistry(str(output_path)).add("h5ad", header)
     except Exception:
@@ -550,6 +568,7 @@ def attach_h5ad(
     gene_map: dict[str, str] = {}
     obs_map: dict[str, str] = {}
     categories: dict[str, list[str]] = {}
+    dictionary: dict[str, dict] = {}
     dtypes: dict[str, str] = {}
 
     with h5py.File(str(h5ad_path), "r") as handle:
@@ -588,6 +607,9 @@ def attach_h5ad(
             dtypes[column] = str(series.dtype)
             if levels is not None:
                 categories[column] = levels
+                dictionary[attr_name] = dictionary_meta(
+                    levels, ordered=is_ordered(series),
+                )
 
         if genes:
             var = _read_elem(handle["var"])
@@ -638,6 +660,7 @@ def attach_h5ad(
         progress=progress,
     )
 
+    mark_dictionary_encoded(store_path, level, dictionary)
     register_attached(
         store_path,
         obs_names=obs_map,

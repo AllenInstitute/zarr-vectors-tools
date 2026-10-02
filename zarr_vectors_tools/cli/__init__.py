@@ -31,11 +31,13 @@ from . import pyramid as _pyramid
 from ._args import (
     EXPORT_REGISTRY,
     FORMAT_REGISTRY,
+    parse_delimiter,
     parse_float_list,
     parse_int_list,
     parse_num_chunks,
     parse_shape,
     parse_str_list,
+    pyramid_methods,
 )
 
 #: What ``convert --format`` accepts.  The union of both directions, because
@@ -45,9 +47,11 @@ from ._args import (
 _CONVERT_FORMATS = tuple(sorted(set(FORMAT_REGISTRY) | set(EXPORT_REGISTRY)))
 
 _SPARSITY_STRATEGIES = (
-    "random", "length", "spatial_coverage", "attribute", "point_thinning",
-    "group",
+    "random", "length", "spatial_coverage", "point_thinning", "group",
 )
+#: ``attribute`` needs ``--sparsity-attribute`` to name its column, which only
+#: the pyramid flags carry.
+_PYRAMID_SPARSITY_STRATEGIES = (*_SPARSITY_STRATEGIES, "attribute")
 
 
 def _pkg_version() -> str:
@@ -63,20 +67,49 @@ def _add_pyramid_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("pyramid (coarser levels)")
     g.add_argument(
         "--coarsen", type=parse_float_list, default=None, metavar="C1,C2,...",
-        help="per-level vertex coarsen factor / decimation stride",
+        help="one entry per coarser level, each relative to the level "
+             "below: points/graphs/meshes multiply the bin edge, skeletons "
+             "and --coarsen-mode decimate take a vertex stride, streamlines "
+             "in rdp mode derive their tolerance from it (see "
+             "--rdp-tolerance). Values must be >= 1; default 1 at each "
+             "level when only --sparsity is given",
     )
     g.add_argument(
         "--sparsity", type=parse_float_list, default=None, metavar="S1,S2,...",
-        help="per-level object-drop divisor (1=keep all, 2=half, 8=1/8, ...)",
+        help="one entry per coarser level: divide the objects kept at the "
+             "level below by this (1 = keep all, 2 = half). Compounds: "
+             "2,2,2 keeps 1/2, 1/4, 1/8 of level 0. Default 1 at each "
+             "level when only --coarsen is given",
     )
     g.add_argument(
         "--chunk-scale", type=parse_int_list, dest="chunk_scale", default=None,
-        metavar="K1,K2,...", help="per-level chunk-size multiplier",
+        metavar="K1,K2,...",
+        help="one entry per coarser level: multiply the chunk edge of the "
+             "level below by this. Compounds: 2,2,2 gives 2x, 4x, 8x the "
+             "level-0 chunk",
     )
     g.add_argument(
         "--sparsity-strategy", dest="sparsity_strategy",
-        choices=_SPARSITY_STRATEGIES, default="random",
-        help="which objects survive sparsification (default: random)",
+        choices=_PYRAMID_SPARSITY_STRATEGIES, default="random",
+        help="which objects survive sparsification (default: random); "
+             "'attribute' keeps the highest values of --sparsity-attribute",
+    )
+    g.add_argument(
+        "--sparsity-attribute", dest="sparsity_attribute", default=None,
+        metavar="NAME",
+        help="with --sparsity-strategy attribute: the per-object attribute "
+             "(object_attributes/NAME on level 0) to rank objects by",
+    )
+    g.add_argument(
+        "--method", dest="method", choices=pyramid_methods(), default="auto",
+        help="how coarser levels are built (default auto: chosen from the "
+             "store's geometry). Meshes: mesh_decimate collapses edges and "
+             "keeps a closed surface closed (each --coarsen entry is the "
+             "factor to shrink the level's data by; --sparsity must be 1), "
+             "mesh clusters vertices (the auto choice, and the one that drops "
+             "objects). Points and streamlines: per_fragment thins each "
+             "fragment in place. A method that does not fit the store's "
+             "geometry is refused",
     )
     g.add_argument(
         "--coarsen-mode", dest="coarsen_mode", choices=("rdp", "decimate"),
@@ -147,7 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument(
         "--chunk-shape", type=parse_shape, dest="chunk_shape", default=None,
-        metavar="X,Y,Z", help="level-0 spatial chunk size (required for non-trk formats)",
+        metavar="X,Y,Z",
+        help="level-0 chunk edge per axis, in the input's coordinate units "
+             "(required for every format except trk, which uses --num-chunks)",
     )
     c.add_argument(
         "--num-chunks", type=parse_num_chunks, dest="num_chunks", default=None,
@@ -155,7 +190,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     c.add_argument(
         "--bin-shape", type=parse_shape, dest="bin_shape", default=None,
-        metavar="X,Y,Z", help="optional intra-chunk sub-binning",
+        metavar="X,Y,Z",
+        help="bin edge inside a chunk (must divide the chunk shape; default: "
+             "the chunk shape). Points, graphs and streamlines coarsen in "
+             "multiples of it, so set it near the point spacing",
     )
     c.add_argument("--dtype", default="float32", help="stored position dtype (default: float32)")
     c.add_argument("--overwrite", action="store_true",
@@ -163,9 +201,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_pyramid_args(c)
     c.add_argument("--compressor", choices=("none", "zstd", "blosc"),
                    default="none",
-                   help="codec for per-chunk arrays (default: none = raw). "
-                        "zstd/blosc roughly halve streamline stores (~2.4x on "
-                        "HCP tracts) at the cost of a slower write path")
+                   help="trk only: codec for per-chunk arrays (default: none = raw). "
+                        "zstd/blosc make streamline stores ~2.4x smaller, but "
+                        "the zarr-vectors Neuroglancer viewer cannot read "
+                        "compressed chunk arrays: keep stores meant for "
+                        "viewing uncompressed")
     c.add_argument("--shard", type=parse_num_chunks, dest="shard", default=None,
                    metavar="N|X,Y,Z",
                    help="after conversion, pack per-chunk cells into shards of N "
@@ -205,7 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="trk: generate a per-object (per-streamline) attribute "
                         "for color-by-object testing (repeatable). Choices: "
                         "length, endpoints, orientation (start->end unit vector, "
-                        "3ch DEC), tortuosity, vertex_count")
+                        "3ch DEC), tortuosity, vertex_count (written for every "
+                        "store with objects anyway)")
     c.add_argument("--vertex-attr", action="append", dest="vertex_attrs",
                    default=None, metavar="NAME",
                    choices=("arc_length", "x", "y", "z", "random",
@@ -267,8 +308,27 @@ def build_parser() -> argparse.ArgumentParser:
                    metavar="NAME",
                    help="table: metadata column to store as a vertex attribute "
                         "(repeatable; default: every non-position, non-key column)")
-    t.add_argument("--delimiter", default=",",
-                   help="table: column delimiter (default: ,), and CSV export")
+    t.add_argument("--delimiter", type=parse_delimiter, default=None,
+                   help="csv/table input, and CSV export: column delimiter. "
+                        "'whitespace' (or ' ') is runs of spaces and tabs, "
+                        "'tab' a tab. Default: csv input reads it from the "
+                        "first row (a comma if it has one, else whitespace), "
+                        "table input uses a comma, export a comma (a space "
+                        "for .xyz)")
+
+    m = c.add_argument_group("meshes (obj, stl)")
+    m.add_argument("--split-objects", action="store_true", dest="split_objects",
+                   help="obj: one object per 'o' or 'g' group, named after it "
+                        "(default: the whole file is one mesh)")
+    m.add_argument("--no-merge-vertices", action="store_true",
+                   dest="no_merge_vertices",
+                   help="stl: keep each triangle's three vertices separate "
+                        "instead of welding the copies STL repeats per face")
+    m.add_argument("--merge-tolerance", type=float, dest="merge_tolerance",
+                   default=None, metavar="DIST",
+                   help="stl: weld vertices that round to the same point of "
+                        "a grid this fine, in the file's units (default: "
+                        "1e-6; 0 welds exact copies only)")
 
     sf = c.add_argument_group("cortical surfaces (gifti, freesurfer)")
     sf.add_argument(
@@ -372,9 +432,9 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument(
         "--attribute", action="append", dest="export_attributes",
         default=None, metavar="NAME",
-        help="per-vertex attributes to include (repeatable). csv/ply/h5ad "
-             "write none by default; trk/trx write every numeric one unless "
-             "this names them",
+        help="per-vertex attributes to include (repeatable). csv/ply write "
+             "none by default; h5ad, trk and trx write every one they can "
+             "unless this names them",
     )
     e.add_argument(
         "--object-attribute", action="append", dest="export_object_attributes",
@@ -401,11 +461,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("store", help="existing zarr-vectors store path")
     _add_pyramid_args(p)
+    p.add_argument("--replace", action="store_true",
+                   help="remove the store's existing coarse levels first "
+                        "(without it, a store that has any is refused)")
     p.add_argument("--compressor", choices=("none", "zstd", "blosc"),
                    default="none",
                    help="codec for the coarser levels' per-chunk arrays "
                         "(default: none = raw). Match the value level 0 was "
-                        "written with to keep the store uniform")
+                        "written with; the zarr-vectors Neuroglancer viewer "
+                        "reads only uncompressed chunk arrays")
     p.add_argument("--workers", type=int, default=None,
                    help="parallel worker processes (default backend needs no extra)")
     p.add_argument("--workers-backend", dest="workers_backend",
@@ -578,14 +642,15 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--on-out-of-bounds", dest="on_out_of_bounds", default="raise",
                    choices=("raise", "skip", "expand"),
                    help="geometry outside the target's grid: refuse (default), "
-                        "drop it, or grow the grid upwards to fit")
+                        "drop it, or grow the grid upwards to fit (never "
+                        "below its first cell)")
     m.add_argument("--pyramid", default="rebuild", choices=("rebuild", "drop", "keep"),
                    help="what to do with the coarse levels a merge invalidates "
                         "(default: rebuild)")
     m.add_argument("--pyramid-coarsen", type=parse_float_list,
                    dest="pyramid_coarsen", default=None, metavar="C1,C2,...",
                    help="per-level coarsen factors for the rebuild (default: "
-                        "inferred from the existing levels)")
+                        "each existing level's recorded settings)")
     m.add_argument("--pyramid-sparsity", type=parse_float_list,
                    dest="pyramid_sparsity", default=None, metavar="S1,S2,...",
                    help="per-level sparsity divisors for the rebuild")
@@ -597,10 +662,10 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--coarsen-mode", dest="coarsen_mode",
                    choices=("rdp", "decimate"), default="rdp",
                    help="streamline/polyline vertex reduction (default: rdp). "
-                        "Note rdp's tolerance is min(chunk_shape)*0.5*factor, "
-                        "so it does NOT compound across levels unless "
-                        "--chunk-scale grows the cells too; 'decimate' strides "
-                        "do compound")
+                        "rdp's tolerance is half the smallest edge of each "
+                        "level's bin, which the coarsen factors multiply, so "
+                        "it compounds across levels; 'decimate' strides "
+                        "compound too")
     m.add_argument("--dry-run", action="store_true", dest="dry_run",
                    help="print the plan -- ids, offsets, whether it fits -- and stop")
     m.set_defaults(func=_compose.run_merge)
@@ -614,8 +679,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("store", help="store to split")
     sp.add_argument("output", help="directory to write the parts into")
+    # No "objects": its id lists have no flag, so from here it could only
+    # fail. It stays in split_store(by="objects", parts=...).
     sp.add_argument("--by", default="groups",
-                    choices=("groups", "attribute", "objects", "provenance"),
+                    choices=("groups", "attribute", "provenance"),
                     help="how to cut (default: the store's named object groups)")
     sp.add_argument("--attribute", default=None, metavar="NAME",
                     help="per-object attribute to cut on, for --by attribute")
@@ -626,8 +693,29 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--bounds", default="source", choices=("source", "fit"),
                     help="keep the parent's grid (default) or size each part "
                          "to its own contents")
-    sp.add_argument("--pyramid", default="drop", choices=("rebuild", "drop", "keep"),
-                    help="pyramid for each part (default: drop)")
+    sp.add_argument("--pyramid", default=None, choices=("rebuild", "drop"),
+                    help="pyramid for each part: rebuild the parent's levels "
+                         "from the part (or the levels --pyramid-coarsen / "
+                         "--pyramid-sparsity give), or none (default: drop, "
+                         "or rebuild when --pyramid-coarsen/--pyramid-sparsity "
+                         "is given)")
+    sp.add_argument("--pyramid-coarsen", type=parse_float_list,
+                    dest="pyramid_coarsen", default=None, metavar="C1,C2,...",
+                    help="per-level coarsen factors for each part's pyramid "
+                         "(default: the parent's levels)")
+    sp.add_argument("--pyramid-sparsity", type=parse_float_list,
+                    dest="pyramid_sparsity", default=None, metavar="S1,S2,...",
+                    help="per-level sparsity divisors for each part's pyramid")
+    sp.add_argument("--sparsity-strategy", dest="sparsity_strategy",
+                    choices=_SPARSITY_STRATEGIES, default="random",
+                    help="which objects survive sparsification (default: "
+                         "random). The parent does not record it: pass the one "
+                         "it was built with")
+    sp.add_argument("--coarsen-mode", dest="coarsen_mode",
+                    choices=("rdp", "decimate"), default="rdp",
+                    help="streamline/polyline vertex reduction for "
+                         "--pyramid-coarsen (default: rdp). The parent's "
+                         "levels are rebuilt in the mode each records")
     sp.add_argument("--min-objects", type=int, dest="min_objects", default=1,
                     metavar="N", help="skip parts with fewer than N objects")
     sp.add_argument("--overwrite", action="store_true",

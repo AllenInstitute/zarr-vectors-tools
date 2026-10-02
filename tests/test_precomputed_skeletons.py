@@ -81,7 +81,8 @@ def _flywire_cutout_reader():
         o = np.array(parse_frag_key(k)) * np.array(info.resolution_nm)
         d = {}
         for _ in range(12):
-            sid = seg; seg += 13
+            sid = seg
+            seg += 13
             n = int(rng.integers(30, 90))
             st = o + rng.uniform(0.1, 0.9, 3) * cs
             p = np.clip(np.cumsum(rng.normal(0, 200, (n, 3)), 0) + st,
@@ -103,8 +104,10 @@ def test_run_ingest_parallel_matches_serial(tmp_path):
     byte-identical store to the serial default."""
     from zarr_vectors_tools.convert.ingest.precomputed_skeletons import run_ingest
     reader, keys, bounds = _flywire_cutout_reader()
-    a = str(tmp_path / "serial.zv")
-    b = str(tmp_path / "parallel.zv")
+    # Same store name in separate directories: core names the root OME node
+    # after the store, so differently named stores can never be identical.
+    a = str(tmp_path / "serial" / "store.zv")
+    b = str(tmp_path / "parallel" / "store.zv")
     args = dict(bounds_nm=bounds, strides=[8, 8], chunk_scale_factors=[2, 2],
                 sparsity_factors=[1.0, 2.0], progress=False)
     run_ingest(reader, a, list(keys), **args)                       # serial
@@ -149,7 +152,9 @@ def test_ingest_driver_offline(tmp_store):
         origin = np.array([vx, vy, vz]) * np.array(info.resolution_nm)
         d = {}
         for _ in range(6):
-            sid = seg; seg += 13; all_segs.add(sid)
+            sid = seg
+            seg += 13
+            all_segs.add(sid)
             npts = int(rng.integers(30, 80))
             start = origin + rng.uniform(0.1, 0.9, 3) * cs_nm
             pos = np.clip(np.cumsum(rng.normal(0, 200, (npts, 3)), axis=0) + start,
@@ -309,3 +314,70 @@ def test_coincident_boundary_vertices_become_cross_chunk_edges(tmp_store):
     assert r1["fragment_count"] == 1          # merged via the cross-chunk edge
     n1 = len(r1["positions"])
     assert len(r1["edges"]) == n1 - 1         # single connected tree
+
+
+def _bfs_parents(n, edges):
+    """Reference: root each component at its lowest index, breadth first."""
+    from collections import defaultdict, deque
+
+    adj = defaultdict(list)
+    for a, b in np.asarray(edges, dtype=np.int64).reshape(-1, 2).tolist():
+        if a != b:
+            adj[a].append(b)
+            adj[b].append(a)
+    parent = np.full(n, -1, dtype=np.int64)
+    seen = np.zeros(n, dtype=bool)
+    for seed in range(n):
+        if seen[seed]:
+            continue
+        seen[seed] = True
+        queue = deque([seed])
+        while queue:
+            u = queue.popleft()
+            for w in adj[u]:
+                if not seen[w]:
+                    seen[w] = True
+                    parent[w] = u
+                    queue.append(w)
+    return parent
+
+
+def test_one_search_per_chunk_roots_every_segment_as_its_own_search_did():
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
+        _segment_parents,
+    )
+
+    rng = np.random.default_rng(3)
+    chunk = {}
+    for seg in range(40):
+        n = int(rng.integers(1, 60))
+        # A few trees per segment, listed in any order and orientation.
+        child = np.arange(1, n)
+        edges = np.stack([child, rng.integers(0, np.maximum(child, 1))], axis=1)
+        edges = edges[rng.random(len(edges)) > 0.1]
+        flip = rng.random(len(edges)) < 0.5
+        edges[flip] = edges[flip][:, ::-1]
+        perm = rng.permutation(n)
+        chunk[1000 + seg] = {
+            "vertices": rng.uniform(0, 100, size=(n, 3)),
+            "edges": perm[edges][rng.permutation(len(edges))],
+        }
+
+    parents = _segment_parents(chunk)
+    for seg, piece in chunk.items():
+        np.testing.assert_array_equal(
+            parents[seg], _bfs_parents(len(piece["vertices"]), piece["edges"]),
+        )
+
+
+def test_an_edge_outside_its_segment_is_refused():
+    from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
+        _segment_parents,
+    )
+
+    chunk = {
+        1: {"vertices": np.zeros((2, 3)), "edges": np.array([[0, 2]])},
+        2: {"vertices": np.zeros((2, 3)), "edges": np.array([[0, 1]])},
+    }
+    with pytest.raises(ValueError, match="segment 1"):
+        _segment_parents(chunk)

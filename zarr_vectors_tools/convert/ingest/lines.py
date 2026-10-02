@@ -15,6 +15,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.lines import write_lines
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+
 
 def ingest_lines_csv(
     input_path: str | Path,
@@ -155,5 +157,8 @@ def ingest_lines_csv(
         object_attributes=line_attributes if line_attributes else None,
         dtype=dtype,
     )
+    # Each segment is an object: its vertex_count, and the segment id that
+    # keeps one colour where it crosses chunks.
+    stamp_object_columns(output_path)
     result.update(enrichment_summary)
     return result

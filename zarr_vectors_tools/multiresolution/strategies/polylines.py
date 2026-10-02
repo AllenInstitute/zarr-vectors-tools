@@ -1108,6 +1108,7 @@ def coarsen_polyline_level(
     simplify_epsilon: float | None = None,
     compressor: Any = None,
     executor: Any = None,
+    attribute_values: npt.NDArray | None = None,
 ) -> dict[str, Any]:
     """Coarsen one streamline/polyline level, chunk-local and executor-parallel.
 
@@ -1271,6 +1272,21 @@ def coarsen_polyline_level(
         simplify_epsilon = 0.5 * float(min(target_bin_shape))
     stride = max(1, int(round(coarsen_factor)))
 
+    # The bin the level records, which is also its scale in the store's OME
+    # ``multiscales`` block.  With an explicit tolerance the factor decides
+    # nothing else, and the recommended recipe leaves it at 1 while the
+    # chunks double -- so every level declared scale 1, the same as level 0.
+    # Such a level is at least as coarse as its chunks are wide, so its bin
+    # grows by the chunk scale where that is the larger.  A derived tolerance
+    # and a decimation stride are read back from the bin by a pyramid
+    # refresh, so those levels keep the factor's bin.
+    level_bin_shape = target_bin_shape
+    if tolerance_source == "explicit" and coarsen_mode == "rdp":
+        level_bin_shape = tuple(
+            b * max(float(coarsen_factor), float(s))
+            for b, s in zip(source_bin, scale)
+        )
+
     coarsening_method = "polyline_decimate" if coarsen_mode == "decimate" else "polyline_rdp"
 
     src_index_meta = src.read_array_meta(OBJECT_INDEX)
@@ -1282,17 +1298,25 @@ def coarsen_polyline_level(
     if not src_vertex_chunks:
         return {"vertex_count": 0, "object_count": 0, "method": coarsening_method}
 
-    # Hard requirement: every fragment boundary must be reconstructable
-    # locally, which needs fragment_attributes/segment_id on the source.
+    # Every fragment boundary must be reconstructable locally, which needs
+    # fragment_attributes/segment_id on the source.  Core's write_polylines
+    # does not write it, so a store written directly by core gets it here,
+    # from its own object manifests, rather than a refusal.  The dense id,
+    # whatever source ids the store has: it is what objects are rebuilt from.
     probe_seg = read_chunk_fragment_attributes(
         src, "segment_id", tuple(int(x) for x in src_vertex_chunks[0]),
         dtype=np.uint64, default=None,
     )
     if probe_seg is None:
-        raise ValueError(
-            "coarsen_polyline_level requires fragment_attributes/segment_id "
-            "on the source level; re-ingest or rebuild the pyramid from level 0"
+        from zarr_vectors.building import refresh_arrays_present
+
+        from zarr_vectors_tools.convert.ingest._object_columns import (
+            stamp_level_object_columns,
         )
+
+        stamp_level_object_columns(src, vertex_count=False, dense_ids=True)
+        # So a reader gating on ``arrays_present`` sees the new column.
+        refresh_arrays_present(src)
 
     # --- Phase 0: sparsity keep-set (O(objects), never O(fragments) unless
     # no cheap per-object signal exists at a coarser source level) ---------
@@ -1335,7 +1359,7 @@ def coarsen_polyline_level(
         kept = apply_sparsity(
             n_src, 1.0 / sparsity_factor, sparsity_strategy,
             seed=sparsity_seed, lengths=lengths, alive_mask=alive_mask,
-            group_labels=group_labels,
+            group_labels=group_labels, attribute_values=attribute_values,
             # Cumulative: keep 1/sparsity_factor of the SURVIVING objects, so
             # a repeated factor sparsifies each level relative to the previous
             # one (503k -> 50k -> 5k -> ...), not relative to the original.
@@ -1368,14 +1392,14 @@ def coarsen_polyline_level(
             ["vertices", "object_index", "fragment_attributes"]
             + (["vertex_attributes"] if vattr_names else [])
         ),
-        bin_shape=target_bin_shape,
+        bin_shape=level_bin_shape,
         # Fold-change relative to LEVEL 0, not to the source level: this is
         # what becomes the NGFF ``scale`` transform.  With per-level coarsen
         # factors the two differ — [2, 2] is ratio 2 then 4 — so it has to be
         # derived from the bin shapes rather than echoing coarsen_factor.
         bin_ratio=tuple(
             max(1, int(round(float(t) / float(r))))
-            for t, r in zip(target_bin_shape, _root_bin)
+            for t, r in zip(level_bin_shape, _root_bin)
         ),
         chunk_shape=chunk_shape_override,
         object_sparsity=(1.0 / sparsity_factor),
@@ -1576,6 +1600,13 @@ def coarsen_polyline_level(
             out[present_oids] = src_data[present_oids]
         create_object_attributes_array(level_group, aname, dtype=str(src_data.dtype))
         write_object_attributes(level_group, aname, out, present_mask=mask)
+    if "vertex_count" in src_attr_names:
+        # Copied above as level 0's counts; this level's are different.
+        from zarr_vectors_tools.convert.ingest._object_columns import (
+            stamp_level_object_columns,
+        )
+
+        stamp_level_object_columns(level_group, segment_id=False, recount=True)
 
     # Phase A wrote the vertices / fragment-attribute cells from separate
     # processes, whose per-array ``nonempty_chunks`` manifest RMWs race and can

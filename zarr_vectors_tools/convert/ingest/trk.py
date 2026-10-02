@@ -1,6 +1,6 @@
 """Ingest streamlines from TrackVis TRK files into zarr vectors.
 
-Requires ``nibabel``: ``pip install nibabel``.
+Requires ``nibabel``: ``pip install 'zarr-vectors-tools[trk]'``.
 """
 
 from __future__ import annotations
@@ -14,9 +14,7 @@ from zarr_vectors.typing import BinShape, ChunkShape
 from zarr_vectors_tools.convert.ingest._attribute_widths import (
     record_vertex_attribute_widths,
 )
-from zarr_vectors_tools.convert.ingest._segment_ids import (
-    stamp_segment_ids,
-)
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 from zarr_vectors_tools.convert.ingest.trk_helpers import (
     _apply_trk_enrichments,
     _extract_trk_data,
@@ -99,8 +97,8 @@ def ingest_trk(
 
     # The pyramid needs a per-fragment segment id, and core's writer does
     # not produce one. Without this, the ingest succeeds but coarsening
-    # refuses the store.
-    stamp_segment_ids(output_path)
+    # refuses the store.  Each streamline's vertex_count comes with it.
+    stamp_object_columns(output_path)
 
     record_vertex_attribute_widths(
         output_path,

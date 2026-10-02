@@ -264,6 +264,25 @@ def _read_pass(
             f"{store_path} stores link_width={policy[0]}"
         )
     layout = _LAYOUT_CHUNKED if policy is not None and policy[2] else _LAYOUT_GRAPH
+    if layout == _LAYOUT_CHUNKED:
+        from zarr_vectors_tools.headers.registry import HeaderRegistry
+        from zarr_vectors_tools.multiresolution.skeleton_layout import (
+            LAYOUT_LINKED,
+            skeleton_layout,
+        )
+
+        # A coarse level of an SWC store is written with directed links too,
+        # but each record is still [child, parent] on a tree whose stored root
+        # is the soma; read it as the graph layout so Strahler order is taken
+        # there rather than at the smallest tip.  A precomputed store is
+        # linked too, but its root is wherever the layer's vertex order put
+        # it, so it keeps the chunked reading (the same edges: every link's
+        # child starts a fragment there).
+        if (
+            skeleton_layout(root) == LAYOUT_LINKED
+            and HeaderRegistry(str(store_path)).has("swc")
+        ):
+            layout = _LAYOUT_GRAPH
     link_store = str(policy[3]) if policy is not None else "canonical"
 
     requested: npt.NDArray[np.int64] | None = None
