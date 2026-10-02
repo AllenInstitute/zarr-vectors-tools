@@ -2,7 +2,8 @@
 
 :func:`build_object_index` groups the per-chunk ``(segment_id, chunk, fragment)``
 records emitted by the level-0 skeleton writer into a segment-id-preserving dense
-object index, writing ``object_index`` + ``object_attributes/segment_id``.
+object index, writing ``object_index`` + ``object_attributes/segment_id`` (and,
+when the caller supplies it, ``object_attributes/length``).
 
 This is *coordination*, not a per-chunk IO primitive (it gathers every chunk's
 records to assign the global dense OID space), so it lives in zarr-vectors-tools
@@ -25,6 +26,7 @@ from zarr_vectors.building import (
 from zarr_vectors.typing import ChunkCoords
 
 SEGMENT_ID_ATTR = "segment_id"
+LENGTH_ATTR = "length"
 
 
 def build_object_index(
@@ -32,6 +34,7 @@ def build_object_index(
     records: list[tuple[int, ChunkCoords, int]],
     *,
     ndim: int,
+    cable_lengths: dict[int, float] | None = None,
 ) -> dict[int, int]:
     """Group per-chunk records by segment_id → dense object index.
 
@@ -44,6 +47,17 @@ def build_object_index(
         records: ``(segment_id, chunk_coords, fragment_index)`` from every chunk
             written.
         ndim: Spatial index dim count.
+        cable_lengths: Optional ``{segment_id: cable_length}`` (sum of edge
+            Euclidean distances), computed while vertices and edges were
+            both still in memory at read time (see
+            ``precomputed_plain_skeletons._read_batches``). When given,
+            written as ``object_attributes/length`` (float32), aligned to
+            the same sorted-segment-id order as ``segment_id``. This is the
+            per-object signal ``sparsity_strategy="length"`` reads at level
+            0 (``coarsen_skeleton_level``); without it that strategy has no
+            cheap per-object length and falls back to a weaker per-fragment
+            proxy. A segment absent from the mapping gets ``0.0``, matching
+            ``compute_cable_lengths``'s own "no edges" convention.
 
     Returns:
         ``{segment_id: object_id}``.
@@ -82,6 +96,14 @@ def build_object_index(
     seg_arr = np.asarray(seg_ids, dtype=np.uint64)
     create_object_attributes_array(level_group, SEGMENT_ID_ATTR, dtype="uint64")
     write_object_attributes(level_group, SEGMENT_ID_ATTR, seg_arr)
+
+    if cable_lengths is not None:
+        len_arr = np.array(
+            [cable_lengths.get(s, 0.0) for s in seg_ids], dtype=np.float32,
+        )
+        create_object_attributes_array(level_group, LENGTH_ATTR, dtype="float32")
+        write_object_attributes(level_group, LENGTH_ATTR, len_arr)
+
     return oid_of_seg
 
 
