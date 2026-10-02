@@ -12,4 +12,5 @@ myst-parser>=3.0
 
 # Extensions
 sphinx-copybutton>=0.5.2
+sphinx-argparse>=0.4      # reference/cli.md, generated from the parser
 sphinx-autobuild>=2024.2.4   # live reload: sphinx-autobuild docs docs/_build/html

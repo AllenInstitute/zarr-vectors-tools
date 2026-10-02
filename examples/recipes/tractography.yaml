@@ -2,27 +2,29 @@
 # scalars and properties.  Run with:  zvtools run tractography.yaml
 name: tractography
 steps:
-  # TRK ingests in parallel and builds the pyramid inline: two coarser levels,
-  # simplified to 0.5 mm and 1 mm, the second keeping a quarter of the
-  # streamlines (longest first).
+  # TRK ingests in parallel and builds the pyramid inline: three coarser
+  # levels, each simplified further (0.5, 1, 2 mm), in chunks twice as wide,
+  # keeping half the streamlines of the level below (longest first).
+  # apply_affine puts the tracts in RAS mm, which the viewer needs.
   - convert:
       input: data/sub-01_tracts.trk
-      output: out/sub-01_tracts.zarrvectors
-      num_chunks: 5000
+      output: out/sub-01_tracts.zv
+      num_chunks: 1000
       workers: 8
-      compressor: zstd
+      apply_affine: true
       compute_length: true
-      coarsen: [8, 8]
-      sparsity: [1, 4]
-      rdp_tolerance: [0.5, 1.0]
+      coarsen: [1, 1, 1]
+      sparsity: [2, 2, 2]
+      rdp_tolerance: [0.5, 1.0, 2.0]
+      chunk_scale: [2, 2, 2]
       sparsity_strategy: length
   - validate:
-      store: out/sub-01_tracts.zarrvectors
+      store: out/sub-01_tracts.zv
   - shard:
-      store: out/sub-01_tracts.zarrvectors
+      store: out/sub-01_tracts.zv
       shape: 8
-  # Back out to TRK from the coarsest level, for tools that want a file.
+  # Back out to TRK from a coarse level, for tools that want a file.
   - convert:
-      input: out/sub-01_tracts.zarrvectors
+      input: out/sub-01_tracts.zv
       output: out/sub-01_tracts_level2.trk
       level: 2

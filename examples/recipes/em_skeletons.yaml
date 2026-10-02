@@ -2,24 +2,27 @@
 # Run with:  zvtools run em_skeletons.yaml
 name: em-skeletons
 steps:
-  # A layer with a spatial index keeps its own chunk grid; --anchor and
-  # --counts take an 8x8x4 block of .frags chunks instead of the whole layer.
+  # A layer with a spatial index keeps its own chunk grid; anchor and counts
+  # take an 8x8x4 block of .frags chunks instead of the whole layer.  The
+  # pyramid keeps every 4th vertex per level, half the neurons (longest
+  # first), in chunks twice as wide.
   - convert:
-      input: gs://flywire_v141_m783/skeletons_mip_1
-      output: out/flywire_cutout.zarrvectors
+      input: https://storage.googleapis.com/flywire_v141_m783/skeletons_mip_1
+      output: out/flywire_cutout.zv
       anchor: [17398, 10448, 3088]
       counts: [8, 8, 4]
-      coarsen: [8, 8, 8]
-      sparsity: [1, 1, 4]
-      drop_interior_below: 3
+      coarsen: [4, 4]
+      sparsity: [2, 2]
+      chunk_scale: [2, 2]
+      sparsity_strategy: length
       workers: 8
   - validate:
-      store: out/flywire_cutout.zarrvectors
+      store: out/flywire_cutout.zv
   - shard:
-      store: out/flywire_cutout.zarrvectors
+      store: out/flywire_cutout.zv
       shape: 8
   - convert:
-      input: out/flywire_cutout.zarrvectors
+      input: out/flywire_cutout.zv
       output: out/neurons
       format: swc
       object_id: [0, 1, 2]

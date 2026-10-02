@@ -16,7 +16,7 @@ copyright = (
 )
 author = "BRIDGE Neuroscience"
 # Package version. Independent of the on-disk FORMAT version this package
-# targets, which is Zarr Vectors 0.9.0 (the merged links/<delta>/<offsets>/ layout).
+# targets, which is Zarr Vectors 0.9 (the merged links/<delta>/<offsets>/ layout).
 release = "0.3.0"
 version = release
 
@@ -27,7 +27,7 @@ version = release
 # substitution mechanism: rst_prolog covers the .rst pages (|zv_version|),
 # myst_substitutions covers the .md pages ({{ zv_version }}). rst_prolog
 # alone leaves the literal "|zv_version|" in the rendered Markdown.
-zv_format_version = "0.9.0"
+zv_format_version = "0.9"
 
 rst_prolog = f"""
 .. |zv_version| replace:: {zv_format_version}
@@ -52,6 +52,8 @@ extensions = [
     "sphinx.ext.graphviz",
     # Copy button on code blocks
     "sphinx_copybutton",
+    # CLI reference generated from the argparse parser (reference/cli.md)
+    "sphinxarg.ext",
 ]
 
 # MyST-Parser configuration
@@ -82,12 +84,24 @@ autodoc_default_options = {
 autodoc_typehints = "description"
 autodoc_typehints_format = "short"
 
-# zarr-vectors isn't on PyPI; mock it so autodoc can import this package
-# without needing the runtime dependency installed.
+# The docs build does not install core; mock it so autodoc can import this
+# package without it.
 autodoc_mock_imports = ["zarr_vectors"]
+
+# sphinx-argparse imports the CLI module itself, outside autodoc's mock, so
+# when core is missing the same mock is installed for the whole build.
+try:
+    import zarr_vectors  # noqa: F401
+except ImportError:
+    from sphinx.ext.autodoc.mock import mock as _mock
+
+    _mock(autodoc_mock_imports).__enter__()
 
 # autosectionlabel — prefix with document name to avoid collisions
 autosectionlabel_prefix_document = True
+# The generated CLI page repeats "positional arguments" / "named arguments"
+# under every subcommand; those labels are never linked to.
+suppress_warnings = ["autosectionlabel.reference/cli", "myst.domains"]
 
 # intersphinx — link to upstream docs
 intersphinx_mapping = {
@@ -107,7 +121,7 @@ intersphinx_mapping = {
 extlinks = {
     "zvpy":   ("https://zarr-vectors-py.readthedocs.io/en/latest/%s", "%s"),
     "zvspec": ("https://alleninstitute.github.io/zarr_vectors/%s", "%s"),
-    "zvrepo": ("https://github.com/BRIDGE-Neuroscience/zarr-vectors-py/%s", "%s"),
+    "zvrepo": ("https://github.com/AllenInstitute/zarr-vectors-py/%s", "%s"),
 }
 extlinks_detect_hardcoded_links = False
 
