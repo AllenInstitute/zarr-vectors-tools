@@ -602,6 +602,51 @@ def test_cable_length_drives_the_attribute_sparsity_strategy(tmp_path: Path, mon
         assert coarse.loc[oid, "cable_length"] == pytest.approx(stored[oid])
 
 
+def test_sparsity_strategy_length_selects_by_real_cable_length_directly(
+    tmp_path: Path,
+) -> None:
+    """The regression test for open-items.md item 11, no monkeypatch needed.
+
+    Same fixture as the test above -- long single-fragment lines (segments
+    10-13) vs. short but heavily-fragmented zigzags (segments 20-23, cable
+    length 4.8 each vs. the lines' 5-8, but SIX fragments each vs. the
+    lines' one). Before this fix, `sparsity_strategy="length"` ranked by
+    fragment count at level 0 and kept the zigzags -- confirmed by
+    temporarily reverting to `manifest_lens`-as-`lengths`, which keeps
+    {20, 21, 22, 23} here instead. After the fix, "length" reads the real
+    `cable_length` column `compute_skeleton_metrics` already wrote (via the
+    ``("length", "cable_length")`` fallback -- this store has no
+    `object_attributes/length`, only `cable_length`, exactly the "upgraded
+    via zvtools metrics, not re-ingested" case the fallback exists for) and
+    keeps the actually-longer lines.
+    """
+    from zarr_vectors_tools.multiresolution.strategies.skeletons import (
+        coarsen_skeleton_level,
+    )
+
+    store = tmp_path / "select_direct.zv"
+    cable = _selection_store(store)
+    frame = compute_skeleton_metrics(store, metrics=["cable_length"])
+    segment_of = dict(zip(frame.index, frame["segment_id"]))
+
+    level0 = get_resolution_level(open_store(str(store)), 0)
+    assert not level0.array_exists("object_attributes/length")
+    assert level0.array_exists("object_attributes/cable_length")
+
+    coarsen_skeleton_level(
+        str(store), 0, 1, stride=1, sparsity_factor=2.0, chunk_scale_factor=2,
+        sparsity_strategy="length",
+    )
+
+    level1 = get_resolution_level(open_store(str(store)), 1)
+    kept = {oid for oid, m in enumerate(read_all_object_manifests(level1)) if m}
+    longest_by_cable = set(
+        sorted(segment_of.keys(), key=lambda o: -cable[int(segment_of[o])])[:4]
+    )
+    assert kept == longest_by_cable
+    assert {int(segment_of[o]) for o in kept} == {10, 11, 12, 13}
+
+
 # ---------------------------------------------------------------------------
 # Refusals
 # ---------------------------------------------------------------------------
