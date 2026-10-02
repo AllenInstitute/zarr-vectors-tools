@@ -4,10 +4,16 @@ Each strategy selects a subset of objects to retain at a coarser
 resolution level.  All functions return ``kept_indices`` — an array
 of integer indices into the original object list.
 
-Five strategies:
+Six strategies:
 
 - **Spatial coverage**: greedy selection maximising spatial spread
-- **Length**: keep the longest objects (streamlines, skeletons)
+- **Length**: keep the longest objects (streamlines, skeletons) — ranks by
+  whatever ``lengths`` array the caller supplies, which must actually BE a
+  length (sum of segment Euclidean distances) for this to mean what it
+  says; see ``strategies/polylines.py`` and ``strategies/skeletons.py`` for
+  how each geometry kind sources it, and open-items.md item 11 for what
+  went wrong when a caller passed something else instead.
+- **Point thinning**: ≤1 survivor per spatial bin
 - **Attribute**: keep objects with highest/lowest attribute values
 - **Random**: uniform random selection (reproducible with seed)
 - **Group**: stratified — a fraction of *each* group, floored at one, so no
