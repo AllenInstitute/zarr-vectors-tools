@@ -326,6 +326,7 @@ def coarsen_mesh_level(
     sparsity_seed: int | None = None,
     compressor: Any = None,
     bin_size: float | None = None,
+    attribute_values: Any = None,
     **_ignored: Any,
 ) -> dict[str, Any]:
     """Coarsen one mesh level by chunk-local vertex clustering.
@@ -426,6 +427,7 @@ def coarsen_mesh_level(
         keep_oids = sorted(int(o) for o in apply_sparsity(
             n_src_objects, 1.0 / float(sparsity_factor), sparsity_strategy,
             seed=sparsity_seed, alive_mask=alive, relative_to="alive",
+            attribute_values=attribute_values,
         ))
     else:
         keep_oids = list(range(n_src_objects))
@@ -847,6 +849,11 @@ def coarsen_mesh_level(
             src_group, level_group,
             surviving_oids=surviving_oids_from(keep_oids, sparsity_factor),
         )
+        from zarr_vectors_tools.multiresolution.object_index import (
+            carry_object_columns,
+        )
+
+        carry_object_columns(src_group, level_group, keep_oids, n_src_objects)
 
     return {
         "vertex_count": total_vertices,
@@ -877,4 +884,5 @@ def _mesh_coarsener(
         sparsity_seed=kwargs.get("sparsity_seed"),
         compressor=kwargs.get("compressor"),
         bin_size=kwargs.get("bin_size"),
+        attribute_values=kwargs.get("attribute_values"),
     )

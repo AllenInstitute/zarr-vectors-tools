@@ -27,7 +27,7 @@ def compute_knn_distance(positions: np.ndarray, k: int) -> np.ndarray:
     except ImportError as e:
         raise IngestError(
             "scipy is required for kNN distance enrichment. "
-            "Install with: pip install zarr-vectors-tools[points-enrichment]"
+            "Install with: pip install 'zarr-vectors-tools[points-enrichment]'"
         ) from e
 
     n = positions.shape[0]
@@ -54,7 +54,9 @@ def compute_per_object_vertex_count(object_ids: np.ndarray) -> tuple[np.ndarray,
         object_ids: ``(N,)`` integer array of per-vertex object IDs.
 
     Returns:
-        ``(unique_ids, counts)`` where both arrays are sorted by id, shape ``(M,)``.
+        ``(unique_ids, counts)`` where both arrays are sorted by id, shape
+        ``(M,)``.  Counts are uint32, the dtype the TRK ingest writes and the
+        zarr-vectors Neuroglancer viewer reads ``vertex_count`` as.
     """
     unique_ids, counts = np.unique(object_ids, return_counts=True)
-    return unique_ids.astype(np.int64), counts.astype(np.int64)
+    return unique_ids.astype(np.int64), counts.astype(np.uint32)

@@ -123,6 +123,10 @@ class TestArgHelpers:
     def test_build_factors_none(self):
         assert build_factors(None, None) is None
 
+    def test_build_factors_one_side_defaults_to_one(self):
+        assert build_factors([2.0, 2.0], None) == [(2.0, 1.0), (2.0, 1.0)]
+        assert build_factors(None, [4.0]) == [(1.0, 4.0)]
+
     def test_build_factors_length_mismatch(self):
         with pytest.raises(SystemExit):
             build_factors([2.0, 2.0], [2.0])
@@ -441,7 +445,10 @@ class TestOverwrite:
         out = tmp_path / "pts.zv"
         self._convert(src, out)
         assert out.exists()
-        _maybe_overwrite(out, overwrite=False)   # no-op without the flag
+        with pytest.raises(SystemExit, match="--overwrite"):
+            _maybe_overwrite(out, overwrite=False)   # refused without the flag
+        assert out.exists()
+        _maybe_overwrite(out, overwrite=False, resume=True)   # resume continues into it
         assert out.exists()
         _maybe_overwrite(out, overwrite=True)    # removes the store
         assert not out.exists()
@@ -515,3 +522,333 @@ class TestApplyAffineScope:
         with pytest.raises(SystemExit):
             main(["convert", str(src), str(tmp_path / "o.zv"),
                   "--chunk-shape", "50,50,50", "--apply-affine"])
+
+
+# ===================================================================
+# Options that do not apply are refused, not ignored
+# ===================================================================
+
+class TestRefusedOptions:
+    @pytest.mark.parametrize("extra", [
+        ["--compressor", "zstd"],          # only the trk ingest applies a codec
+        ["--num-chunks", "8"],             # trk sizes its grid this way
+        ["--n-parts", "4"],
+        ["--compute-endpoints"],           # streamlines only
+        ["--nodes", "n.csv"],              # edgelist only
+    ])
+    def test_csv_refuses(self, tmp_path, extra):
+        src = _write_csv(tmp_path / "pts.csv")
+        with pytest.raises(SystemExit, match="applies to"):
+            main(["convert", str(src), str(tmp_path / "o.zv"),
+                  "--chunk-shape", "100,100,100", *extra])
+
+    def test_table_refuses_knn(self, tmp_path):
+        # Was forwarded to ingest_table, which has no such argument.
+        src = tmp_path / "t.csv"
+        src.write_text("id,x,y,z\na,1,2,3\nb,4,5,6\n")
+        with pytest.raises(SystemExit, match="--knn-distance-k"):
+            main(["convert", str(src), str(tmp_path / "o.zv"), "--format", "table",
+                  "--position-columns", "x,y,z", "--chunk-shape", "10,10,10",
+                  "--knn-distance-k", "2"])
+
+    @pytest.mark.parametrize("coarsen,sparsity", [("0.5,2", "1,1"), ("2,2", "1,0.25")])
+    def test_factors_below_one(self, coarsen, sparsity):
+        with pytest.raises(SystemExit, match=">= 1"):
+            build_factors(parse_float_list(coarsen), parse_float_list(sparsity))
+
+
+# ===================================================================
+# SWC: one object per tree
+# ===================================================================
+
+def _write_swc_forest(path: Path, trees: int = 3, nodes: int = 40) -> Path:
+    lines, nid = [], 0
+    for t in range(trees):
+        root = nid + 1
+        lines.append(f"{root} 1 {t * 30.0} 0 0 2.0 -1")
+        nid = root
+        for k in range(1, nodes):
+            nid += 1
+            lines.append(f"{nid} 3 {t * 30.0 + k * 0.5} {k * 0.7} {k * 0.2} 1.0 {nid - 1}")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+class TestSwcForest:
+    def test_each_tree_is_an_object(self, tmp_path):
+        from zarr_vectors.building import get_resolution_level, read_all_object_manifests
+
+        out = tmp_path / "f.zv"
+        src = _write_swc_forest(tmp_path / "f.swc")
+        assert main(["convert", str(src), str(out), "--chunk-shape", "50,50,50"]) == 0
+        level0 = get_resolution_level(open_store(str(out)), 0)
+        assert len(read_all_object_manifests(level0)) == 3
+
+
+# ===================================================================
+# merge stages a file that needs a chunk shape on the target's grid
+# ===================================================================
+
+def _write_grouped_table(path: Path, rows: int, start: int = 0) -> Path:
+    rng = np.random.default_rng(start)
+    lines = ["cell,x,y,z,group"]
+    for i in range(rows):
+        x, y, z = rng.uniform(0, 300, 3)
+        lines.append(f"c{start + i},{x:.3f},{y:.3f},{z:.3f},{i % 3}")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_merge_table_into_store(tmp_path):
+    table = ["--format", "table", "--position-columns", "x,y,z",
+             "--key-column", "cell", "--object-id-column", "group"]
+    target = tmp_path / "t.zv"
+    assert main(["convert", str(_write_grouped_table(tmp_path / "a.csv", 20)),
+                 str(target), "--chunk-shape", "100,100,100", *table]) == 0
+    extra = _write_grouped_table(tmp_path / "b.csv", 6, start=100)
+    # A table needs its column options, which only convert takes: refused
+    # with that advice, and the advice works.
+    assert main(["merge", str(target), str(extra), "--format", "table"]) == 1
+    staged = tmp_path / "b.zv"
+    assert main(["convert", str(extra), str(staged),
+                 "--chunk-shape", "100,100,100", *table]) == 0
+    assert main(["merge", str(target), str(staged), "--pyramid", "drop"]) == 0
+    meta = json.loads((target / "0" / "zarr.json").read_text())
+    assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == 26
+
+
+def test_merge_refuses_points_without_objects(tmp_path):
+    target = tmp_path / "t.zv"
+    assert main(["convert", str(_write_csv(tmp_path / "a.csv", n=20)), str(target),
+                 "--chunk-shape", "100,100,100"]) == 0
+    extra = _write_csv(tmp_path / "b.csv", n=5, seed=1)
+    assert main(["merge", str(target), str(extra)]) == 1   # IngestError, cleanly
+    meta = json.loads((target / "0" / "zarr.json").read_text())
+    assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == 20
+
+
+# ===================================================================
+# zvtools pyramid over an existing pyramid
+# ===================================================================
+
+def _multiscale_paths(store: Path) -> list[str]:
+    attrs = json.loads((store / "zarr.json").read_text())["attributes"]
+    return [d["path"] for d in attrs["multiscales"][0]["datasets"]]
+
+
+class TestPyramidReplace:
+    def _store(self, tmp_path):
+        out = tmp_path / "p.zv"
+        assert main(["convert", str(_write_csv(tmp_path / "p.csv", n=400)), str(out),
+                     "--chunk-shape", "100,100,100", "--bin-shape", "10,10,10",
+                     "--coarsen", "2,2,2", "--sparsity", "1,1,1",
+                     "--cross-level-storage", "none"]) == 0
+        return out
+
+    def test_refused_without_replace(self, tmp_path):
+        out = self._store(tmp_path)
+        with pytest.raises(SystemExit, match="--replace"):
+            main(["pyramid", str(out), "--coarsen", "2", "--sparsity", "1"])
+        assert _levels(out) == [0, 1, 2, 3]
+
+    def test_replace_leaves_no_stale_level(self, tmp_path):
+        out = self._store(tmp_path)
+        assert main(["pyramid", str(out), "--coarsen", "4", "--sparsity", "1",
+                     "--cross-level-storage", "none", "--replace"]) == 0
+        assert _levels(out) == [0, 1]
+        assert _multiscale_paths(out) == ["0", "1"]
+
+
+def test_convert_refuses_existing_output(tmp_path):
+    # Writing into an existing store used to leave its old chunks behind.
+    out = tmp_path / "pts.zv"
+    assert main(["convert", str(_write_csv(tmp_path / "a.csv", n=300)), str(out),
+                 "--chunk-shape", "100,100,100"]) == 0
+    with pytest.raises(SystemExit, match="already exists"):
+        main(["convert", str(_write_csv(tmp_path / "b.csv", n=5, seed=3)), str(out),
+              "--chunk-shape", "100,100,100"])
+    meta = json.loads((out / "0" / "zarr.json").read_text())
+    assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == 300
+
+
+def test_edgelist_attributes_follow_their_edges(tmp_path, monkeypatch):
+    import zarr_vectors_tools.convert.ingest.edgelist as edgelist
+
+    written = {}
+    real = edgelist.write_graph
+
+    def capture(*args, **kwargs):
+        written.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(edgelist, "write_graph", capture)
+    nodes = tmp_path / "nodes.csv"
+    nodes.write_text("node_id,x,y,z\n100,1,1,1\n101,2,2,2\n102,3,3,3\n")
+    edges = tmp_path / "edges.csv"
+    # The middle edge names a node that is not in the node table.
+    edges.write_text("source,target,w\n100,101,1\n100,999,2\n101,102,3\n")
+    edgelist.ingest_edgelist(edges, nodes, tmp_path / "g.zv", (10.0, 10.0, 10.0))
+    attrs = written.get("edge_attributes") or written.get("link_attributes")
+    assert np.asarray(attrs["w"]).tolist() == [1.0, 3.0]
+
+
+# ===================================================================
+# Pyramid fixes: point duplicates, attribute sparsity, per-level counts
+# ===================================================================
+
+def _grouped_points_store(tmp_path: Path) -> Path:
+    rng = np.random.default_rng(0)
+    group = np.repeat(np.arange(40), 100)
+    xyz = rng.uniform(50, 350, (40, 3))[group] + rng.normal(0, 25, (group.size, 3))
+    src = tmp_path / "g.csv"
+    src.write_text("x,y,z,group\n" + "\n".join(
+        f"{x:.3f},{y:.3f},{z:.3f},{g}" for (x, y, z), g in zip(xyz, group)
+    ) + "\n")
+    out = tmp_path / "g.zv"
+    assert main(["convert", str(src), str(out), "--format", "table",
+                 "--position-columns", "x,y,z", "--object-id-column", "group",
+                 "--chunk-shape", "100,100,100", "--bin-shape", "10,10,10",
+                 "--coarsen", "2,2,2", "--sparsity", "1,1,1",
+                 "--cross-level-storage", "none"]) == 0
+    return out
+
+
+class TestPointPyramid:
+    def test_no_object_stores_a_bin_twice(self, tmp_path):
+        from zarr_vectors.types.points import read_points
+
+        out = _grouped_points_store(tmp_path)
+        for level in (1, 2, 3):
+            for oid in (0, 7, 31):
+                got = read_points(str(out), level=level, object_ids=[oid])
+                pos = np.asarray(got["positions"])
+                assert len(pos) == len(np.unique(pos, axis=0)), (level, oid)
+
+    def test_vertex_count_is_what_a_read_returns(self, tmp_path):
+        from zarr_vectors.types.points import read_points
+
+        out = _grouped_points_store(tmp_path)
+        for level in (1, 2, 3):
+            meta = json.loads((out / str(level) / "zarr.json").read_text())
+            rows = len(read_points(str(out), level=level)["positions"])
+            assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == rows
+
+
+class TestAttributeSparsity:
+    def _tracts(self, tmp_path):
+        pytest.importorskip("nibabel")
+        out = tmp_path / "t.zv"
+        assert main(["convert", str(_write_smooth_trk(tmp_path / "t.trk", n=120, npts=40)),
+                     str(out), "--num-chunks", "27", "--compute-length"]) == 0
+        return out
+
+    def test_keeps_the_highest_values(self, tmp_path):
+        from zarr_vectors.building import (
+            get_resolution_level,
+            read_all_object_manifests,
+            read_object_attributes,
+        )
+
+        out = self._tracts(tmp_path)
+        assert main(["pyramid", str(out), "--coarsen", "1", "--sparsity", "4",
+                     "--rdp-tolerance", "0.5", "--sparsity-strategy", "attribute",
+                     "--sparsity-attribute", "length"]) == 0
+        root = open_store(str(out))
+        length = np.asarray(read_object_attributes(get_resolution_level(root, 0), "length"))
+        manifests = read_all_object_manifests(get_resolution_level(root, 1))
+        kept = {i for i, m in enumerate(manifests) if m}
+        assert kept == set(np.argsort(-length)[: len(kept)].tolist())
+        assert len(kept) == 30
+
+    def test_needs_the_attribute_named(self, tmp_path):
+        out = self._tracts(tmp_path)
+        with pytest.raises(SystemExit, match="go together"):
+            main(["pyramid", str(out), "--coarsen", "1", "--sparsity", "2",
+                  "--sparsity-strategy", "attribute"])
+        assert main(["pyramid", str(out), "--coarsen", "1", "--sparsity", "2",
+                     "--sparsity-strategy", "attribute",
+                     "--sparsity-attribute", "no_such_column"]) == 1
+        assert _levels(out) == [0]
+
+
+def test_build_pyramid_refuses_fractions_and_reports_its_method(tmp_path):
+    from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+
+    out = tmp_path / "p.zv"
+    assert main(["convert", str(_write_csv(tmp_path / "p.csv")), str(out),
+                 "--chunk-shape", "100,100,100"]) == 0
+    with pytest.raises(ValueError, match=">= 1"):
+        build_pyramid(str(out), factors=[(0.5, 1)])
+    assert _levels(out) == [0]
+    pytest.importorskip("nibabel")
+    tracts = tmp_path / "t.zv"
+    assert main(["convert", str(_write_smooth_trk(tmp_path / "t.trk", n=40, npts=30)),
+                 str(tracts), "--num-chunks", "8"]) == 0
+    result = build_pyramid(str(tracts), factors=[(1, 2)], rdp_tolerances=[0.5])
+    assert result["method"] == result["level_specs"][0]["method"] != "per_object"
+
+
+def test_coarse_levels_count_their_own_vertices(tmp_path):
+    from zarr_vectors.building import get_resolution_level, read_object_attributes
+
+    pytest.importorskip("nibabel")
+    out = tmp_path / "t.zv"
+    assert main(["convert", str(_write_smooth_trk(tmp_path / "t.trk", n=80, npts=50)),
+                 str(out), "--num-chunks", "8", "--object-attr", "vertex_count",
+                 "--coarsen", "1,1", "--sparsity", "2,2", "--rdp-tolerance", "0.5,1"]) == 0
+    root = open_store(str(out))
+    for level in (0, 1, 2):
+        level_group = get_resolution_level(root, level)
+        counts = np.asarray(read_object_attributes(level_group, "vertex_count"))
+        meta = json.loads((out / str(level) / "zarr.json").read_text())
+        assert int(counts.sum()) == meta["attributes"]["zarr_vectors_level"]["vertex_count"]
+        if level:
+            assert (counts == 0).sum() > 0      # dropped objects count 0, not "missing"
+
+
+def test_mesh_decimate_without_scipy_leaves_attributes_off(tmp_path, monkeypatch):
+    import zarr_vectors_tools.multiresolution.strategies.mesh_decimate_level as mdl
+    from zarr_vectors_tools.convert.ingest.obj import ingest_obj
+    from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
+
+    t = (1 + 5 ** 0.5) / 2
+    verts = np.array([[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t],
+                      [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]])
+    faces = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4],
+             [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8],
+             [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]]
+    obj = tmp_path / "ico.obj"
+    obj.write_text("".join(f"v {a} {b} {c}\n" for a, b, c in verts * 10 + 50)
+                   + "".join(f"vn {a} {b} {c}\n" for a, b, c in verts)
+                   + "".join(f"f {a + 1}//{a + 1} {b + 1}//{b + 1} {c + 1}//{c + 1}\n"
+                             for a, b, c in faces))
+    out = tmp_path / "ico.zv"
+    ingest_obj(obj, out, (100.0, 100.0, 100.0))
+    monkeypatch.setattr(mdl, "_have_scipy", lambda: False)
+    with pytest.warns(UserWarning, match="not carried"):
+        build_pyramid(str(out), factors=[(1.5, 1)], method="mesh_decimate")
+    assert not (out / "1" / "vertex_attributes").exists()
+
+
+def test_coarse_point_levels_carry_attributes(tmp_path):
+    from zarr_vectors.types.points import read_points
+
+    rng = np.random.default_rng(2)
+    group = np.repeat(np.arange(10), 60)
+    xyz = rng.uniform(20, 280, (10, 3))[group] + rng.normal(0, 15, (group.size, 3))
+    src = tmp_path / "a.csv"
+    src.write_text("x,y,z,group,intensity,label\n" + "\n".join(
+        f"{x:.3f},{y:.3f},{z:.3f},{g},{x / 1000:.6f},{g % 3}"
+        for (x, y, z), g in zip(xyz, group)
+    ) + "\n")
+    out = tmp_path / "a.zv"
+    assert main(["convert", str(src), str(out), "--format", "table",
+                 "--position-columns", "x,y,z", "--object-id-column", "group",
+                 "--chunk-shape", "100,100,100", "--bin-shape", "10,10,10",
+                 "--coarsen", "2", "--sparsity", "1", "--cross-level-storage", "none"]) == 0
+    level1 = read_points(str(out), level=1, attribute_names=["intensity", "label"])
+    attrs = level1["vertex_attributes"]
+    # A float column is the bin's mean, as the position is: intensity = x/1000.
+    np.testing.assert_allclose(attrs["intensity"], level1["positions"][:, 0] / 1000, atol=1e-5)
+    # Codes keep a value that occurred, not a blend.
+    assert set(np.unique(attrs["label"]).tolist()) <= {0, 1, 2}

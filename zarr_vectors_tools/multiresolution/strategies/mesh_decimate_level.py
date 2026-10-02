@@ -28,6 +28,7 @@ already makes and the only one ``write_links`` supports for canonicalisation.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -360,6 +361,8 @@ def _write_level_objects(
         create_links_array,
         create_links_family,
         finalize_links,
+        level_grid_layout,
+        read_root_metadata,
         write_chunk_attributes,
         write_chunk_links,
         write_chunk_vertices,
@@ -371,6 +374,16 @@ def _write_level_objects(
     attr_spec = attr_spec or {}
 
     cs = np.asarray(chunk_shape, np.float64)
+    # The level's arrays span the chunks the store's bounds cover.  A
+    # collapse places the merged vertex where the quadric is least, which
+    # can be a hair outside a surface that touches the bounds; that vertex
+    # is filed in the nearest chunk the grid has, where it stays at the
+    # position the decimation gave it.
+    grid_origin, grid_shape = level_grid_layout(
+        read_root_metadata(root).bounds, tuple(float(c) for c in cs),
+    )
+    grid_lo = np.asarray(grid_origin, np.int64)
+    grid_hi = grid_lo + np.asarray(grid_shape, np.int64) - 1
 
     # ---- assign every vertex to a chunk, per object --------------------
     per_chunk: dict[tuple, list[tuple[int, npt.NDArray]]] = {}
@@ -378,7 +391,10 @@ def _write_level_objects(
     for oid, (v, f) in sorted(meshes.items()):
         if len(v) == 0:
             continue
-        cc = np.floor(np.asarray(v, np.float64) / cs).astype(np.int64)
+        cc = np.clip(
+            np.floor(np.asarray(v, np.float64) / cs).astype(np.int64),
+            grid_lo, grid_hi,
+        )
         vert_chunk[oid] = cc
         # Group rows by chunk with np.unique rather than a dict keyed on a
         # per-vertex Python tuple: the latter is O(V) interpreter work and
@@ -485,6 +501,71 @@ def _write_level_objects(
     return n_faces, manifests
 
 
+def _carry_object_columns(
+    src_group, level_group, present: list[int], n_objects: int,
+) -> None:
+    """Carry the source level's object attributes, and restamp the viewer's columns.
+
+    Every object attribute is copied for the objects with geometry here --
+    a coarse level without ``segment_id`` would have a viewer take each
+    source segment id for a dense object id.  ``vertex_count`` is counted
+    afresh, since it describes the level, and each fragment gets its
+    object's ``segment_id`` when the source level's fragments had one.
+    """
+    from zarr_vectors.building import (
+        create_object_attributes_array,
+        read_object_attributes,
+        write_object_attributes,
+    )
+    from zarr_vectors.constants import FRAGMENT_ATTRIBUTES, OBJECT_ATTRIBUTES
+    from zarr_vectors.exceptions import ArrayError
+
+    from zarr_vectors_tools.convert.ingest._object_columns import (
+        VERTEX_COUNT_ATTR,
+        stamp_level_object_columns,
+    )
+
+    names = (
+        list(src_group[OBJECT_ATTRIBUTES].children())
+        if OBJECT_ATTRIBUTES in src_group else []
+    )
+    keep = np.asarray(present, dtype=np.int64)
+    mask = np.zeros(n_objects, dtype=np.uint8)
+    mask[keep[keep < n_objects]] = 1
+    for name in names:
+        if name == VERTEX_COUNT_ATTR:
+            continue
+        try:
+            data = np.asarray(read_object_attributes(src_group, name))
+        except ArrayError:
+            continue
+        out = np.zeros_like(data)
+        rows = keep[keep < len(data)]
+        out[rows] = data[rows]
+        create_object_attributes_array(level_group, name, dtype=str(data.dtype))
+        write_object_attributes(level_group, name, out, present_mask=mask[:len(out)])
+    stamp_level_object_columns(
+        level_group,
+        vertex_count=VERTEX_COUNT_ATTR in names,
+        segment_id=src_group.array_exists(f"{FRAGMENT_ATTRIBUTES}/segment_id"),
+    )
+
+
+def _tiling_bin(bin_size: float, chunk: float) -> float:
+    """``bin_size``, or the nearest whole fraction of ``chunk`` when it is no larger."""
+    if bin_size > chunk:
+        return float(bin_size)
+    return float(chunk) / max(1, int(round(float(chunk) / float(bin_size))))
+
+
+def _have_scipy() -> bool:
+    try:
+        import scipy.spatial  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _resample_attributes(
     source_vertices: npt.NDArray,
     new_vertices: npt.NDArray,
@@ -499,8 +580,8 @@ def _resample_attributes(
     what ``meshes._quadric_pyfqmr`` already does, and it keeps a categorical
     label a value that genuinely occurred rather than a blend of two.
 
-    Falls back to leaving the attributes off when SciPy is absent, rather
-    than failing a whole pyramid over it.
+    The caller leaves the attributes off when SciPy is absent (see
+    :func:`_have_scipy`), rather than failing a whole pyramid over it.
     """
     if not attr_spec or not source_attributes or len(new_vertices) == 0:
         return {}
@@ -607,6 +688,17 @@ def coarsen_mesh_decimate_level(
     # surface and loses every scalar on it, which for a cortical surface is
     # the whole payload.
     attr_spec = _vertex_attribute_spec(src_group)
+    if attr_spec and not _have_scipy():
+        # Carrying needs a nearest-vertex lookup; without it the arrays
+        # would be created and left as zeros, which reads as data.  Leave
+        # them off this level instead, and say so.
+        warnings.warn(
+            "mesh_decimate: scipy is not installed, so vertex attributes "
+            f"{sorted(attr_spec)} are not carried to level {target_level}; "
+            "pip install 'zarr-vectors-tools[mesh]'",
+            stacklevel=2,
+        )
+        attr_spec = {}
     meshes, src_attributes = _read_level_objects(
         src_group, ndim, link_width, attr_spec,
     )
@@ -671,35 +763,29 @@ def coarsen_mesh_decimate_level(
     else:
         scale = (int(chunk_scale_factor),) * ndim
     src_chunk_shape = get_level_chunk_shape(root_meta, src_lm)
-    target_chunk_shape = tuple(float(c) * float(s)
-                               for c, s in zip(src_chunk_shape, scale))
-    # Cap the growth at the extent of the data. Doubling the chunk every level
-    # suits a corpus that spans many chunks; on a single cell it runs away --
-    # the test neuron is 0.66 mm across while level 4 and 5 chunks reached
-    # 2.05 mm and 4.10 mm, so each coarse level became ONE chunk holding the
-    # whole object, which no viewer can cull spatially and which defeats the
-    # store's own spatial index.
-    # The cap must land on an integer multiple of the ROOT chunk shape --
-    # create_resolution_level rejects a level whose chunk_shape is not one
-    # ("nested chunk grids are required"). Clamping straight to the data extent
-    # produced e.g. 1000 against a root of 600 and raised MetadataError, so the
-    # cap is rounded down to a whole multiple, floored at 1x.
-    lo, hi = root_meta.bounds
-    extent = [float(b) - float(a) for a, b in zip(lo, hi)]
-    capped = []
-    for c, e, r in zip(target_chunk_shape, extent, root_meta.chunk_shape):
-        r = float(r)
-        mult_target = max(1, int(round(c / r)))
-        mult_cap = max(1, int(np.floor(max(e, r) / r)))
-        capped.append(r * min(mult_target, mult_cap))
-    target_chunk_shape = tuple(capped)
+    # Each level's chunk is the requested whole multiple of the level below's,
+    # every grid anchored at 0, so a coarse chunk is exactly a block of finer
+    # ones.  Growth is not capped at the data's extent: a level whose chunk
+    # and objects match the level below's ties with it in the viewer, which
+    # then never refines, and capping in multiples of the root chunk gave
+    # e.g. 300 above a level of 200.  A chunk larger than the data is just
+    # one chunk.
+    target_chunk_shape = tuple(
+        float(c) * int(s) for c, s in zip(src_chunk_shape, scale)
+    )
     root_bin = tuple(float(b) for b in root_meta.effective_bin_shape)
     src_bin = getattr(src_lm, "bin_shape", None) if src_lm else None
     source_bin = tuple(float(b) for b in src_bin) if src_bin else root_bin
     # The geometric scale really applied is the linear one implied by the area
     # reduction, sqrt(k) -- recorded so the NGFF transform is not the ~340x
-    # misstatement the clustering strategy leaves behind.
-    target_bin = tuple(b * float(np.sqrt(k)) for b in source_bin)
+    # misstatement the clustering strategy leaves behind.  A bin no larger
+    # than the chunk must tile it (core refuses the level otherwise), so it
+    # is snapped to the nearest whole fraction of the chunk: sqrt(2) times a
+    # 50-unit bin in a 100-unit chunk records 100, not 70.7.
+    target_bin = tuple(
+        _tiling_bin(b * float(np.sqrt(k)), c)
+        for b, c in zip(source_bin, target_chunk_shape)
+    )
 
     v_out = sum(len(v) for v, f in out.values())
     f_out = sum(len(f) for v, f in out.values())
@@ -714,7 +800,14 @@ def coarsen_mesh_decimate_level(
         bin_shape=target_bin,
         bin_ratio=tuple(max(1, int(round(t / r)))
                         for t, r in zip(target_bin, root_bin)),
-        chunk_shape=(target_chunk_shape if any(s != 1 for s in scale) else None),
+        # Stamped whenever it is not the root's: a level above a grown one
+        # keeps that grid even at scale 1, rather than falling back to root.
+        chunk_shape=(
+            target_chunk_shape
+            if any(float(t) != float(r)
+                   for t, r in zip(target_chunk_shape, root_meta.chunk_shape))
+            else None
+        ),
         object_sparsity=1.0 / float(sparsity_factor),
         coarsening_method=COARSEN_MESH_DECIMATE,
         parent_level=source_level,
@@ -739,6 +832,7 @@ def coarsen_mesh_decimate_level(
     propagate_groupings(src_group, level_group,
                         surviving_oids=surviving_oids_from(
                             sorted(out), sparsity_factor))
+    _carry_object_columns(src_group, level_group, sorted(manifests), n_src_objects)
 
     achieved = predict_bytes(v_in, f_in) / max(predict_bytes(v_out, f_out), 1)
     return {
@@ -776,30 +870,33 @@ def build_mesh_pyramid_to_floor(
     object_floors: dict | None = None,
     verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    """Add levels at ``size_factor``x data-size reduction each, until the floor.
+    """Add levels at ``size_factor``-fold data-size reduction each, until the floor.
 
     "The floor" is where the surface can no longer be reduced by the requested
-    factor and still be a mesh. Three things stop the ladder, and which one
+    factor and still be a mesh. Four things stop the ladder, and which one
     fired is reported per level:
 
-    ``target_missed``  the level came out more than ``tolerance`` short of the
-        requested factor. Every remaining edge collapse is refused by the link
-        condition or the normal-flip guard, so the geometry is as coarse as it
-        can be without pinching a tube shut or folding a face over. This is the
-        real floor and normally the one that fires.
-    ``min_faces``      the absolute face budget is exhausted.
-    ``not_a_mesh``     the level failed :func:`mesh_floor_report` -- an orphan
-        appeared, or a component fell below the 4 faces a closed surface needs.
-        This should never fire; it is a backstop against a bug, not a design
-        stop, and it deletes the offending level rather than publishing it.
-
-    ``tube_floor``    the next level would fall below the face count at which
-        the geometry can still be a surface at all -- see
-        :func:`tube_floor_faces`. Checked BEFORE the level is built, so a level
-        that cannot look right is never written rather than written and judged.
-        This is the stop that matters for thin neurites: the size-factor tests
-        below are blind to quality and happily emitted a level at 3.99x whose
-        axon had disintegrated into 5:1 slivers.
+    ``target_missed``
+        The level came out more than ``tolerance`` short of the requested
+        factor. Every remaining edge collapse is refused by the link condition
+        or the normal-flip guard, so the geometry is as coarse as it can be
+        without pinching a tube shut or folding a face over. This is the real
+        floor and normally the one that fires.
+    ``min_faces``
+        The absolute face budget is exhausted.
+    ``not_a_mesh``
+        The level failed :func:`mesh_floor_report` -- an orphan appeared, or a
+        component fell below the 4 faces a closed surface needs. This should
+        never fire; it is a backstop against a bug, not a design stop, and it
+        deletes the offending level rather than publishing it.
+    ``tube_floor``
+        The next level would fall below the face count at which the geometry
+        can still be a surface at all -- see :func:`tube_floor_faces`. Checked
+        BEFORE the level is built, so a level that cannot look right is never
+        written rather than written and judged. This is the stop that matters
+        for thin neurites: the size-factor tests are blind to quality and
+        happily emitted a level at 3.99x whose axon had disintegrated into
+        5:1 slivers.
 
     The level that trips a stop is kept if it is still a valid mesh (it is the
     coarsest honest representation), and discarded only in the ``not_a_mesh``

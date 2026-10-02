@@ -63,9 +63,18 @@ from zarr_vectors.building import write_object_attributes
 from zarr_vectors.types import skeletons as sk
 from zarr_vectors.typing import ChunkCoords
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_level_object_columns
+
 # Re-use the coordinate-distribution helper from the .frags ingest module.
-from zarr_vectors_tools.convert.ingest.precomputed_skeletons import pieces_from_chunk
+from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
+    pieces_from_chunk,
+    stamp_level_vertex_count,
+)
 from zarr_vectors_tools.multiresolution.object_index import build_object_index
+from zarr_vectors_tools.multiresolution.skeleton_layout import (
+    LAYOUT_LINKED,
+    mark_skeleton_layout,
+)
 from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
     coarsen_skeleton_level,
@@ -197,7 +206,8 @@ class PlainPrecomputedReader:
         if props_path is None:
             raise RuntimeError(
                 f"No 'segment_properties' entry in info at {self.base_url}. "
-                "Pass explicit seg_ids= to run_ingest_plain."
+                "Name the segments to ingest: --segment-id ID (repeatable) "
+                "from the CLI, or segment_ids= in Python."
             )
         from cloudfiles import CloudFiles
 
@@ -249,7 +259,7 @@ class PlainPrecomputedReader:
             except ImportError as e:
                 raise ImportError(
                     "PlainPrecomputedReader.read_skeleton requires cloud-volume: "
-                    "pip install cloud-volume"
+                    "pip install 'zarr-vectors-tools[precomputed]'"
                 ) from e
             source = PrecomputedSkeletonSource.from_cloudpath(self.base_url)
             self._local.source = source
@@ -568,6 +578,10 @@ def run_ingest_plain(
             backend=backend,
             coordinate_offset=grid_origin.tolist(),
         )
+        # Every vertex once, a crossing edge as a [child, parent] link
+        # record (pieces_from_chunk): the layout SWC ingest writes, not the
+        # face copies of a .frags layer.
+        mark_skeleton_layout(root, LAYOUT_LINKED)
 
         cross_edges, chunk_files = _distribute_batches(
             batch_paths, chunk_shape_nm, list(attribute_names), grid_origin,
@@ -608,6 +622,8 @@ def run_ingest_plain(
     oid_of_seg = build_object_index(lg, records, ndim=ndim)
 
     sk.finalize_skeleton_store(root)
+    stamp_level_vertex_count(lg)
+    stamp_level_object_columns(lg)
 
     if progress:
         print(f"  [plain-ingest] object index: {len(oid_of_seg)} objects", flush=True)

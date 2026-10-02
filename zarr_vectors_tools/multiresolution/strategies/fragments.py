@@ -46,13 +46,11 @@ Trade-offs, stated plainly
 * **No cross-level links are emitted.**  ``cross_level_depth`` /
   ``cross_level_storage`` are accepted and ignored, the same way the polyline
   and skeleton strategies ignore them — only the per-object coarsener emits
-  inline ``±1`` arrays.  ``_finalize_cross_level_for_store`` still stamps those
-  two values on root metadata afterwards, so a store built this way advertises
-  a cross-level depth it has no arrays for.  Pass ``cross_level_depth=0,
-  cross_level_storage="none"`` if that matters to a downstream reader.  What
-  this strategy *does* give you instead is a stable ``(chunk, fragment_index)``
-  identity across levels, which is a coarser-grained but cheaper way to relate
-  a level to its parent.
+  inline ``±1`` arrays, and ``build_pyramid`` stamps root metadata with what
+  was written (``cross_level_storage="none"`` here).  What this strategy
+  *does* give you instead is a stable ``(chunk, fragment_index)`` identity
+  across levels, which is a coarser-grained but cheaper way to relate a level
+  to its parent.
 """
 
 from __future__ import annotations
@@ -156,6 +154,7 @@ def coarsen_fragments_level(
     sparsity_seed: int | None = None,
     compressor: Any = None,
     coarsen_mode: str = "decimate",
+    attribute_values: Any = None,
     **_ignored: Any,
 ) -> dict[str, Any]:
     """Coarsen one level fragment-wise, preserving fragment identity and reuse.
@@ -205,6 +204,7 @@ def coarsen_fragments_level(
             seed=sparsity_seed,
             alive_mask=alive,
             relative_to="alive",
+            attribute_values=attribute_values,
         ))
     else:
         keep_oids = list(range(n_src_objects))
@@ -444,12 +444,12 @@ def _per_fragment_coarsener(
         sparsity_seed=kwargs.get("sparsity_seed"),
         compressor=kwargs.get("compressor"),
         coarsen_mode=kwargs.get("coarsen_mode", "decimate"),
+        attribute_values=kwargs.get("attribute_values"),
     )
 
 
 __all__ = [
     "COARSENER_KEY",
     "COARSEN_PER_FRAGMENT",
-    "_per_fragment_coarsener",
     "coarsen_fragments_level",
 ]

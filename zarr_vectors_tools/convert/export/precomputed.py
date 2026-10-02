@@ -32,10 +32,11 @@ What the format forces, and what this module does about it:
   records no unit is taken to be in nanometres unless ``unit=`` says
   otherwise.  The store's coordinate offset is added back.
 * **Segment ids.**  A store written by the precomputed ingesters keeps a
-  ``segment_id`` per object, and that is the id.  Any other store numbers its
-  objects from 0, and Neuroglancer treats segment 0 as background -- it
-  never asks for its skeleton or mesh -- so those are exported as
-  ``object id + 1``.  A stored segment id of 0 is refused for the same reason.
+  ``segment_id`` per object, and that is the id; the SWC ingest stores
+  ``object id + 1``.  Any other store numbers its objects from 0, and
+  Neuroglancer treats segment 0 as background -- it never asks for its
+  skeleton or mesh -- so those are exported as ``object id + 1`` too.  A
+  stored segment id of 0 is refused for the same reason.
 * **Meshes are single-resolution** (``neuroglancer_legacy_mesh``), one
   fragment per segment.  The multi-resolution Draco format and sharding are
   not written; export a coarser level to a second layer instead.  The legacy
@@ -177,7 +178,8 @@ def export_precomputed_skeletons(
     nanometres, its edges, and one block per carried vertex attribute, in
     the order the layer's ``info`` lists them.
 
-    An EM skeleton store (one the precomputed ingesters wrote) is read one
+    An EM skeleton store (one the precomputed ingesters wrote; see
+    :mod:`zarr_vectors_tools.multiresolution.skeleton_layout`) is read one
     segment at a time, touching only the chunks each segment lives in, and
     the boundary-crossing edges between its fragments are added back from
     the cross-chunk links -- without them a neuron that crosses a chunk
@@ -223,7 +225,7 @@ def export_precomputed_skeletons(
     plan, skipped = _attribute_plan(level_group, attribute_names)
 
     stored = _stored_segment_ids(level_group)
-    em = stored is not None and _is_em_skeleton_store(root_meta)
+    em = stored is not None and _is_em_skeleton_store(root)
     explicit = object_ids is not None or segment_ids is not None
     if em:
         pairs = _select(level, len(stored), stored, object_ids, segment_ids)
@@ -445,11 +447,19 @@ def _open_level(store_path: str | Path, level: int) -> tuple[Any, Any, Any]:
     return root, root_meta, level_group
 
 
-def _is_em_skeleton_store(root_meta: Any) -> bool:
-    """Is this a store core's pull-by-segment-id reader can read?"""
-    from zarr_vectors.constants import LINKS_IMPLICIT_BRANCHES
+def _is_em_skeleton_store(root: Any) -> bool:
+    """Is this a store core's pull-by-segment-id reader can read?
 
-    return root_meta.links_convention == LINKS_IMPLICIT_BRANCHES
+    Only the split layout the precomputed ingesters write: an SWC store
+    carries segment ids too, but its trees cross chunks by link records,
+    which that reader does not follow.
+    """
+    from zarr_vectors_tools.multiresolution.skeleton_layout import (
+        LAYOUT_SPLIT,
+        skeleton_layout,
+    )
+
+    return skeleton_layout(root) == LAYOUT_SPLIT
 
 
 def _stored_segment_ids(level_group: Any) -> npt.NDArray[np.uint64] | None:
@@ -581,6 +591,12 @@ def _select(
             )
     else:
         oids = list(nonempty) if nonempty is not None else list(range(n_objects))
+        if stored is not None:
+            # An object a coarse level's sparsity dropped keeps its slot, with
+            # the all-ones id; it has no geometry, and several of them would
+            # otherwise read as one segment id repeated.
+            dropped = np.iinfo(np.uint64).max
+            oids = [oid for oid in oids if int(ids[oid]) != dropped]
 
     if segment_ids is not None or object_ids is not None:
         if nonempty is not None:

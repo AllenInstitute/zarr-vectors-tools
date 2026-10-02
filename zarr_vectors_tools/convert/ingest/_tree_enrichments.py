@@ -16,14 +16,16 @@ TERMINAL = 3
 
 def compute_tree_metrics(
     parents: np.ndarray,
-    root_idx: int = 0,
+    root_idx: int | list[int] = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """One traversal returning topological depth, Strahler number, and node kind.
 
     Args:
         parents: ``(N,)`` integer array. ``parents[i]`` is the parent index
-            of node i, or -1 for the root. Must encode a valid tree.
-        root_idx: Index of the root node (used to set node_kind=SOMA).
+            of node i, or -1 for a root. Must encode a valid tree, or a
+            forest when ``root_idx`` lists every root.
+        root_idx: Index of the root node (used to set node_kind=SOMA), or a
+            list of them for a forest -- each tree is measured from its own.
 
     Returns:
         ``(topological_depth, strahler, node_kind)`` — each ``(N,)``:
@@ -45,9 +47,12 @@ def compute_tree_metrics(
         if p >= 0 and p != i:
             children[int(p)].append(i)
 
-    # Topological depth via BFS from root.
+    roots = [int(root_idx)] if np.isscalar(root_idx) else [int(r) for r in root_idx]
+    is_root = set(roots)
+
+    # Topological depth via BFS from the root(s).
     depth = np.zeros((n,), dtype=np.uint16)
-    stack = [root_idx]
+    stack = list(roots)
     while stack:
         node = stack.pop()
         for c in children[node]:
@@ -58,7 +63,7 @@ def compute_tree_metrics(
     node_kind = np.full((n,), CONTINUATION, dtype=np.uint8)
     for i in range(n):
         nc = len(children[i])
-        if i == root_idx:
+        if i in is_root:
             node_kind[i] = SOMA
         elif nc == 0:
             node_kind[i] = TERMINAL
@@ -69,7 +74,7 @@ def compute_tree_metrics(
     # Strahler via post-order. Iterative to avoid recursion limits.
     strahler = np.zeros((n,), dtype=np.uint8)
     order: list[int] = []
-    visit_stack = [root_idx]
+    visit_stack = list(roots)
     while visit_stack:
         node = visit_stack.pop()
         order.append(node)

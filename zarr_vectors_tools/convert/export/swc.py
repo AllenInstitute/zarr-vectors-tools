@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,36 @@ _RADIUS_ATTR = "radius"
 _COMPARTMENT_ATTR = "compartment"
 _DEFAULT_RADIUS = 1.0
 _DEFAULT_COMPARTMENT = 3  # 3 = (basal) dendrite, the SWC catch-all
-#: The per-object attribute an EM skeleton store keeps its segment ids in.
+#: The per-object attribute a skeleton store keeps its segment ids in.
 _SEGMENT_ID_ATTR = "segment_id"
+#: The comment line every export ends its header with.
+_PROVENANCE = "# SWC exported by zarr-vectors"
+
+
+def _stored_comments(store_path: str | Path) -> list[str]:
+    """The ``#`` lines of the SWC the store was ingested from, else none.
+
+    ``ingest_swc`` keeps them in the store's SWC header.  An earlier export's
+    provenance line is left out, so a file that goes round more than once
+    carries one, not one per trip.
+    """
+    try:
+        from zarr_vectors_tools.headers.registry import HeaderRegistry
+
+        registry = HeaderRegistry(open_store(str(store_path)))
+        if not registry.has("swc"):
+            return []
+        lines = registry.get("swc").comment_lines
+    except Exception:  # noqa: BLE001 - no header is an answer, not an error
+        return []
+    out = []
+    for line in lines:
+        line = str(line).rstrip("\n")
+        if not line.startswith("#"):
+            line = "# " + line
+        if line != _PROVENANCE:
+            out.append(line)
+    return out
 
 
 def _level_order_attribute(
@@ -119,11 +148,14 @@ def _write_swc(
     parents: np.ndarray,
     radius: np.ndarray,
     compartment: np.ndarray,
+    comments: Sequence[str] = (),
 ) -> None:
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
-            f.write("# SWC exported by zarr-vectors\n")
+            for line in comments:
+                f.write(line + "\n")
+            f.write(_PROVENANCE + "\n")
             for i in range(len(positions)):
                 # SWC: ID type X Y Z radius parent_ID (1-indexed, -1 for root)
                 swc_parent = int(parents[i]) + 1 if parents[i] >= 0 else -1
@@ -148,12 +180,13 @@ def export_swc(
     """Export a zarr vectors skeleton to SWC.
 
     Reconstructs the parent array from the edge list and writes the
-    7-column SWC format.
+    7-column SWC format.  The ``#`` lines of an ingested SWC come first,
+    then ``# SWC exported by zarr-vectors``.
 
     Without ``object_ids`` the whole level is one file.  With them,
     ``output_path`` is a directory and each object gets its own
     single-tree file, named after its segment id when the store has one
-    (an EM skeleton store does) and its object id otherwise.
+    (EM and SWC skeleton stores do) and its object id otherwise.
 
     Args:
         store_path: Path to the zarr vectors store.
@@ -200,7 +233,10 @@ def export_swc(
         store_path, level, _COMPARTMENT_ATTR, n_nodes, chunks,
     )
     radius, compartment = _columns(parents, stored_radius, stored_compartment)
-    _write_swc(Path(output_path), positions, parents, radius, compartment)
+    _write_swc(
+        Path(output_path), positions, parents, radius, compartment,
+        _stored_comments(store_path),
+    )
 
     return {
         "node_count": n_nodes,
@@ -222,28 +258,39 @@ def _export_objects(
     An EM skeleton store (one written by the precomputed ingesters) keeps a
     sorted ``segment_id`` per object, and core reads one skeleton by that id
     touching only the chunks the object lives in -- which matters when the
-    store holds a whole dataset and the request is five neurons.  A store
-    without it is read once and split by the object manifests.
+    store holds a whole dataset and the request is five neurons.  Any other
+    store, an SWC store included, is read once and split by the object
+    manifests: core's by-id reader joins an EM store's face copies, and an
+    SWC store's trees cross chunks by link records it does not follow.
     """
     from zarr_vectors.building import read_object_attributes
+
+    from zarr_vectors_tools.multiresolution.skeleton_layout import (
+        LAYOUT_SPLIT,
+        skeleton_layout,
+    )
 
     if directory.suffix.lower() == ".swc":
         raise ExportError(
             f"with object_ids, {directory} names a directory to write one "
             f".swc per object into, not a file"
         )
-    level_group = get_resolution_level(open_store(str(store_path)), level)
+    root = open_store(str(store_path))
+    level_group = get_resolution_level(root, level)
     try:
         segment_ids = np.asarray(
             read_object_attributes(level_group, _SEGMENT_ID_ATTR), dtype=np.uint64,
         ).reshape(-1)
-    except Exception:  # noqa: BLE001 - not an EM store
+    except Exception:  # noqa: BLE001 - a store without segment ids
         segment_ids = None
 
-    if segment_ids is not None:
+    if segment_ids is not None and skeleton_layout(root) == LAYOUT_SPLIT:
         pieces = _objects_by_segment_id(store_path, level, object_ids, segment_ids)
     else:
-        pieces = _objects_by_manifest(store_path, level_group, level, object_ids)
+        pieces = _objects_by_manifest(
+            store_path, level_group, level, object_ids, segment_ids,
+        )
+    comments = _stored_comments(store_path)
 
     files: list[str] = []
     node_count = root_count = 0
@@ -256,7 +303,7 @@ def _export_objects(
         )
         carried.update(a for a in (_RADIUS_ATTR, _COMPARTMENT_ATTR) if a in attributes)
         path = directory / f"{name}.swc"
-        _write_swc(path, positions, parents, radius, compartment)
+        _write_swc(path, positions, parents, radius, compartment, comments)
         files.append(str(path))
         node_count += len(positions)
         root_count += int(np.count_nonzero(parents < 0))
@@ -365,6 +412,7 @@ def _objects_by_manifest(
     level_group: Any,
     level: int,
     object_ids: list[int],
+    segment_ids: np.ndarray | None = None,
 ) -> dict[int, tuple[str, np.ndarray, np.ndarray, dict[str, np.ndarray]]]:
     """Split the whole level into objects.
 
@@ -372,7 +420,8 @@ def _objects_by_manifest(
     ``chunk_local_to_global_offsets`` order, each chunk's fragments
     concatenated.  The object manifests say which object each
     ``(chunk, fragment)`` belongs to, and the chunk's fragment index gives
-    the fragment's node range, which together label every node.
+    the fragment's node range, which together label every node.  Each
+    object is named by its segment id when ``segment_ids`` is given.
     """
     from zarr_vectors.building import read_all_object_manifests, read_vertex_fragment_index
 
@@ -417,8 +466,9 @@ def _objects_by_manifest(
         local = np.full(n_nodes, -1, dtype=np.int64)
         local[nodes] = np.arange(len(nodes))
         inside = (local[edges[:, 0]] >= 0) & (local[edges[:, 1]] >= 0)
+        named = segment_ids is not None and int(oid) < len(segment_ids)
         out[oid] = (
-            str(int(oid)),
+            str(int(segment_ids[int(oid)]) if named else int(oid)),
             positions[nodes],
             local[edges[inside]],
             {name: values[nodes] for name, values in attributes_all.items()},

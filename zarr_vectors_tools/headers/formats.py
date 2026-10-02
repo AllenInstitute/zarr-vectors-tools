@@ -448,8 +448,10 @@ class H5ADHeader(Header):
       names are sanitised for Zarr paths, so the original labels are kept
       in the ``*_names``/``*_attrs`` parallel lists.
     - **Categories.** Categorical/string ``obs`` columns are stored as
-      integer codes; ``categories`` maps a column to its level labels so
-      export can rebuild the ``pandas.Categorical``.
+      integer codes, dictionary-encoded on the array itself so a reader
+      sees labels; ``categories`` maps a column to its level labels too,
+      under its original name, so export can rebuild the
+      ``pandas.Categorical``.
     - **Order and identity.** Zarr Vectors orders vertices by spatial chunk, not by
       original row, so ``row_attr`` names the attribute holding each
       cell's source row index and ``obs_index`` (when small enough to
@@ -483,6 +485,10 @@ class H5ADHeader(Header):
     # obs column that became Zarr Vectors object_ids, plus its category labels.
     object_id_column: str | None = None
     object_id_categories: list[str] | None = None
+    # Source names of the position columns, in axis order (a table's
+    # coordinate columns, or an obsm DataFrame's), so a CSV export can
+    # write the header it came from.  None when the source had no names.
+    position_names: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -503,6 +509,7 @@ class H5ADHeader(Header):
             "obs_index": self.obs_index,
             "object_id_column": self.object_id_column,
             "object_id_categories": self.object_id_categories,
+            "position_names": self.position_names,
         }
 
     @classmethod
@@ -524,6 +531,7 @@ class H5ADHeader(Header):
             obs_index=d.get("obs_index"),
             object_id_column=d.get("object_id_column"),
             object_id_categories=d.get("object_id_categories"),
+            position_names=d.get("position_names"),
         )
 
     def attr_to_obs(self) -> dict[str, str]:

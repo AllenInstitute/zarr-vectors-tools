@@ -4,6 +4,8 @@ The level's links are read once as arrays into a compressed sparse row
 adjacency (:mod:`~zarr_vectors_tools.algorithms._graph_edges`).  BFS then
 expands a whole frontier per step with numpy; Dijkstra and A* keep a heap,
 but walk the adjacency's arrays, and stop at the target.  Memory: O(N + E).
+On a skeleton store the adjacency includes the parent links its links
+convention implies rather than stores.
 
 Cross-chunk edges are not a special case: connectivity is one family, so
 they take per-edge weights from the same ``link_attributes/<weight>/0/``

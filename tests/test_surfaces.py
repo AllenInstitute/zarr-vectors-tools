@@ -38,7 +38,6 @@ from tests._surface_fixtures import (  # noqa: E402
     write_shape_gii,
     write_surf_gii,
 )
-from zarr_vectors_tools.headers.registry import HeaderRegistry  # noqa: E402
 from zarr_vectors_tools.convert.ingest._surface_store import map_name  # noqa: E402
 from zarr_vectors_tools.convert.ingest.cifti import attach_cifti  # noqa: E402
 from zarr_vectors_tools.convert.ingest.freesurfer import ingest_freesurfer  # noqa: E402
@@ -46,6 +45,7 @@ from zarr_vectors_tools.convert.ingest.gifti import (  # noqa: E402
     classify_gifti,
     ingest_gifti,
 )
+from zarr_vectors_tools.headers.registry import HeaderRegistry  # noqa: E402
 
 CHUNK = (20.0, 20.0, 20.0)
 N = len(sheet("left")[0])

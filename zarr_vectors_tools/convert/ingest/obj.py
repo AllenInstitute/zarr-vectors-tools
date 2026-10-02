@@ -16,6 +16,10 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._attribute_widths import (
+    record_vertex_attribute_widths,
+)
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 from zarr_vectors_tools.convert.ingest._text_tokens import (
     TokenTable,
     iter_chunks,
@@ -28,6 +32,22 @@ from zarr_vectors_tools.convert.ingest._text_tokens import (
 # An index longer than this may not fit in int64, where the line reader's
 # int() never overflows; such a file takes the line reader.
 _MAX_INDEX_DIGITS = 18
+
+
+def refuse_unreadable_encoding(encoding: str) -> None:
+    """Refuse a mesh encoding the store could not be read back in.
+
+    Core's ``write_mesh`` writes Draco-encoded chunks, but ``read_mesh`` has
+    no Draco decoder and fails on them ("buffer size must be a multiple of
+    element size"), as does every exporter and the pyramid.  Lift this when
+    core reads Draco.
+    """
+    if encoding != "raw":
+        raise IngestError(
+            f"encoding={encoding!r} is not supported: core writes Draco meshes "
+            f"but cannot read them back, so the store would be unreadable; "
+            f"use encoding='raw'"
+        )
 
 
 class _ParsedOBJ(NamedTuple):
@@ -65,7 +85,9 @@ def ingest_obj(
         output_path: Path for the output zarr vectors store.
         chunk_shape: Spatial chunk size per dimension (3D).
         dtype: Dtype for position data.
-        encoding: ``"raw"`` or ``"draco"``.
+        encoding: ``"raw"``, the only encoding a store can be read back
+            in.  ``"draco"`` is refused: core writes Draco meshes but has
+            no decoder to read them.
         draco_quantization_bits: For Draco encoding.
         auto_object_id: If True, parse ``o <name>`` / ``g <name>``
             directives and assign each vertex an integer object ID based
@@ -75,6 +97,7 @@ def ingest_obj(
     Returns:
         Summary dict from :func:`write_mesh`.
     """
+    refuse_unreadable_encoding(encoding)
     input_path = Path(input_path)
     if not input_path.exists():
         raise IngestError(f"Input file not found: {input_path}")
@@ -125,6 +148,11 @@ def ingest_obj(
         write_kwargs["object_ids"] = object_ids_arr
 
     result = write_mesh(str(output_path), positions, faces_arr, **write_kwargs)
+    stamp_object_columns(output_path)
+    # write_mesh stamps an (N, 3) normal as one column of 3N rows.
+    record_vertex_attribute_widths(output_path, vertex_attributes)
+    if object_ids_arr is not None:
+        result["object_count"] = int(len(np.unique(object_ids_arr)))
 
     if auto_object_id and object_names:
         try:

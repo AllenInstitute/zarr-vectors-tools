@@ -27,6 +27,11 @@ from zarr_vectors.exceptions import ExportError
 from zarr_vectors.types.points import read_points
 from zarr_vectors.typing import BoundingBox, ChunkCoords
 
+from zarr_vectors_tools.convert.export._point_batches import (
+    box_chunks,
+    clip_to_box,
+    require_object_index,
+)
 from zarr_vectors_tools.convert.ingest.attach import DEFAULT_KEY_ATTRIBUTE
 
 
@@ -71,6 +76,17 @@ def _restore_dtype(values: np.ndarray, source_dtype: str | None) -> Any:
     if source_dtype == "bool":
         return values.astype(bool)
     return values
+
+
+def _ordered(store_path: str, level: int, name: str) -> bool:
+    """Whether a dictionary-encoded attribute declares its categories ordered."""
+    from zarr_vectors.building import VERTEX_ATTRIBUTES, get_resolution_level, open_store
+
+    try:
+        group = get_resolution_level(open_store(store_path), level)
+        return bool(group.read_array_meta(f"{VERTEX_ATTRIBUTES}/{name}").get("ordered"))
+    except Exception:  # noqa: BLE001 - a store written before the flag
+        return False
 
 
 def export_h5ad(
@@ -134,15 +150,17 @@ def export_h5ad(
         attribute_names = _list_vertex_attributes(store_path, level)
     requested = list(attribute_names)
 
+    require_object_index(store_path, level, object_ids)
     try:
-        result = read_points(
+        # bbox by chunks and a row mask rather than read_points(bbox=...):
+        # see _point_batches.box_chunks.
+        result = clip_to_box(read_points(
             store_path,
             level=level,
-            bbox=bbox,
             object_ids=object_ids,
-            chunks=chunks,
+            chunks=box_chunks(store_path, level, bbox, chunks),
             attribute_names=requested or None,
-        )
+        ), bbox)
     except Exception as e:
         raise ExportError(f"Failed to read store '{store_path}': {e}") from e
 
@@ -199,10 +217,18 @@ def export_h5ad(
             continue
         levels = categories.get(label)
         if levels is not None:
-            codes = np.asarray(values, dtype=np.int32)
-            obs_data[label] = pd.Categorical.from_codes(
-                codes, categories=levels, ordered=False
-            )
+            ordered = _ordered(store_path, level, name)
+            if values.dtype.kind in "OUS":
+                # A dictionary-encoded column reads back as its labels
+                # (None where missing), in place of the codes.
+                obs_data[label] = pd.Categorical(
+                    values, categories=levels, ordered=ordered,
+                )
+            else:
+                obs_data[label] = pd.Categorical.from_codes(
+                    np.asarray(values, dtype=np.int32), categories=levels,
+                    ordered=ordered,
+                )
         else:
             obs_data[label] = _restore_dtype(values, source_dtypes.get(label))
 

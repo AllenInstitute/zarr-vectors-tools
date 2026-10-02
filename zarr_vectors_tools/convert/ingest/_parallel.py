@@ -100,6 +100,11 @@ def process_pool_executor(workers: int | None = None):
     Suitable for the coarsener's per-chunk workers, which already write
     their cells with ``record_presence=False`` and rely on a coordinator
     manifest rebuild.
+
+    An exception leaving the context -- Ctrl-C included -- stops the pool at
+    once: queued tasks are cancelled and the workers terminated, then the
+    exception propagates.  A plain shutdown would wait for every queued task
+    to finish first, which on a large ingest is the rest of the run.
     """
     from concurrent.futures import ProcessPoolExecutor
 
@@ -140,9 +145,32 @@ def process_pool_executor(workers: int | None = None):
 
     try:
         yield executor
-    finally:
+    except BaseException:
+        if state["pool"] is not None:
+            _abandon(state["pool"])
+        raise
+    else:
         if state["pool"] is not None:
             state["pool"].shutdown(wait=True)
+
+
+def _abandon(pool: Any) -> None:
+    """Stop a process pool now: drop its queued work and end its workers.
+
+    ``shutdown(cancel_futures=True)`` only drops what has not started; the
+    tasks already running would still be waited for, so the workers are
+    terminated too (``_processes`` is the pool's own pid -> Process map).
+    """
+    processes = list((getattr(pool, "_processes", None) or {}).values())
+    pool.shutdown(wait=False, cancel_futures=True)
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+    for process in processes:
+        process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
 
 
 @contextmanager

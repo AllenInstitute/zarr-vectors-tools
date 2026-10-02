@@ -1,6 +1,6 @@
 """Export zarr vectors streamlines to TRX format.
 
-Requires ``trx-python``: ``pip install trx-python``.
+Requires ``trx-python``: ``pip install 'zarr-vectors-tools[trx]'``.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def export_trx(
     except ImportError as e:
         raise ExportError(
             "trx-python is required for TRX export. "
-            "Install with: pip install trx-python"
+            "Install with: pip install 'zarr-vectors-tools[trx]'"
         ) from e
 
     data, skipped = read_streamline_level(

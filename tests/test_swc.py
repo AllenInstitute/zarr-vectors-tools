@@ -12,7 +12,10 @@ class TestSWC:
 
     def test_ingest(self, tmp_path: Path) -> None:
         swc = tmp_path / "n.swc"
-        swc.write_text("# test\n1 1 0 0 0 5 -1\n2 3 10 0 0 3 1\n3 3 20 0 0 2 2\n4 3 15 10 0 2 2\n5 2 -10 0 0 2.5 1\n")
+        swc.write_text(
+            "# test\n1 1 0 0 0 5 -1\n2 3 10 0 0 3 1\n3 3 20 0 0 2 2\n"
+            "4 3 15 10 0 2 2\n5 2 -10 0 0 2.5 1\n"
+        )
         s = ingest_swc(swc, tmp_path / "n.zv", (100.,100.,100.))
         assert s["node_count"] == 5 and s["kind"] == "skeleton"
 
@@ -22,7 +25,7 @@ class TestSWC:
         ingest_swc(swc, tmp_path / "n.zv", (100.,100.,100.))
         out = tmp_path / "out.swc"
         export_swc(tmp_path / "n.zv", out)
-        lines = [l for l in out.read_text().strip().split("\n") if not l.startswith("#")]
+        lines = [line for line in out.read_text().strip().split("\n") if not line.startswith("#")]
         assert len(lines) == 3
 
 

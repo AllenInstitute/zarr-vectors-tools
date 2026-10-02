@@ -286,17 +286,17 @@ class TestRefresh:
         assert after.coarsening_method == before.coarsening_method
         assert after.vertex_count == before.vertex_count
 
-    def test_skeleton_level_refuses_rather_than_inventing_a_stride(
-        self, tmp_path: Path,
+    def test_skeleton_level_is_rebuilt_at_its_recorded_stride(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Nothing on a skeleton level records its stride.
+        """A skeleton level's bin does not encode its stride; its record does.
 
-        The bin-ratio arithmetic every other method is recovered by reads
-        back 1.0 here, which the coarsener takes as "keep anchors only" --
-        so the level was silently flattened.  Refusing names the one
-        parameter the caller has to supply.
+        The level is rebuilt at the stride it records.  A level written
+        before the record carried one is refused rather than rebuilt at a
+        stride read off the bin ratio, which flattened the level.
         """
         pytest.importorskip("zarr_vectors.types.skeletons")
+        import zarr_vectors_tools.multiresolution.coarsen as coarsen
         from tests.test_skeleton_coarsen import _write_two_skeletons
         from zarr_vectors_tools.multiresolution.strategies.skeletons import (
             build_skeleton_pyramid,
@@ -307,14 +307,23 @@ class TestRefresh:
         build_skeleton_pyramid(str(store), strides=[4], chunk_scale_factors=[2])
         before = read_level_metadata(open_store(str(store)), 1).vertex_count
 
+        rebuild_pyramid_from_level(open_store(str(store), mode="r+"), 0)
+        assert read_level_metadata(open_store(str(store)), 1).vertex_count == before
+
+        # A level from before the stride was recorded.
+        recorded = coarsen.read_coarsening_record
+        monkeypatch.setattr(
+            coarsen, "read_coarsening_record",
+            lambda root, level: {
+                k: v for k, v in recorded(root, level).items() if k != "stride"
+            },
+        )
         with pytest.raises(EditError, match="stride"):
             rebuild_pyramid_from_level(open_store(str(store), mode="r+"), 0)
-
         rebuild_pyramid_from_level(
             open_store(str(store), mode="r+"), 0, coarsen_factors={1: 4},
         )
-        after = read_level_metadata(open_store(str(store)), 1).vertex_count
-        assert after == before
+        assert read_level_metadata(open_store(str(store)), 1).vertex_count == before
 
 
 # =====================================================================

@@ -50,6 +50,23 @@ def _build_sources(args) -> list[Any]:
         if path.is_file():
             fmt = resolve_reader_format(path, args.format)
 
+        if not (fmt and has_native_reader(fmt)):
+            # Only a natively read file can be grouped or re-spaced on the
+            # way in; a store or a staged file would merge without it.
+            ignored = [
+                flag for flag, given in (
+                    ("--group-by", bool(args.group_by)),
+                    ("--lut", bool(args.lut)),
+                    ("--space", args.space != "voxmm"),
+                ) if given
+            ]
+            if ignored:
+                verb = "apply" if len(ignored) > 1 else "applies"
+                raise SystemExit(
+                    f"error: {' / '.join(ignored)} {verb} to TRK, TCK and TRX "
+                    f"files, not to {spec}"
+                )
+
         if fmt and has_native_reader(fmt) and (args.group_by or args.space != "voxmm"):
             options: dict[str, Any] = {}
             if fmt == "trk":
@@ -60,9 +77,33 @@ def _build_sources(args) -> list[Any]:
             built.append(
                 GeometrySource(geometry, transform=transform, label=path.name)
             )
+        elif fmt and not has_native_reader(fmt):
+            # Staged through a scratch store, whose ingester needs a chunk
+            # shape.  The merge re-bins onto the target's grid, so the
+            # target's own chunk shape is as good as any and needs no flag.
+            built.append(open_source(
+                spec, transform=transform, format=fmt,
+                chunk_shape=_staging_chunk_shape(args),
+            ))
         else:
             built.append(open_source(spec, transform=transform))
     return built
+
+
+def _staging_chunk_shape(args) -> tuple[float, ...]:
+    """The chunk shape to stage a file source with: the target's, else ``--cell-size``."""
+    root = Path(args.target) / "zarr.json"
+    if root.exists():
+        attrs = json.loads(root.read_text()).get("attributes", {})
+        chunk = attrs.get("zarr_vectors", {}).get("chunk_shape")
+        if chunk:
+            return tuple(float(c) for c in chunk)
+    if args.cell_size:
+        return tuple(args.cell_size)
+    raise SystemExit(
+        f"error: {args.target} does not exist yet, so a file source has no "
+        f"grid to stage on; pass --cell-size X,Y,Z with --create"
+    )
 
 
 def _load_transform(spec: str):
@@ -86,22 +127,26 @@ def _load_transform(spec: str):
 def run_merge(args) -> int:
     from zarr_vectors_tools.compose import merge_stores, plan_merge
 
-    if args.dry_run:
-        _print("merge plan:", plan_merge(str(args.target), list(args.sources)))
-        return 0
+    from ._args import build_factors
 
-    factors = None
-    if args.pyramid_coarsen or args.pyramid_sparsity:
-        coarsen = args.pyramid_coarsen or []
-        sparsity = args.pyramid_sparsity or []
-        if len(coarsen) != len(sparsity):
-            raise SystemExit(
-                f"error: --pyramid-coarsen has {len(coarsen)} entries but "
-                f"--pyramid-sparsity has {len(sparsity)}; they must match"
-            )
-        factors = [(float(c), float(s)) for c, s in zip(coarsen, sparsity)]
+    factors = build_factors(
+        args.pyramid_coarsen, args.pyramid_sparsity,
+        flags=("--pyramid-coarsen", "--pyramid-sparsity"),
+    )
+    if factors and args.pyramid != "rebuild":
+        raise SystemExit(
+            f"error: --pyramid-coarsen / --pyramid-sparsity describe a rebuilt "
+            f"pyramid; they do nothing with --pyramid {args.pyramid}"
+        )
 
     sources = _build_sources(args)
+    if args.dry_run:
+        try:
+            _print("merge plan:", plan_merge(str(args.target), sources))
+        finally:
+            for source in sources:
+                source.close()
+        return 0
     try:
         summary = merge_stores(
             str(args.target), sources,
@@ -130,6 +175,21 @@ def run_split(args) -> int:
     from zarr_vectors_tools.compose import plan_split, split_store
     from zarr_vectors_tools.compose.readers import load_lut
 
+    from ._args import build_factors
+
+    factors = build_factors(
+        args.pyramid_coarsen, args.pyramid_sparsity,
+        flags=("--pyramid-coarsen", "--pyramid-sparsity"),
+    )
+    # Asking for levels is asking for a pyramid, so the factors switch the
+    # default from drop to rebuild; only an explicit --pyramid drop refuses.
+    pyramid = args.pyramid or ("rebuild" if factors else "drop")
+    if factors and pyramid != "rebuild":
+        raise SystemExit(
+            "error: --pyramid-coarsen / --pyramid-sparsity describe a rebuilt "
+            "pyramid; they do nothing with --pyramid drop"
+        )
+
     names = load_lut(args.lut) if args.lut else None
     common = {
         "by": args.by,
@@ -144,7 +204,12 @@ def run_split(args) -> int:
     summary = split_store(
         str(args.store), args.output,
         bounds=args.bounds,
-        pyramid=args.pyramid,
+        pyramid=pyramid,
+        pyramid_factors=factors,
+        pyramid_options={
+            "coarsen_mode": args.coarsen_mode,
+            "sparsity_strategy": args.sparsity_strategy,
+        },
         overwrite=args.overwrite,
         min_objects=args.min_objects,
         progress=True,

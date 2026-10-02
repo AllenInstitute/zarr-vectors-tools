@@ -18,6 +18,8 @@ from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.graphs import write_graph
 from zarr_vectors.typing import BinShape, ChunkShape
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
+
 
 def _read_csv(path: Path, *, use_cudf: bool):
     """Read a CSV with cuDF (if requested) and return a pandas DataFrame."""
@@ -137,14 +139,20 @@ def ingest_edgelist(
     node_to_idx = {nid: i for i, nid in enumerate(node_ids)}
     positions = nodes_df[list(position_columns)].to_numpy(dtype=np.float64).astype(np.dtype(dtype))
 
+    # Edges whose endpoints are both in the node table.  The same mask
+    # selects the edge attributes below, so a dropped edge cannot shift the
+    # attribute values of the edges after it.
+    sources = edges_df[source_col].to_numpy()
+    targets = edges_df[target_col].to_numpy()
+    edge_kept = np.array(
+        [s in node_to_idx and t in node_to_idx for s, t in zip(sources, targets)],
+        dtype=bool,
+    )
     edges_arr = np.array(
-        [
-            [node_to_idx[s], node_to_idx[t]]
-            for s, t in zip(edges_df[source_col].to_numpy(), edges_df[target_col].to_numpy())
-            if s in node_to_idx and t in node_to_idx
-        ],
+        [[node_to_idx[s], node_to_idx[t]]
+         for s, t in zip(sources[edge_kept], targets[edge_kept])],
         dtype=np.int64,
-    ) if len(edges_df) else np.zeros((0, 2), dtype=np.int64)
+    ).reshape(-1, 2)
 
     node_attributes: dict[str, np.ndarray] = {}
     keep_node_cols = (
@@ -168,7 +176,7 @@ def ingest_edgelist(
     for col in keep_edge_cols:
         if col in edges_df.columns:
             try:
-                edge_attributes[col] = edges_df[col].to_numpy(dtype=np.float32)[: len(edges_arr)]
+                edge_attributes[col] = edges_df[col].to_numpy(dtype=np.float32)[edge_kept]
             except Exception:
                 continue
 
@@ -179,7 +187,7 @@ def ingest_edgelist(
         except ImportError as e:
             raise IngestError(
                 "networkx is required for graph enrichments. "
-                "Install with: pip install zarr-vectors-tools[graph]"
+                "Install with: pip install 'zarr-vectors-tools[graph]'"
             ) from e
 
         G = nx.Graph()
@@ -218,6 +226,7 @@ def ingest_edgelist(
         link_attributes=edge_attributes if edge_attributes else None,
         dtype=dtype,
     )
+    stamp_object_columns(output_path)
     result.update(enrichment_summary)
 
     if compute_summary:

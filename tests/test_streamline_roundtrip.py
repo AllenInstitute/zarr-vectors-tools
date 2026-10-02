@@ -140,7 +140,8 @@ class TestTrkRoundTrip:
         out = tmp_path / "out.trk"
         summary = export_trk(str(store), str(out))
         assert summary["attributes_carried"] == ["fa", "rgb"]
-        assert summary["object_attributes_carried"] == ["colour", "weight"]
+        # vertex_count: the per-object count every store with objects carries.
+        assert summary["object_attributes_carried"] == ["colour", "vertex_count", "weight"]
         assert summary["space"] == "rasmm"
         _assert_trk_matches(out, streamlines, dpp, dps)
 

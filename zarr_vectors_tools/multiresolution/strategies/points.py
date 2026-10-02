@@ -213,15 +213,13 @@ def build_point_subset_pyramid(
     The general :func:`~zarr_vectors_tools.multiresolution.coarsen.build_pyramid`
     does not fit an object-less point cloud: its sparsity factor drops
     *objects*, so a store whose points carry no object IDs is treated as a
-    single object and every level comes out identical. Its coarseners also
-    write ``vertices`` (and object attributes) only — per-vertex attributes
-    are dropped, which for a cell atlas means the coarse levels cannot be
-    coloured by gene or metadata.
+    single object and only binning thins it.  Binning also replaces points
+    with bin means, and their per-vertex attributes with the bin's mean (a
+    float column) or one merged point's value (any other column).
 
-    This builder addresses both: each level keeps a uniformly random
-    ``1/divisor`` of its parent's points, and carries every per-vertex
-    attribute across, so any level can be rendered and coloured exactly
-    like level 0.
+    This builder instead keeps a uniformly random ``1/divisor`` of its
+    parent's points per level, exact positions and exact attribute values,
+    so any level can be rendered and coloured exactly like level 0.
 
     Sampling is drawn from a seeded generator, so the same ``seed`` gives
     the same pyramid.  Levels nest — level *n+1* is a subset of level
@@ -435,6 +433,11 @@ def build_point_subset_pyramid(
         spec.pop("kept", None)
         spec.pop("assignments", None)
         spec.pop("group", None)
+    # Subset levels have no cross-level links; without a stamp the root reads
+    # as the format default, "explicit".
+    from zarr_vectors_tools.multiresolution.coarsen import _stamp_root_cross_level
+
+    _stamp_root_cross_level(root)
 
     return {
         "levels_created": len(per_level),

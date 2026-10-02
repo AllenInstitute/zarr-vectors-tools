@@ -44,6 +44,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 from zarr_vectors_tools.convert.ingest.precomputed import layer_url
 
 LEGACY_MESH_TYPE = "neuroglancer_legacy_mesh"
@@ -259,6 +260,9 @@ def ingest_precomputed_meshes(
         object_ids=object_ids,
         object_attributes={_SEGMENT_ID_ATTR: np.asarray(written, dtype=np.uint64)},
     ))
+    # Each fragment carries its segment's id, as the precomputed skeleton
+    # ingests write it, and each object its vertex_count.
+    stamp_object_columns(out_store)
 
     properties: list[str] = []
     if segment_properties and info.get("segment_properties"):

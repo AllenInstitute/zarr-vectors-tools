@@ -36,7 +36,6 @@ __all__ = [
     "carry_headers",
     "expand_grid",
     "handle_pyramid",
-    "infer_pyramid_factors",
     "merge_groups",
     "read_provenance",
     "record_provenance",
@@ -50,19 +49,27 @@ __all__ = [
 
 
 def expand_grid(
-    dataset: Any, level: Any, needed: Sequence[int],
+    dataset: Any,
+    level: Any,
+    needed: Sequence[int],
+    *,
+    lower: Sequence[int] | None = None,
+    extent: tuple[Sequence[float], Sequence[float]] | None = None,
 ) -> dict[str, Any]:
-    """Grow every per-chunk array so ``needed`` cells fit.
+    """Grow every per-chunk array so chunk coordinates below ``needed`` fit.
 
-    Safe *upwards only*, and the asymmetry is the whole point.  A chunk
-    key is ``floor(p / cell)`` — an absolute cell index with the grid's
-    corner pinned at the coordinate origin — so adding cells at the top
-    leaves every existing key meaning exactly what it meant before, and
-    the resize touches no data.  Extending *downwards*, into negative
-    coordinates, would shift the origin and therefore renumber every
-    chunk in the store: the same bytes, all under the wrong keys.  That
-    is a rewrite, not an expansion, so it is refused rather than
-    attempted.
+    ``needed`` is one past the highest chunk coordinate to hold, per axis
+    (``floor(hi / cell) + 1``); ``lower``, when given, is the lowest.  Both
+    are absolute chunk coordinates — ``floor(p / cell)``, the chunk key a
+    write uses.
+
+    Safe *upwards only*, and the asymmetry is the whole point.  Each array
+    stores cell ``key - origin``, where ``origin`` is the chunk coordinate
+    of its first cell, so adding cells at the top leaves every existing
+    cell where it was and the resize touches no data.  Extending
+    *downwards* moves the first cell and therefore renumbers every cell
+    already written: the same bytes, all under the wrong keys.  That is a
+    rewrite, not an expansion, so it is refused rather than attempted.
 
     Every per-chunk family is grown together — vertices, fragments, link
     families, and each attribute — because they are addressed by the same
@@ -70,26 +77,56 @@ def expand_grid(
     a new cell.  :func:`per_chunk_array_paths` is what enumerates them;
     guessing the names misses the link families, which nest two levels
     deeper.
+
+    The declared bounds grow to cover the new cells (to ``extent`` when
+    given), because arrays created later — a new link segment, a new
+    attribute — are sized from them.
     """
-    from zarr_vectors.building import per_chunk_array_paths, update_root_metadata
+    from zarr_vectors.building import (
+        per_chunk_array_paths,
+        read_root_metadata,
+        update_root_metadata,
+    )
 
     group = level.store
-    want = tuple(int(v) for v in needed)
-    if any(v < 0 for v in want):
-        raise StoreError(
-            "cannot expand a grid to hold negative chunk coordinates: chunk "
-            "keys are absolute cell indices from the coordinate origin, so "
-            "moving the origin renumbers every chunk already written. "
-            "Translate the incoming geometry into positive coordinates, or "
-            "rebuild the target over bounds that cover both."
-        )
-
     try:
-        current = tuple(int(s) for s in group.zarr_group["vertices"].shape)
+        vertices = group.zarr_group["vertices"]
+        current = tuple(int(s) for s in vertices.shape)
     except Exception as exc:  # noqa: BLE001
         raise StoreError("cannot read the target's grid shape to expand it") from exc
+    origin = tuple(
+        int(o) for o in (vertices.attrs.get("chunk_grid_origin") or (0,) * len(current))
+    )
 
-    target = tuple(max(a, b) for a, b in zip(current, want))
+    want_hi = tuple(int(v) for v in needed)
+    # The highest cell wanted lying below the first cell means the data on
+    # that axis is entirely below the grid, which is as downward as it gets.
+    want_lo = tuple(
+        int(v) for v in (lower if lower is not None else (h - 1 for h in want_hi))
+    )
+    below = [
+        (axis, lo, first)
+        for axis, (lo, first) in enumerate(zip(want_lo, origin))
+        if lo < first
+    ]
+    if below:
+        axis, lo, first = below[0]
+        cell = float(level.scale[axis])
+        raise StoreError(
+            f"cannot grow the target's grid downward: axis {axis} needs the "
+            f"cell starting at {lo * cell:g} (chunk coordinate {lo}), but the "
+            f"grid's first cell starts at {first * cell:g} (chunk coordinate "
+            f"{first}). Every cell already written is stored relative to the "
+            "first cell, so moving it would renumber every chunk in the store. "
+            "Move the source into the target's frame "
+            "(--transform FILE, or a Source built with transform=), rebuild "
+            "the target over bounds that cover both, or drop the objects that "
+            "do not fit (--on-out-of-bounds skip / on_out_of_bounds='skip')."
+        )
+
+    target = tuple(
+        max(size, hi - first) for size, hi, first in zip(current, want_hi, origin)
+    )
     if target == current:
         return {"expanded": False, "grid": list(current)}
 
@@ -102,14 +139,30 @@ def expand_grid(
         shape = tuple(int(s) for s in array.shape)
         if len(shape) != len(target):
             continue
-        merged = tuple(max(a, b) for a, b in zip(shape, target))
+        # Each array is grown to reach the same top cell, from its own first
+        # cell: arrays created at different times need not share an origin.
+        own = tuple(
+            int(o) for o in (array.attrs.get("chunk_grid_origin") or (0,) * len(shape))
+        )
+        merged = tuple(
+            max(size, first + size_v - own_first)
+            for size, first, size_v, own_first in zip(shape, origin, target, own)
+        )
         if merged != shape:
             array.resize(merged)
             grown.append(path)
 
     cell = np.asarray([float(v) for v in level.scale], dtype=np.float64)
-    lo, hi = dataset.bounds
-    new_hi = np.maximum(np.asarray(hi, dtype=np.float64), np.asarray(target) * cell)
+    try:
+        lo, hi = read_root_metadata(dataset.store).bounds
+    except Exception:  # noqa: BLE001
+        lo, hi = dataset.bounds
+    if extent is not None:
+        top = np.asarray(extent[1], dtype=np.float64)
+    else:
+        # The middle of the new top cell: in it, whatever the rounding.
+        top = (np.asarray(origin) + np.asarray(target) - 0.5) * cell
+    new_hi = np.maximum(np.asarray(hi, dtype=np.float64), top)
     try:
         update_root_metadata(
             dataset.store,
@@ -117,6 +170,11 @@ def expand_grid(
         )
     except Exception:  # noqa: BLE001 - the arrays are what a write checks
         pass
+    # Core caches the grid it derives from the root bounds on the level
+    # handle, and sizes any array it creates later (a new link segment, a new
+    # attribute) from that cache.  Left in place it predates this expansion,
+    # and the first write to a new cell through a new array fails.
+    group.__dict__.pop("_derived_native_config", None)
 
     return {
         "expanded": True,
@@ -351,7 +409,9 @@ def carry_headers(
     the key ``"trk"``.  The second is filed under ``"trk@<label>"``
     instead of replacing the first: a header that describes half the
     store is useful, and a header that silently describes the wrong half
-    is not.
+    is not.  ``label`` is the source's short name
+    (:attr:`~zarr_vectors_tools.compose.sources.Source.name`), so the key
+    reads ``trk@subject_b`` rather than carrying a whole URL.
 
     Returns:
         ``{format_name: key_written_under}``.
@@ -436,48 +496,6 @@ def stale_levels(dataset: Any) -> list[int]:
     return [int(i) for i in dataset.levels if int(i) != 0]
 
 
-def infer_pyramid_factors(dataset: Any) -> list[tuple[float, float]] | None:
-    """Recover the ``(coarsen, sparsity)`` factors a pyramid was built with.
-
-    Levels record what they *are* — ``bin_ratio`` against level 0 and a
-    cumulative ``object_sparsity`` — not the per-level ratios
-    :func:`build_pyramid` takes.  Dividing consecutive levels recovers
-    them, which is what lets a rebuild reproduce the pyramid the store
-    had rather than asking the caller to remember it.
-
-    Returns ``None`` when a level is missing either number, because a
-    guessed pyramid is worse than an honest refusal.
-    """
-    from zarr_vectors.building import read_level_metadata
-
-    levels = sorted(int(i) for i in dataset.levels)
-    if len(levels) < 2:
-        return None
-
-    ratios: list[float] = []
-    sparsities: list[float] = []
-    for index in levels:
-        try:
-            meta = read_level_metadata(dataset.store, index)
-        except Exception:  # noqa: BLE001
-            return None
-        bin_ratio = getattr(meta, "bin_ratio", None)
-        sparsity = getattr(meta, "object_sparsity", None)
-        if sparsity is None:
-            return None
-        ratios.append(float(np.mean(bin_ratio)) if bin_ratio else 1.0)
-        sparsities.append(float(sparsity))
-
-    factors: list[tuple[float, float]] = []
-    for i in range(1, len(levels)):
-        coarsen = ratios[i] / ratios[i - 1] if ratios[i - 1] else 1.0
-        keep = sparsities[i] / sparsities[i - 1] if sparsities[i - 1] else 1.0
-        # build_pyramid takes sparsity as "one in N", the reciprocal of the
-        # retained fraction the level records.
-        factors.append((round(coarsen, 6), round(1.0 / keep, 6) if keep else 1.0))
-    return factors
-
-
 def handle_pyramid(
     dataset: Any,
     policy: str,
@@ -503,7 +521,11 @@ def handle_pyramid(
         least find out.  For when the merge is one of several and the
         rebuild is deferred to the end.
     """
-    from zarr_vectors.building import remove_resolution_level, update_level_metadata
+    from zarr_vectors.building import (
+        remove_resolution_level,
+        update_level_metadata,
+        write_multiscale_metadata,
+    )
 
     levels = stale_levels(dataset)
     if policy == "keep":
@@ -522,22 +544,31 @@ def handle_pyramid(
             f"pyramid={policy!r} is not one of 'rebuild', 'drop', 'keep'"
         )
 
-    if policy == "rebuild" and factors is None:
-        factors = infer_pyramid_factors(dataset)
-        if factors is None and levels:
-            raise StoreError(
-                "pyramid='rebuild' cannot reconstruct the factors this store's "
-                "pyramid was built with (its levels do not record enough to "
-                "divide out per-level ratios). Pass pyramid_factors=[(coarsen, "
-                "sparsity), ...] explicitly, or choose pyramid='drop' to leave "
-                "the store single-resolution."
-            )
+    if policy == "rebuild" and factors is None and levels:
+        # Re-run each level with the parameters it records -- method, bin and
+        # chunk scale, rdp tolerance and per-level sparsity -- rather than
+        # dividing numbers back out of the metadata, which lost the chunk
+        # scale and tolerance and read per-level sparsity as cumulative.
+        from zarr_vectors_tools.multiresolution.refresh import (
+            rebuild_pyramid_from_level,
+        )
+
+        specs = rebuild_pyramid_from_level(
+            dataset.store, 0,
+            sparsity_strategy=build_options.get("sparsity_strategy", "random"),
+            executor=build_options.get("executor"),
+        )
+        return {"pyramid": "rebuild", "rebuilt_levels": levels, "build": specs}
 
     for index in sorted(levels, reverse=True):
         try:
             remove_resolution_level(dataset.store, index)
         except Exception:  # noqa: BLE001 - already gone is fine
             continue
+    if levels:
+        # remove_resolution_level leaves the level listed in `multiscales`,
+        # which is where a viewer reads the level list from.
+        write_multiscale_metadata(dataset.store)
 
     if policy == "drop" or not factors:
         # Reporting "drop" for a rebuild that had nothing to rebuild

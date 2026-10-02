@@ -10,24 +10,24 @@ affine.  That is the layout viewers which can only scale/translate (not rotate),
 e.g. neuroglancer, need: NGFF transforms can't undo the affine's axis flips, so
 the geometry itself must carry them.
 
-Pipeline
---------
-Phase 0  Parse 1000-byte header; resolve the registration affine.
-Phase 1  Offset-index scan (~6 s for 5.6M streamlines), also sampling one
-         vertex per streamline to size ``chunk_shape`` from ``num_chunks``;
-         partition into N parts.
-Phase A  Parallel over N parts: bin streamlines → spatial chunks, a block of
-         streamlines at a time, write .npz, report each part's exact bbox.
-Grid     Single-process: union those bboxes into the store bounds and lay out
-         the chunk grid, then create the store.  The grid comes from the
-         geometry, not the header's declared FOV — see ingest_trk_parallel.
-Phase B  Parallel over batches of the S chunks: assemble from all N parts →
-         write level-0.
-Coord    Single-process: reconstruct manifests + cross-chunk links from the
-         part directories; the links are written in parallel, whole offsets
-         arrays per task.
-Phase 5  Store CRS/affine metadata + TRKHeader for round-trip.
-Phase 6  Build multiscale pyramid via coarsen.build_pyramid.
+Pipeline::
+
+    Phase 0  Parse 1000-byte header; resolve the registration affine.
+    Phase 1  Offset-index scan (~6 s for 5.6M streamlines), also sampling
+             each streamline's first, middle and last vertex to size
+             ``chunk_shape`` from ``num_chunks``; partition into N parts.
+    Phase A  Parallel over N parts: bin streamlines → spatial chunks, a block of
+             streamlines at a time, write .npz, report each part's exact bbox.
+    Grid     Single-process: union those bboxes into the store bounds and lay out
+             the chunk grid, then create the store.  The grid comes from the
+             geometry, not the header's declared FOV — see ingest_trk_parallel.
+    Phase B  Parallel over batches of the S chunks: assemble from all N parts →
+             write level-0.
+    Coord    Single-process: reconstruct manifests + cross-chunk links from the
+             part directories; the links are written in parallel, whole offsets
+             arrays per task.
+    Phase 5  Store CRS/affine metadata + TRKHeader for round-trip.
+    Phase 6  Build multiscale pyramid via coarsen.build_pyramid.
 """
 
 from __future__ import annotations
@@ -210,7 +210,7 @@ def _trackvis_to_rasmm_affine(input_path: str | Path) -> np.ndarray:
         raise IngestError(
             "nibabel is required to register TRK streamlines to RASmm world "
             "space (so neuroglancer aligns them with the source image). "
-            "Install with: pip install nibabel"
+            "Install with: pip install 'zarr-vectors-tools[trk]'"
         ) from e
     hdr = nib.streamlines.load(str(input_path), lazy_load=True).header
     return np.asarray(get_affine_trackvis_to_rasmm(hdr), dtype=np.float64)
@@ -256,6 +256,28 @@ def _bounds_contain(
     )
 
 
+def _axis_counts(
+    bounds: tuple[list[float], list[float]],
+    num_chunks: int | tuple[int, int, int] | None,
+) -> tuple[int, int, int] | None:
+    """Chunks per axis for ``num_chunks``, or ``None`` for a degenerate extent."""
+    if isinstance(num_chunks, tuple):
+        nx, ny, nz = num_chunks
+        return int(nx), int(ny), int(nz)
+    lo, hi = bounds
+    extent = [hi[i] - lo[i] for i in range(3)]
+    T = int(num_chunks) if num_chunks is not None else 125
+    vol = extent[0] * extent[1] * extent[2]
+    if vol <= 0:
+        return None
+    s = (T / vol) ** (1.0 / 3.0)
+    return (
+        max(1, round(extent[0] * s)),
+        max(1, round(extent[1] * s)),
+        max(1, round(extent[2] * s)),
+    )
+
+
 def _compute_chunk_shape(
     bounds: tuple[list[float], list[float]],
     num_chunks: int | tuple[int, int, int] | None = None,
@@ -273,17 +295,10 @@ def _compute_chunk_shape(
     lo, hi = bounds
     extent = [hi[i] - lo[i] for i in range(3)]
 
-    if isinstance(num_chunks, tuple):
-        nx, ny, nz = num_chunks
-    else:
-        T = int(num_chunks) if num_chunks is not None else 125
-        vol = extent[0] * extent[1] * extent[2]
-        if vol <= 0:
-            return (10.0, 10.0, 10.0)
-        s = (T / vol) ** (1.0 / 3.0)
-        nx = max(1, round(extent[0] * s))
-        ny = max(1, round(extent[1] * s))
-        nz = max(1, round(extent[2] * s))
+    counts = _axis_counts(bounds, num_chunks)
+    if counts is None:
+        return (10.0, 10.0, 10.0)
+    nx, ny, nz = counts
 
     # Round for a readable chunk size, but never to zero: a sub-millimetre
     # tractogram (or any extent smaller than the chunk count) rounded straight
@@ -300,6 +315,41 @@ def _compute_chunk_shape(
     return (_edge(extent[0], nx), _edge(extent[1], ny), _edge(extent[2], nz))
 
 
+def _fit_chunk_shape(
+    bounds: tuple[list[float], list[float]],
+    num_chunks: int | tuple[int, int, int] | None = None,
+) -> tuple[float, float, float]:
+    """:func:`_compute_chunk_shape`, widened so the grid has the cells asked for.
+
+    Chunk keys are ``floor(p / edge)`` from the coordinate origin, not from
+    the data's corner, so ``n`` edges' worth of extent spans ``n + 1`` cells
+    whenever it does not start on a multiple of the edge -- as it almost
+    never does.  At 4 chunks per axis that alone is twice the grid asked
+    for.  Each edge is widened a rounding step at a time (whole millimetres,
+    or a sixteenth of a sub-millimetre edge) until ``bounds`` spans ``n``
+    cells; an edge that cannot get there short of ``extent / (n - 1)`` is
+    left as computed.
+    """
+    shape = _compute_chunk_shape(bounds, num_chunks)
+    counts = _axis_counts(bounds, num_chunks)
+    if counts is None:
+        return shape
+    lo, hi = bounds
+
+    def _cells(axis: int, edge: float) -> int:
+        return int(np.floor(hi[axis] / edge) - np.floor(lo[axis] / edge)) + 1
+
+    fitted = []
+    for axis, (edge, n) in enumerate(zip(shape, counts)):
+        step = 1.0 if edge >= 1.0 else edge / 16.0
+        limit = (hi[axis] - lo[axis]) / max(n - 1, 1) + step
+        widened = edge
+        while _cells(axis, widened) > n and widened <= limit:
+            widened += step
+        fitted.append(widened if _cells(axis, widened) <= n else edge)
+    return (fitted[0], fitted[1], fitted[2])
+
+
 # ---------------------------------------------------------------------------
 # Offset index: scan the file to build streamline byte offsets
 # ---------------------------------------------------------------------------
@@ -311,7 +361,7 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
         byte_offset  int64 (O,)  byte position of each streamline's n_points int32
         n_points     int32 (O,)  point count per streamline
         nbytes       int64 (O,)  byte span of each streamline record (4 + n_pts*pt_stride + props)
-        first_point  float32 (O, 3)  each streamline's first vertex, on-disk voxmm
+        sample_points  float32 (O, 3, 3)  first, middle, last vertex, on-disk voxmm
     """
     n_scalars = header["n_scalars"]
     n_properties = header["n_properties"]
@@ -320,10 +370,10 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
 
     byte_offsets = []
     n_points_list = []
-    # One vertex per streamline, collected as raw bytes and viewed as float32
-    # at the end — cheaper than 5M struct.unpack calls, and 12 bytes per
-    # streamline is a rounding error next to the offsets themselves.
-    first_pts = bytearray()
+    # Three vertices per streamline, collected as raw bytes and viewed as
+    # float32 at the end — cheaper than 5M struct.unpack calls, and 36 bytes
+    # per streamline is a rounding error next to the offsets themselves.
+    sample_pts = bytearray()
 
     path = Path(path)
     # Big buffer so the read/skip pair below stays inside one buffer fill for
@@ -338,18 +388,29 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
             n = struct.unpack("<i", b)[0]
             if n <= 0:
                 break
-            # The first vertex costs nothing extra: the file is already
-            # positioned on it, so this reads 12 bytes it would have skipped.
-            # Its bbox over all streamlines is what sizes chunk_shape, because
-            # the header's declared FOV can be nothing like where the tracts
-            # actually are (see ingest_trk_parallel).
-            pt = f.read(12)
-            if len(pt) < 12:
+            # The first, middle and last vertex: their bbox over all
+            # streamlines is what sizes chunk_shape, because the header's
+            # declared FOV can be nothing like where the tracts actually are
+            # (see ingest_trk_parallel).  The first alone is not enough: a
+            # bundle's streamlines tend to start together, and on single
+            # atlas tracts their starts spanned a median 16% of the volume
+            # the tract fills, so chunks sized from them came out six times
+            # too many.  All three read in place, a seek apart, inside the
+            # buffer for an ordinary record.
+            mid, last = n // 2, n - 1
+            first = f.read(12)
+            if len(first) < 12:
                 break  # truncated final record — drop it, same as a short count
+            f.seek(mid * pt_stride - 12, 1)
+            middle = f.read(12)
+            f.seek((last - mid) * pt_stride - 12, 1)
+            end = f.read(12)
+            if len(middle) < 12 or len(end) < 12:
+                break
             n_points_list.append(n)
             byte_offsets.append(pos)
-            first_pts += pt
-            f.seek(n * pt_stride + prop_bytes - 12, 1)
+            sample_pts += first + middle + end
+            f.seek(pt_stride - 12 + prop_bytes, 1)
 
     byte_offsets_arr = np.array(byte_offsets, dtype=np.int64)
     n_points_arr = np.array(n_points_list, dtype=np.int32)
@@ -361,7 +422,7 @@ def build_offset_index(path: str | Path, header: dict[str, Any]) -> dict[str, np
         "byte_offset": byte_offsets_arr,
         "n_points": n_points_arr,
         "nbytes": nbytes_arr,
-        "first_point": np.frombuffer(bytes(first_pts), dtype="<f4").reshape(-1, 3),
+        "sample_points": np.frombuffer(bytes(sample_pts), dtype="<f4").reshape(-1, 3, 3),
     }
 
 
@@ -563,9 +624,14 @@ class _RunRecord:
             self.resume and cached is not None and cached.exists()
             and self.state.get("input") == fingerprint
         ):
-            log("  reusing the offset index from an earlier run")
             with np.load(cached) as data:
-                return {key: np.asarray(data[key]) for key in data.files}
+                index = {key: np.asarray(data[key]) for key in data.files}
+            # An index cached before the scan sampled three vertices per
+            # streamline has only the first; rescan rather than size the
+            # chunks from less than a fresh run would.
+            if "sample_points" in index:
+                log("  reusing the offset index from an earlier run")
+                return index
         index = build_offset_index(input_path, header)
         if cached is not None:
             np.savez(cached, **index)
@@ -608,7 +674,11 @@ class _RunRecord:
         pyramid options match.  Anything on disk past the last recorded level
         was being written when the run stopped, and is removed.
         """
-        from zarr_vectors.building import list_resolution_levels, remove_resolution_level
+        from zarr_vectors.building import (
+            list_resolution_levels,
+            remove_resolution_level,
+            write_multiscale_metadata,
+        )
 
         pyramid = self.state.get("pyramid") if self.resume else None
         keep = 0
@@ -617,9 +687,14 @@ class _RunRecord:
         existing = set(list_resolution_levels(root))
         while keep > 0 and not all(level in existing for level in range(1, keep + 1)):
             keep -= 1
+        removed = False
         for level in sorted(existing, reverse=True):
             if level > keep:
                 remove_resolution_level(root, level)
+                removed = True
+        if removed:
+            # remove_resolution_level leaves the level listed in `multiscales`.
+            write_multiscale_metadata(root)
         if keep:
             log(f"  keeping pyramid levels 1-{keep} from an earlier run")
         self.set("pyramid", {"plan": pyramid_plan, "levels_done": keep})
@@ -1508,11 +1583,13 @@ def ingest_trk_parallel(
             or explicit (nx, ny, nz) 3-tuple, or None (uses 125).
         n_parts: Number of file parts for Phase A parallelism. Controls how
             finely the input file is sliced — does NOT affect how many
-            processes run simultaneously (that is ``workers``). Defaults to
-            4× workers (fine-grained enough for good load balancing).
-        workers: Number of Dask worker processes. None = cpu_count-1.
-        executor: Injected executor (func, items, shared) callable. If None,
-            either uses dask_executor (when workers>1) or runs serially.
+            processes run simultaneously (set by ``executor``). Defaults to
+            max(4 x workers, 16), capped at the streamline count.
+        workers: Sizes ``n_parts`` and the batches; it does not start any
+            processes itself.
+        executor: The executor that runs the parts in parallel, e.g.
+            :func:`zarr_vectors_tools.parallel.process_pool_executor`.
+            Without one the ingest runs serially.
         dtype: Numpy dtype for vertex positions.
         compressor: Codec for the level-0 per-chunk arrays.  ``None``
             (default) stores raw — vertices then cost exactly
@@ -1535,6 +1612,8 @@ def ingest_trk_parallel(
             ``endpoints``, ``orientation`` (start→end unit vector, 3ch),
             ``tortuosity``, ``vertex_count``.  ``compute_length`` /
             ``compute_endpoints`` are folded in as ``length`` / ``endpoints``.
+            ``vertex_count`` is always written, in place of a file
+            property of that name.
         vertex_attrs: Synthetic per-vertex (per-point) attributes to generate
             for color-by-vertex testing.  Any of ``arc_length`` (0→1 along the
             streamline), ``x`` / ``y`` / ``z`` (coordinate), ``random``,
@@ -1635,8 +1714,16 @@ def ingest_trk_parallel(
     header = parse_trk_header(input_path)
     header_bounds = _compute_bounds_from_header(header)
     file_scalars, file_properties = _plan_file_data(
-        header, keep_scalars, keep_properties, vertex_attrs, object_attrs,
+        header, keep_scalars, keep_properties, vertex_attrs,
+        object_attrs - {"vertex_count"},
     )
+    # Every store carries each streamline's vertex_count (uint32), which a
+    # viewer budgets objects by.  A file property of that name -- a TRK
+    # exported with it -- holds the same counts as float32, which a viewer
+    # reading uint32 would misread, so it gives way to the count made here.
+    file_properties = [p for p in file_properties if p[0] != "vertex_count"]
+    object_attrs.add("vertex_count")
+    _need_vertex_count = True
     # Register to RASmm world space by baking the trackvis-voxmm→RASmm affine
     # into the geometry (applied per streamline in Phase A).  Derive the store
     # bounds/chunk grid in that same RASmm space so the chunk layout matches the
@@ -1664,19 +1751,23 @@ def ingest_trk_parallel(
             "nbytes": offset_index["nbytes"][:max_streamlines],
             # Sliced too, so a subset run sizes its chunks from the subset it
             # actually ingests rather than the whole file's spread.
-            "first_point": offset_index["first_point"][:max_streamlines],
+            "sample_points": offset_index["sample_points"][:max_streamlines],
         }
         n_streamlines = len(offset_index["byte_offset"])
 
-    # Chunk *size* only.  One vertex per streamline is a good enough sample of
-    # where the tracts are, and the header's declared FOV is not: on a real
-    # tractogram the header box was 152 mm across an axis whose tracts ran to
-    # 186 mm, so chunks sized from it were both wrong-scaled and offset.  The
-    # grid's origin and extent come later, from Phase A's exact bounds.
-    seed_bounds = _bounds_of_points(offset_index["first_point"], header_bounds)
+    # Chunk *size* only.  Three vertices per streamline are a good enough
+    # sample of where the tracts are, and the header's declared FOV is not: on
+    # a real tractogram the header box was 152 mm across an axis whose tracts
+    # ran to 186 mm, so chunks sized from it were both wrong-scaled and
+    # offset.  The grid's origin and extent come later, from Phase A's exact
+    # bounds; the sample is close enough to them that the edges can be fitted
+    # to the anchored grid here.
+    seed_bounds = _bounds_of_points(
+        offset_index["sample_points"].reshape(-1, 3), header_bounds,
+    )
     if affine_tv2ras is not None:
         seed_bounds = _transform_bounds(seed_bounds, affine_tv2ras)
-    chunk_shape = _compute_chunk_shape(seed_bounds, num_chunks)
+    chunk_shape = _fit_chunk_shape(seed_bounds, num_chunks)
     _log(f"  chunk_shape: {chunk_shape}")
 
     _n_workers = workers if workers and workers > 0 else max(1, (os.cpu_count() or 2) - 1)
@@ -1867,10 +1958,12 @@ def ingest_trk_parallel(
                 # array's codecs are fixed at creation — so the compressor has to
                 # be set HERE or the store's largest arrays stay raw forever.
                 compressor=compressor,
+                # The UDUNITS-2 name NGFF requires, as the TRX and TCK ingests
+                # write; readers that know "mm" also know "millimeter".
                 axes=[
-                    {"name": "x", "type": "space", "unit": "mm"},
-                    {"name": "y", "type": "space", "unit": "mm"},
-                    {"name": "z", "type": "space", "unit": "mm"},
+                    {"name": "x", "type": "space", "unit": "millimeter"},
+                    {"name": "y", "type": "space", "unit": "millimeter"},
+                    {"name": "z", "type": "space", "unit": "millimeter"},
                 ],
                 geometry_types=["streamline"],
                 links_convention="implicit_sequential",
@@ -2063,11 +2156,11 @@ def ingest_trk_parallel(
                     obj_attrs_to_write[prop_name] = column[:, 0] if width == 1 else column
 
             if obj_attrs_to_write:
-                from zarr_vectors.building import write_object_attributes
-
-                from zarr_vectors_tools.multiresolution.coarsen import (
+                from zarr_vectors.building import (
                     create_object_attributes_array,
+                    write_object_attributes,
                 )
+
                 for attr_name, data in obj_attrs_to_write.items():
                     create_object_attributes_array(level_group, attr_name)
                     write_object_attributes(level_group, attr_name, data)
