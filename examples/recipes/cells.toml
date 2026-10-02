@@ -1,35 +1,40 @@
-# Spatial transcriptomics: cells from one table, a second file of gene
-# counts joined on after, then a pyramid.  TOML needs no extra dependency.
+# Spatial transcriptomics: cells from one table, a second file of cell types
+# joined on after, then a pyramid.  TOML needs no extra dependency.
 # Run with:  zvtools run cells.toml
 name = "cells"
 
+# Positions in um; 100 um chunks, 10 um bins (near the cell spacing).  The
+# sample column makes each sample an object, so coarse levels can thin them.
 [[steps]]
 [steps.convert]
 input = "data/cells.csv"
-output = "out/cells.zarrvectors"
+output = "out/cells.zv"
 format = "table"
 position_columns = ["x", "y", "z"]
 key_column = "cell_id"
+object_id_column = "sample"
 chunk_shape = [100, 100, 100]
+bin_shape = [10, 10, 10]
 
 [[steps]]
 [steps.attach]
-store = "out/cells.zarrvectors"
+store = "out/cells.zv"
 input = "data/cell_types.csv"
 key_column = "cell_id"
 column = ["cell_type", "leiden"]
 
 [[steps]]
 [steps.pyramid]
-store = "out/cells.zarrvectors"
-coarsen = [2, 4]
-sparsity = [2, 4]
+store = "out/cells.zv"
+coarsen = [2, 2, 2]
+sparsity = [1, 1, 1]
+cross_level_storage = "none"
 
 [[steps]]
 [steps.validate]
-store = "out/cells.zarrvectors"
+store = "out/cells.zv"
 
 [[steps]]
 [steps.shard]
-store = "out/cells.zarrvectors"
+store = "out/cells.zv"
 shape = 8

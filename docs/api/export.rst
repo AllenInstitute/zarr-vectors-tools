@@ -1,21 +1,29 @@
 Export
 ======
 
-File-format export functions. Each one reads a Zarr Vectors store and
-writes a single file in the target format.
+``zarr_vectors_tools.convert.export``: one module per output format. Each
+reads a store and writes a file. ``zvtools convert STORE FILE`` calls these.
 
-CSV / XYZ point clouds
-----------------------
+CSV / XYZ points
+----------------
 
 .. automodule:: zarr_vectors_tools.convert.export.csv_points
    :members:
    :undoc-members:
    :show-inheritance:
 
-PLY (points)
-------------
+PLY
+---
 
 .. automodule:: zarr_vectors_tools.convert.export.ply
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+AnnData (h5ad)
+--------------
+
+.. automodule:: zarr_vectors_tools.convert.export.h5ad
    :members:
    :undoc-members:
    :show-inheritance:
@@ -52,16 +60,16 @@ Wavefront OBJ
    :undoc-members:
    :show-inheritance:
 
-GIFTI (cortical surfaces)
--------------------------
+GIFTI
+-----
 
 .. automodule:: zarr_vectors_tools.convert.export.gifti
    :members:
    :undoc-members:
    :show-inheritance:
 
-Neuroglancer precomputed (skeletons, meshes)
---------------------------------------------
+Neuroglancer precomputed
+------------------------
 
 .. automodule:: zarr_vectors_tools.convert.export.precomputed
    :members:

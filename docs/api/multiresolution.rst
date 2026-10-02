@@ -1,15 +1,15 @@
 Multiresolution
 ===============
 
-Pyramid construction and the coarsening layer. ``coarsen`` is the
-orchestrator; the per-geometry coarsening rules live in
-``multiresolution.strategies``.
+``zarr_vectors_tools.multiresolution``: build coarser levels. ``coarsen`` is
+the entry point; ``strategies`` holds the per-geometry rules. ``zvtools
+pyramid`` calls these; see :doc:`../pyramids`.
 
-Pyramid construction
---------------------
+Pyramid building
+----------------
 
-Coarsening orchestrator
-~~~~~~~~~~~~~~~~~~~~~~~
+Coarsen
+~~~~~~~
 
 .. automodule:: zarr_vectors_tools.multiresolution.coarsen
    :members:
@@ -24,16 +24,91 @@ Object selection
    :undoc-members:
    :show-inheritance:
 
-Pyramid refresh
-~~~~~~~~~~~~~~~
+Refresh
+~~~~~~~
 
 .. automodule:: zarr_vectors_tools.multiresolution.refresh
    :members:
    :undoc-members:
    :show-inheritance:
 
-Supporting machinery
---------------------
+Strategies
+----------
+
+Points
+~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.points
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Polylines
+~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.polylines
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Skeletons
+~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.skeletons
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Skeleton bins
+~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.skeleton_bins
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Meshes, clustering
+~~~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.meshes
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Meshes, decimation
+~~~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.mesh_decimate
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Mesh decimation levels
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.mesh_decimate_level
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Graphs
+~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.graphs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Fragments
+~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.strategies.fragments
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Supporting modules
+------------------
 
 Metanodes
 ~~~~~~~~~
@@ -51,16 +126,16 @@ Object index
    :undoc-members:
    :show-inheritance:
 
-Skeleton graph preprocessing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Skeleton graph
+~~~~~~~~~~~~~~
 
 .. automodule:: zarr_vectors_tools.multiresolution.skeleton_graph
    :members:
    :undoc-members:
    :show-inheritance:
 
-Implicit sequential coarsening
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Implicit sequential
+~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: zarr_vectors_tools.multiresolution.coarsen_implicit
    :members:
@@ -71,49 +146,6 @@ Constants
 ~~~~~~~~~
 
 .. automodule:: zarr_vectors_tools.multiresolution.constants
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Coarsening strategies
----------------------
-
-Skeletons
-~~~~~~~~~
-
-.. automodule:: zarr_vectors_tools.multiresolution.strategies.skeletons
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Polylines
-~~~~~~~~~
-
-.. automodule:: zarr_vectors_tools.multiresolution.strategies.polylines
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Points
-~~~~~~
-
-.. automodule:: zarr_vectors_tools.multiresolution.strategies.points
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Meshes
-~~~~~~
-
-.. automodule:: zarr_vectors_tools.multiresolution.strategies.meshes
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Graphs
-~~~~~~
-
-.. automodule:: zarr_vectors_tools.multiresolution.strategies.graphs
    :members:
    :undoc-members:
    :show-inheritance:

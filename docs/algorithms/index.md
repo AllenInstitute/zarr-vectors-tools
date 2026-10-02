@@ -1,138 +1,50 @@
 # Algorithms
 
-Streaming algorithms for graphs (and skeletons, which are graphs with a
-tree convention), triangle meshes, streamline bundles and cortical
-surfaces. They all read directly from a chunked Zarr Vectors store — no
-full materialisation — and a subset write their results back to the same
-store: per-vertex results via
-`zarr_vectors_tools._attributes.write_vertex_attribute`, bundle summaries
-as group attributes.
-
-## Matrix
-
-| Function | Domain | Returns | `write_back` | `per_object` | Constraints |
-| --- | --- | --- | --- | --- | --- |
-| `bfs_distances` | graph | distances, predecessors | – | – | – |
-| `shortest_path` | graph | path, cost, visited | – | – | edge weights via attribute name |
-| `compute_connected_components` | graph | labels, sizes | ✓ → `attributes/component_label/` | – | undirected |
-| `compute_k_core` | graph | coreness, sizes | – | – | – |
-| `compute_label_propagation` | graph | labels, sizes | – | – | – |
-| `compute_louvain` | graph | labels, modularity | – | – | edge weights via attribute name |
-| `compute_mesh_summary` | mesh | area, volume, Euler χ | – | ✓ → per-object dicts | triangle meshes (`link_width=3`) |
-| `compute_vertex_normals` | mesh | normals | ✓ → `attributes/vertex_normal/` | – | triangle meshes |
-| `compute_mean_curvature` | mesh | curvature | ✓ → `attributes/mean_curvature/` | – | triangle meshes |
-| `closest_point` | mesh | hit position, chunk, face | – | – | triangle meshes |
-| `cast_ray` | mesh | hit t, position, chunk, face | – | – | triangle meshes |
-| `compute_skeleton_metrics` | skeleton | per-object cable length, node / leaf / branch / component counts, Strahler order, extent | ✓ → `object_attributes/*` | – | EM and SWC-style skeleton stores |
-| `select_streamlines` | streamlines | object ids through a NIfTI mask or box, or ending in it | – | – | reads only the chunks the region touches |
-| `bundle_summary` | streamlines | per-group table (count, length stats, tortuosity, endpoint centroids) | ✓ → `group_attributes/bundle_*` | – | object groups required |
-| `parcel_summary` | surface mesh | per-parcel vertex count, surface area, map mean / std | – | – | matches FreeSurfer `?h.aparc.stats` |
-| `parcel_at` | surface mesh | parcel of the vertex nearest each point | – | – | surface stores |
-| `read_hemisphere` | surface mesh | vertices in source order, faces, attributes, any kept surface | – | – | surface stores (GIFTI / FreeSurfer ingest) |
-| `SegmentLink` | any store with segment ids | each store's object id for a segment, the match for a picked object, each store's object attributes | – | – | `object_attributes/segment_id` (precomputed ingests, synapse join) |
-
-## Calling convention
-
-All algorithms take a store path as the first argument and accept
-`level=0` (the resolution level to operate on) as a keyword:
+`zarr_vectors_tools.algorithms` measures and queries a store where it is. Each
+function reads the chunks it needs from one [level](../concepts.md) and
+returns arrays, dicts or pandas tables. Some can also write their result into
+the store as an attribute.
 
 ```python
-from zarr_vectors_tools.algorithms import (
-    compute_connected_components,
-    compute_mesh_summary,
-    shortest_path,
-)
+from zarr_vectors_tools.algorithms import compute_skeleton_metrics
 
-cc      = compute_connected_components("graph.zv", write_back=True)
-summary = compute_mesh_summary("mesh.zv", per_object=True)
-path    = shortest_path("graph.zv", source=0, target=42, weight="cost")
+metrics = compute_skeleton_metrics("neurons.zv")   # one row per neuron; also stored
 ```
 
-## Domain pages
+Everything here is Python, except bundle summaries, which also have a
+command: `zvtools bundles STORE`.
 
-- [Graph search](graph_search.md) — `bfs_distances`, `shortest_path`
-- [Graph components](graph_components.md) — `compute_connected_components`
-- [Graph clustering](graph_clustering.md) — `compute_k_core`,
-  `compute_label_propagation`, `compute_louvain`
-- [Mesh summary](mesh_summary.md) — `compute_mesh_summary`
-- [Mesh attributes](mesh_attributes.md) — `compute_vertex_normals`,
-  `compute_mean_curvature`
-- [Mesh queries](mesh_query.md) — `closest_point`, `cast_ray`
+| Function | Geometry | Computes | Writes to the store | Page |
+| --- | --- | --- | --- | --- |
+| `bfs_distances` | graph, skeleton | hop count and parent from one vertex | no | [Graphs](graphs.md) |
+| `shortest_path` | graph, skeleton | Dijkstra or A* path and cost | no | [Graphs](graphs.md) |
+| `compute_connected_components` | graph, skeleton | component label per vertex | `write_back=False`; if true: `vertex_attributes/component_label` | [Graphs](graphs.md) |
+| `compute_k_core` | graph, skeleton | coreness per vertex | no | [Graphs](graphs.md) |
+| `compute_label_propagation` | graph, skeleton | community per vertex | no | [Graphs](graphs.md) |
+| `compute_louvain` | graph, skeleton | community per vertex, modularity | no | [Graphs](graphs.md) |
+| `compute_mesh_summary` | mesh | area, volume, Euler characteristic; per object on request | no | [Meshes](meshes.md) |
+| `compute_vertex_normals` | mesh | unit normal per vertex | `write_back=False`; if true: `vertex_attributes/vertex_normal` | [Meshes](meshes.md) |
+| `compute_mean_curvature` | mesh | mean curvature per vertex | `write_back=False`; if true: `vertex_attributes/mean_curvature` | [Meshes](meshes.md) |
+| `closest_point` | mesh | nearest point on the surface | no | [Meshes](meshes.md) |
+| `cast_ray` | mesh | first surface hit along a ray | no | [Meshes](meshes.md) |
+| `select_streamlines` | streamlines | ids of streamlines through, or ending in, a mask or box | no | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `bundle_summary` | streamlines with groups | per group: count, length statistics, tortuosity, endpoint centroids | `write=True`: `group_attributes/bundle_*` | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `read_bundle_summary` | streamlines with groups | the rows `bundle_summary` stored | no | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `compute_skeleton_metrics` | skeleton | per object: cable length, node, leaf, branch and component counts, Strahler order, extent | `write=True`: `object_attributes/<metric>` | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `SegmentLink` | stores with segment ids | the same segment's object in each store | no | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `read_hemisphere` | cortical surface | one hemisphere in the source file's vertex order | no | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `parcel_summary` | cortical surface | per parcel: vertex count, area, map mean and standard deviation | no | [Streamlines, skeletons](streamlines_skeletons.md) |
+| `parcel_at` | cortical surface | the parcel nearest each point | no | [Streamlines, skeletons](streamlines_skeletons.md) |
 
-## Cross-chunk handling
+Every function takes the store path first (`SegmentLink` takes several) and
+`level=` as a keyword argument, defaulting to `0`. The exception is
+`bundle_summary`: it defaults to `level=None`, which computes from level 0 and
+writes the same rows to every level. A writing function writes to the level it
+was given: `0/vertex_attributes/component_label` for level 0. Re-running it
+replaces the attribute.
 
-At format 0.9.0, connectivity is **one** family per level: every record
-lives under `links/<delta>/<offsets>/`, and an intra-chunk record is
-simply one whose offsets are all zero. There is no separate
-`cross_chunk_links/` group to read — a record that spans chunks is
-distinguished by its offsets, not by its location.
+## Objects that span chunks
 
-:::{warning}
-**The double-count trap.** Before the links merge, `read_links` meant
-*intra-chunk only* and had a sibling `read_cross_chunk_links`, so the
-idiom was "loop `read_chunk_links` over every chunk, then add
-`read_cross_chunk_links`". `read_links` now returns the **whole family**,
-so that idiom unions every intra-chunk edge twice — silently doubling
-every degree, with no error and no exception. Code ported from the
-pre-0.9 shape must do exactly one of:
-
-- call `read_links(level_group, delta=0)` alone and **drop** the
-  per-chunk loop; or
-- keep the per-chunk `read_chunk_links` loop and add
-  `read_cross_links(level_group, delta=0)` — never bare `read_links`.
-:::
-
-The supported filters live in `zarr_vectors_tools.algorithms._links`:
-
-| Helper | Returns | Use for |
-| --- | --- | --- |
-| `read_cross_links` | Every record under `links/<delta>` spanning ≥ 2 chunks | Pairing with a per-chunk `read_chunk_links` loop |
-| `link_prefetch_plan` | `(array_path, [chunk_key])` entries, one per offsets segment | Batching reads before a whole-family decode |
-| `list_link_cells` | Chunk tuples of every populated cross-chunk cell | Bucketing cells to target chunks without decoding records (`delta=0` only) |
-
-`read_cross_links` is the **sole** definition of the cross filter — that
-is why the module does not re-export a bare `read_links`. It filters on
-decoded chunk identity rather than on the offsets segment name, because
-`store="duplicate"` and `perm_idx` make the segment-to-record mapping
-non-obvious, and `read_links` is the only public reader that reverses
-`perm_idx` back to input order.
-
-:::{note}
-`links/<delta>` is a **group**, not an array — its children are one array
-per offsets segment. Naming the group where an array is expected fails
-*silently*: `list_chunks` returns `[]` for it and the batch reader skips
-any prefetch entry that is not an array, so every read falls back to a
-serial GET with no warning. That is what `link_prefetch_plan` exists for:
-it enumerates the segments so the plan names arrays and prefetch actually
-happens.
-:::
-
-How each algorithm resolves this:
-
-- **Graph search, components, clustering**: one whole-family
-  `read_links` and no per-chunk loop. Weights come from
-  `read_link_attributes(level_group, weight, delta=0)`, which enumerates
-  in the same `(segment, cell)` order as `read_links` — that shared order
-  is the only thing aligning row *i* to record *i*, so a length mismatch
-  is treated as a partial or stale write and the weights are dropped back
-  to unit.
-- **Mesh summary**: per-chunk `read_chunk_links` for the area / volume /
-  edge accumulation, then `read_cross_links` for the boundary records.
-  Cross-chunk **face** records (arity ≥ 3) contribute their consecutive
-  endpoint pairs to the Euler-characteristic dedup set, but their
-  per-face area / volume is excluded; `excluded_cross_face_edges`
-  quantifies the gap.
-- **Mesh attributes** (normals, curvature): per-chunk faces drive the
-  computation, and `read_cross_links` identifies boundary vertices, which
-  are counted in `incomplete_boundary_vertices`. Their values are
-  computed from intra-chunk faces only.
-- **Mesh queries** (`closest_point`, `cast_ray`): per-chunk
-  `read_chunk_links` only — cross-chunk faces are not tested. For typical
-  meshes this is a negligible minority.
-
-## See also
-
-- [Multiresolution](../multiresolution/index.md) — building the levels these algorithms read.
-- [Cross-level links](../multiresolution/cross_level_links.md) — the `delta != 0` families in the same layout.
-- `zarr_vectors_tools._attributes.write_vertex_attribute`
-  — the write-back surface used by the four functions above.
+Every function follows objects across chunk boundaries: an edge or a triangle
+whose ends lie in different chunks counts once, like any other. Results do not
+depend on the chunk shape.

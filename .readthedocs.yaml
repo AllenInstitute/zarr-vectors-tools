@@ -6,10 +6,9 @@ build:
     python: "3.11"
   jobs:
     install:
-      # zarr-vectors isn't on PyPI and isn't needed at docs build time —
-      # docs/conf.py mocks it via autodoc_mock_imports. Install the on-PyPI
-      # extras, then this package with --no-deps so pip doesn't try to
-      # resolve zarr-vectors, then the Sphinx toolchain.
+      # zarr-vectors isn't needed at docs build time -- docs/conf.py mocks
+      # it. Install the readers, then this package with --no-deps so pip
+      # doesn't resolve zarr-vectors, then the Sphinx toolchain.
       - pip install numpy pandas laspy plyfile nibabel trx-python networkx scipy
       - pip install --no-deps .
       - pip install -r docs/requirements-docs.txt

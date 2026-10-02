@@ -1,7 +1,8 @@
 Algorithms
 ==========
 
-Streaming graph and mesh algorithms over chunked Zarr Vectors stores.
+``zarr_vectors_tools.algorithms``: measure and query a store in place. See
+:doc:`../algorithms/index` for usage.
 
 Graph search
 ------------
@@ -51,22 +52,6 @@ Mesh queries
    :undoc-members:
    :show-inheritance:
 
-Cortical surfaces
------------------
-
-.. automodule:: zarr_vectors_tools.algorithms.surfaces
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Streamline bundles
-------------------
-
-.. automodule:: zarr_vectors_tools.algorithms.bundles
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Streamline selection
 --------------------
 
@@ -75,10 +60,10 @@ Streamline selection
    :undoc-members:
    :show-inheritance:
 
-Cortical parcels
+Bundle summaries
 ----------------
 
-.. automodule:: zarr_vectors_tools.algorithms.parcels
+.. automodule:: zarr_vectors_tools.algorithms.bundles
    :members:
    :undoc-members:
    :show-inheritance:
@@ -95,6 +80,22 @@ Segments across stores
 ----------------------
 
 .. automodule:: zarr_vectors_tools.algorithms.segment_link
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Surfaces
+--------
+
+.. automodule:: zarr_vectors_tools.algorithms.surfaces
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Parcels
+-------
+
+.. automodule:: zarr_vectors_tools.algorithms.parcels
    :members:
    :undoc-members:
    :show-inheritance:
