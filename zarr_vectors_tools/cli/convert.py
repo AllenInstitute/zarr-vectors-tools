@@ -546,7 +546,7 @@ def run(args) -> int:
         "--resume": ({"trk"}, bool(getattr(args, "resume", False))),
         "--geometry": ({"gifti", "freesurfer"}, getattr(args, "geometry", None) is not None),
         "--hemisphere": ({"gifti", "freesurfer"}, bool(getattr(args, "hemispheres", None))),
-        "--space": ({"freesurfer"}, getattr(args, "space", "auto") != "auto"),
+        "--space": ({"freesurfer", "gifti"}, getattr(args, "space", "auto") != "auto"),
         "--surface": ({"freesurfer"}, bool(getattr(args, "surfaces", None))),
         "--morph": ({"freesurfer"}, bool(getattr(args, "morph", None))),
         "--annot": ({"freesurfer"}, bool(getattr(args, "annots", None))),
@@ -717,6 +717,7 @@ def run(args) -> int:
                     "the files"
                 )
             kwargs["hemisphere"] = _hemisphere_name(hemis[0]) if hemis else None
+            kwargs["space"] = args.space
         if fmt.name == "freesurfer":
             if args.geometry is not None:
                 kwargs["geometry"] = args.geometry

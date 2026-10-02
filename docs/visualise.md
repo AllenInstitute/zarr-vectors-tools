@@ -88,7 +88,7 @@ parameters (`?…`) are refused. Percent-encode attribute names containing `,` o
 | Single-column vertex attributes | A multi-column one (LAS `color`, OBJ `normal`) stops every chunk loading. Open such a store with `#attributes=` naming only single-column attributes, or with `#attributes=` alone |
 | 3-D positions | A 2-D store (two h5ad embedding columns, say) fails: "a rank-2 store of this geometry has nothing to render" |
 | TRK ingested with `--apply-affine` | Without it the store keeps TrackVis voxel-mm coordinates (2 to 181 mm on a test file, against −89 to 90 mm RAS) and the viewer ignores the stored affine, so tracts sit apart from other RAS data |
-| Units | Read from the store: TRK, TCK and TRX stores record millimetres; inputs without units (SWC, OBJ, CSV) open unitless |
+| Units | Read from the store: TRK, TCK, TRX, GIFTI and FreeSurfer stores record millimetres; inputs without units (SWC, OBJ, CSV) open unitless |
 | At most 65,536 objects | Needed for object attributes in the viewer ([below](#objects-attributes-and-colour-by)) |
 
 ## Sizing the pyramid for the GPU budget

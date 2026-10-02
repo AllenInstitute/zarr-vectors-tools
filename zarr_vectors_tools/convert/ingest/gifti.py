@@ -21,16 +21,32 @@ How each file is classified
 - **Kind.** A file with a ``POINTSET`` array is a surface; one with a
   ``LABEL`` array is a parcellation; anything else holding per-vertex values
   (``SHAPE``, ``NONE``, statistics, ``TIME_SERIES``) is a scalar map.
-- **Hemisphere.** From the image's ``AnatomicalStructurePrimary`` metadata,
-  falling back to the filename (``hemi-L``, ``.L.``, ``lh.``...).
+- **Hemisphere.** From ``AnatomicalStructurePrimary``, in the file's
+  metadata or an array's, falling back to the filename (``hemi-L``, ``.L.``,
+  ``lh.``...).
 - **Surface.** ``GeometricType`` first for the shapes that are not anatomy
   (inflated, sphere, flat), because HCP writes an inflated surface with
   ``AnatomicalStructureSecondary=MidThickness`` -- it was inflated FROM the
   midthickness -- and reading that field first would chunk a balloon.  Then
   the filename, then ``AnatomicalStructureSecondary``.
 
-Coordinates are stored as the file has them.  GIFTI declares a dataspace but
-positions are already in it, so the dataspace is recorded, not applied.
+Coordinate systems
+------------------
+A surface's positions are in the array's *dataspace*, and the file may carry
+a matrix, ``CoordinateSystemTransformMatrix``, from there to a *transformed
+space*.  FreeSurfer's ``mris_convert`` writes exactly that: positions in
+surface RAS (dataspace ``unknown``), and a translation by ``c_ras`` to
+``scanner``.  Read as stored, such a surface sits ``c_ras`` away from the
+same subject's T1 and tractography.
+
+``space="auto"`` (the default) applies the matrix when it leads to a named
+space and is not the identity, and records that space; otherwise positions
+are kept and the dataspace is recorded.  ``"scanner"`` requires the result to
+be scanner RAS, and ``"surface"`` keeps every position as the file stores it.
+Only anatomical surfaces are moved: inflated, spherical and flat ones are in
+no anatomical space.  Each matrix applied is recorded in the header, as is
+``c_ras`` when the matrices are one translation into scanner RAS, so the
+change can be undone.
 
 Requires ``nibabel``::
 
@@ -58,6 +74,7 @@ from zarr_vectors_tools.convert.ingest._tabular import sanitise_name
 
 __all__ = [
     "ANATOMICAL_PREFERENCE",
+    "SPACES",
     "GiftiFile",
     "classify_gifti",
     "ingest_gifti",
@@ -151,10 +168,13 @@ def _intent(darray) -> str:
 
 
 def _hemisphere(image, path: Path) -> str | None:
-    primary = str(image.meta.get("AnatomicalStructurePrimary", "") or "")
-    hemi = _HEMI_META.get(primary.strip().lower())
-    if hemi:
-        return hemi
+    # The file's metadata first, then each array's: FreeSurfer's mris_convert
+    # writes AnatomicalStructurePrimary on the POINTSET array only.
+    for meta in (image.meta, *(d.meta for d in image.darrays)):
+        primary = str((meta or {}).get("AnatomicalStructurePrimary", "") or "")
+        hemi = _HEMI_META.get(primary.strip().lower())
+        if hemi:
+            return hemi
     name = path.name.lower()
     for pattern, value in _HEMI_FILENAME:
         if re.search(pattern, name):
@@ -219,18 +239,79 @@ def classify_gifti(path: str | Path) -> GiftiFile:
     )
 
 
-def _dataspace(image) -> str | None:
+#: ``space`` values :func:`ingest_gifti` takes, as ``ingest_freesurfer`` does.
+SPACES = ("auto", "scanner", "surface")
+
+#: Tolerance for a matrix being the identity, or two translations agreeing (mm).
+_MATRIX_TOLERANCE = 1e-4
+
+
+@dataclass
+class _Placement:
+    """Where one surface file's positions end up."""
+
+    space: str
+    #: The file's matrix, when it is applied; ``None`` when positions are kept.
+    matrix: npt.NDArray[np.float64] | None = None
+
+    def apply(self, positions: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        positions = np.asarray(positions, dtype=np.float64)
+        if self.matrix is None:
+            return positions
+        return positions @ self.matrix[:3, :3].T + self.matrix[:3, 3]
+
+
+def _space_name(code: Any) -> str | None:
+    """A NIfTI xform code's name, ``None`` for ``unknown`` or anything unreadable."""
     import nibabel as nib
 
-    for darray in image.darrays:
-        coordsys = getattr(darray, "coordsys", None)
-        if coordsys is None:
-            continue
-        code = getattr(coordsys, "dataspace", 0)
-        label = nib.nifti1.xform_codes.label.get(code)
-        if label and label != "unknown":
-            return str(label)
-    return None
+    try:
+        label = nib.nifti1.xform_codes.label.get(int(code))
+    except (TypeError, ValueError):
+        return None
+    return None if not label or label == "unknown" else str(label)
+
+
+def _coordinate_system(image) -> tuple[str | None, str | None, npt.NDArray[np.float64]]:
+    """``(dataspace, transformed space, matrix)`` of a surface's ``POINTSET`` array."""
+    pointset = next((d for d in image.darrays if _intent(d) == "pointset"), None)
+    coordsys = getattr(pointset, "coordsys", None)
+    if coordsys is None:
+        return None, None, np.eye(4)
+    matrix = np.asarray(getattr(coordsys, "xform", np.eye(4)), dtype=np.float64)
+    if matrix.shape != (4, 4) or not np.all(np.isfinite(matrix)):
+        matrix = np.eye(4)
+    return (
+        _space_name(getattr(coordsys, "dataspace", 0)),
+        _space_name(getattr(coordsys, "xformspace", 0)),
+        matrix,
+    )
+
+
+def _placement(entry: GiftiFile, space: str) -> _Placement:
+    """Where ``space`` puts one surface file's positions; see the module notes."""
+    dataspace, target, matrix = _coordinate_system(entry.image)
+    identity = np.allclose(matrix, np.eye(4), atol=_MATRIX_TOLERANCE)
+    if space != "surface" and target is not None and not identity:
+        return _Placement(target, matrix)
+    # Kept as stored.  An identity matrix says the positions are already in
+    # the transformed space, when the dataspace does not say otherwise.
+    return _Placement(dataspace or (target if identity else None) or "unknown")
+
+
+def _c_ras(applied: dict[str, npt.NDArray[np.float64]], space: str) -> list[float] | None:
+    """The one translation into scanner RAS the matrices applied amount to, if so."""
+    if space != "scanner" or not applied:
+        return None
+    matrices = list(applied.values())
+    first = matrices[0]
+    for matrix in matrices:
+        if not (
+            np.allclose(matrix[:3, :3], np.eye(3), atol=_MATRIX_TOLERANCE)
+            and np.allclose(matrix[:3, 3], first[:3, 3], atol=_MATRIX_TOLERANCE)
+        ):
+            return None
+    return [float(v) for v in first[:3, 3]]
 
 
 def _scalar_maps(
@@ -315,6 +396,7 @@ def ingest_gifti(
     dtype: str = "float32",
     geometry: str | None = None,
     hemisphere: str | None = None,
+    space: str = "auto",
 ) -> dict[str, Any]:
     """Ingest a set of GIFTI files into one cortical surface store.
 
@@ -334,22 +416,30 @@ def ingest_gifti(
             one (``"left"``/``"right"``).  Only needed for files that carry
             neither ``AnatomicalStructurePrimary`` nor a hemisphere token in
             their name.
+        space: ``"auto"`` (apply each surface file's matrix when it leads to
+            a named space), ``"scanner"`` (require scanner RAS) or
+            ``"surface"`` (keep positions as the files store them).  See the
+            module notes.
 
     Returns:
         The surface-store summary: mesh counts plus ``hemispheres``,
-        ``geometry``, ``space``, ``scalars``, ``labels``, ``alternates``,
+        ``geometry``, ``space``, ``c_ras``, ``transformed`` (the files whose
+        matrix was applied), ``scalars``, ``labels``, ``alternates``,
         ``filled`` and ``files`` (how each input was classified).
 
     Raises:
         IngestError: If a file's hemisphere cannot be determined, a map does
-            not match its surface's vertex count, or a hemisphere has no
-            surface to use as geometry.
+            not match its surface's vertex count, a hemisphere has no
+            surface to use as geometry, or ``space="scanner"`` is asked of a
+            surface that does not lead to scanner RAS.
     """
     paths = _collect_inputs(input_path)
     if hemisphere is not None and hemisphere not in ("left", "right"):
         raise IngestError(
             f"hemisphere must be 'left' or 'right', got {hemisphere!r}"
         )
+    if space not in SPACES:
+        raise IngestError(f"space must be one of {SPACES}, got {space!r}")
 
     entries = [classify_gifti(p) for p in paths]
     for entry in entries:
@@ -363,11 +453,30 @@ def ingest_gifti(
                 )
             entry.hemisphere = hemisphere
 
-    dataspaces = {_dataspace(e.image) for e in entries if e.kind == "surface"}
-    dataspaces.discard(None)
-    space = dataspaces.pop() if len(dataspaces) == 1 else (
-        "unknown" if not dataspaces else "mixed"
-    )
+    # Only anatomical surfaces are in a space to move into.
+    placements: dict[Path, _Placement] = {
+        e.path: _placement(e, space)
+        for e in entries
+        if e.kind == "surface" and e.surface not in _NON_ANATOMICAL
+    }
+    if space == "scanner":
+        elsewhere = {
+            p.name: where.space for p, where in placements.items()
+            if where.space != "scanner"
+        }
+        if elsewhere:
+            raise IngestError(
+                f"space='scanner', but these surfaces do not lead to scanner "
+                f"RAS: {elsewhere}. A file reaches it through a "
+                f"CoordinateSystemTransformMatrix to NIFTI_XFORM_SCANNER_ANAT, "
+                f"or by being stored in it. Use space='auto' or 'surface' to "
+                f"keep them as they are."
+            )
+
+    def positions(entry: GiftiFile) -> npt.NDArray[np.float64]:
+        stored = entry.image.agg_data("pointset")
+        where = placements.get(entry.path)
+        return np.asarray(stored, dtype=np.float64) if where is None else where.apply(stored)
 
     hemispheres: list[HemisphereSurface] = []
     for hemi in ("left", "right"):
@@ -413,7 +522,7 @@ def ingest_gifti(
             chosen = anatomical[0]
 
         geo = surfaces[chosen].image
-        vertices = np.asarray(geo.agg_data("pointset"), dtype=np.float64)
+        vertices = positions(surfaces[chosen])
         faces = np.asarray(geo.agg_data("triangle"), dtype=np.int64)
 
         surface = HemisphereSurface(
@@ -422,9 +531,7 @@ def ingest_gifti(
         for name, entry in surfaces.items():
             if name == chosen:
                 continue
-            surface.alternates[name] = np.asarray(
-                entry.image.agg_data("pointset"), dtype=np.float32,
-            )
+            surface.alternates[name] = positions(entry).astype(np.float32)
         for entry in (e for e in mine if e.kind == "scalar"):
             for name, values in _scalar_maps(entry, used).items():
                 surface.scalars[name] = values
@@ -437,10 +544,25 @@ def ingest_gifti(
                 surface.sources[name] = entry.path.name
         hemispheres.append(surface)
 
+    spaces = {where.space for where in placements.values()}
+    resolved = spaces.pop() if len(spaces) == 1 else ("unknown" if not spaces else "mixed")
+    applied = {
+        p.name: where.matrix for p, where in placements.items()
+        if where.matrix is not None
+    }
+    c_ras = _c_ras(applied, resolved)
     summary = write_surface_store(
         output_path, hemispheres, chunk_shape,
-        source="gifti", space=space, bin_shape=bin_shape, dtype=dtype,
+        source="gifti", space=resolved, bin_shape=bin_shape, dtype=dtype,
+        c_ras=c_ras,
+        extra_header={
+            "applied_transforms": {
+                name: matrix.tolist() for name, matrix in sorted(applied.items())
+            },
+        } if applied else None,
     )
+    summary["c_ras"] = c_ras
+    summary["transformed"] = sorted(applied)
     summary["files"] = {
         e.path.name: {
             "kind": e.kind, "hemisphere": e.hemisphere, "surface": e.surface,

@@ -285,6 +285,144 @@ class TestGiftiIngest:
 
 
 # ===========================================================================
+# GIFTI coordinates
+# ===========================================================================
+
+#: What FreeSurfer's mris_convert writes: surface RAS positions, and a
+#: translation by c_ras from there (dataspace unknown) to scanner RAS.
+GIFTI_CRAS = np.array([-2.75, -3.0, -15.2])
+SCANNER = 1   # NIFTI_XFORM_SCANNER_ANAT
+MNI = 4       # NIFTI_XFORM_MNI_152
+
+
+def _translation(offset) -> np.ndarray:
+    matrix = np.eye(4)
+    matrix[:3, 3] = offset
+    return matrix
+
+
+def _mris_convert_subject(root: Path) -> Path:
+    """One hemisphere as mris_convert writes it: hemisphere on the array,
+    positions in surface RAS, the c_ras matrix to scanner RAS."""
+    root.mkdir(parents=True, exist_ok=True)
+    vertices, faces = sheet("right")
+    for name, coords, geometric in (
+        ("pial", vertices, "Anatomical"),
+        ("white", vertices - [0, 0, 1], "Anatomical"),
+        ("inflated", vertices * 1.5, "Inflated"),
+    ):
+        write_surf_gii(
+            root / f"rh.{name}.surf.gii", coords, faces, geometric=geometric,
+            array_primary="CortexRight", dataspace=0, xformspace=SCANNER,
+            xform=_translation(GIFTI_CRAS),
+        )
+    return root
+
+
+class TestGiftiCoordinates:
+
+    def test_the_file_matrix_takes_the_surface_to_scanner_ras(self, tmp_path: Path) -> None:
+        # The matrix used to be dropped, leaving the surface c_ras away from
+        # the same subject's T1 and tractography.
+        store = tmp_path / "rh.zv"
+        summary = ingest_gifti(_mris_convert_subject(tmp_path / "gii"), store, CHUNK,
+                               geometry="pial")
+        assert summary["hemispheres"] == ["right"]   # read from the array
+        assert summary["space"] == "scanner"
+        np.testing.assert_allclose(summary["c_ras"], GIFTI_CRAS)
+        assert summary["transformed"] == ["rh.pial.surf.gii", "rh.white.surf.gii"]
+
+        vertices, _ = sheet("right")
+        positions, columns = read_surface_columns(store, {
+            "coords_white": 3, "coords_inflated": 3,
+        })
+        _, vertex = _split(columns["zv_join_key"])
+        np.testing.assert_allclose(positions, vertices[vertex] + GIFTI_CRAS, atol=1e-4)
+        np.testing.assert_allclose(
+            columns["coords_white"], vertices[vertex] - [0, 0, 1] + GIFTI_CRAS, atol=1e-4,
+        )
+        # An inflated surface is in no anatomical space; it is not moved.
+        np.testing.assert_allclose(
+            columns["coords_inflated"], vertices[vertex] * 1.5, atol=1e-4,
+        )
+
+        header = HeaderRegistry(str(store)).get("surface")
+        assert header.space == "scanner"
+        np.testing.assert_allclose(header.c_ras, GIFTI_CRAS)
+        assert sorted(header.extra["applied_transforms"]) == [
+            "rh.pial.surf.gii", "rh.white.surf.gii",
+        ]
+        np.testing.assert_allclose(
+            header.extra["applied_transforms"]["rh.pial.surf.gii"], _translation(GIFTI_CRAS),
+        )
+
+    def test_surface_keeps_positions_as_stored(self, tmp_path: Path) -> None:
+        store = tmp_path / "rh.zv"
+        summary = ingest_gifti(_mris_convert_subject(tmp_path / "gii"), store, CHUNK,
+                               geometry="pial", space="surface")
+        assert summary["space"] == "unknown"
+        assert summary["c_ras"] is None and summary["transformed"] == []
+        vertices, _ = sheet("right")
+        positions, columns = read_surface_columns(store, {})
+        _, vertex = _split(columns["zv_join_key"])
+        np.testing.assert_allclose(positions, vertices[vertex], atol=1e-4)
+
+    def test_a_general_affine_is_applied_and_recorded(self, tmp_path: Path) -> None:
+        vertices, faces = sheet("left")
+        affine = np.array([[0.0, -1.0, 0.0, 5.0],
+                           [1.0, 0.0, 0.0, -2.0],
+                           [0.0, 0.0, 2.0, 1.0],
+                           [0.0, 0.0, 0.0, 1.0]])
+        path = write_surf_gii(tmp_path / "lh.pial.surf.gii", vertices, faces,
+                              primary="CortexLeft", dataspace=0, xformspace=MNI,
+                              xform=affine)
+        store = tmp_path / "lh.zv"
+        summary = ingest_gifti(path, store, CHUNK)
+        assert summary["space"] == "mni"
+        assert summary["c_ras"] is None           # not a translation into scanner RAS
+        positions, columns = read_surface_columns(store, {})
+        _, vertex = _split(columns["zv_join_key"])
+        expected = vertices[vertex] @ affine[:3, :3].T + affine[:3, 3]
+        np.testing.assert_allclose(positions, expected, atol=1e-4)
+
+    def test_an_identity_matrix_moves_nothing(self, tmp_path: Path) -> None:
+        vertices, faces = sheet("left")
+        path = write_surf_gii(tmp_path / "lh.pial.surf.gii", vertices, faces,
+                              primary="CortexLeft", dataspace=0, xformspace=SCANNER)
+        summary = ingest_gifti(path, tmp_path / "lh.zv", CHUNK)
+        # Stored in the transformed space already, so that is its space.
+        assert summary["space"] == "scanner"
+        assert summary["transformed"] == [] and summary["c_ras"] is None
+
+    def test_scanner_refuses_a_surface_that_does_not_reach_it(self, tmp_path: Path) -> None:
+        source = write_gifti_subject(tmp_path / "gii")   # talairach, identity matrix
+        with pytest.raises(IngestError, match="do not lead to scanner RAS"):
+            ingest_gifti(source, tmp_path / "s.zv", CHUNK, space="scanner")
+        assert not (tmp_path / "s.zv").exists()
+
+    def test_scanner_accepts_a_surface_that_does(self, tmp_path: Path) -> None:
+        summary = ingest_gifti(_mris_convert_subject(tmp_path / "gii"), tmp_path / "s.zv",
+                               CHUNK, geometry="pial", space="scanner")
+        assert summary["space"] == "scanner"
+
+    def test_surface_stores_are_in_millimetres(self, gifti_store: Path) -> None:
+        # Without a unit the viewer reads the axes as unitless numbers.
+        import json
+
+        attrs = json.loads((gifti_store / "zarr.json").read_text())["attributes"]
+        assert [a.get("unit") for a in attrs["multiscales"][0]["axes"]] == ["millimeter"] * 3
+
+    def test_the_command_line_takes_space_for_gifti(self, tmp_path: Path) -> None:
+        from zarr_vectors_tools.cli import main
+
+        source = _mris_convert_subject(tmp_path / "gii")
+        store = tmp_path / "s.zv"
+        assert main(["convert", str(source), str(store), "--chunk-shape", "20,20,20",
+                     "--geometry", "pial", "--space", "surface"]) == 0
+        assert HeaderRegistry(str(store)).get("surface").space == "unknown"
+
+
+# ===========================================================================
 # FreeSurfer
 # ===========================================================================
 

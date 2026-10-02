@@ -348,7 +348,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--space", choices=("auto", "scanner", "surface"), default="auto",
         help="freesurfer: scanner RAS (add c_ras, lines up with volumes and "
              "tracts) or FreeSurfer surface RAS. auto = scanner when the "
-             "files record c_ras (default: auto)",
+             "files record c_ras. gifti: auto applies each surface's "
+             "transform matrix when it leads to a named space, scanner "
+             "requires scanner RAS, surface keeps positions as stored "
+             "(default: auto)",
     )
     sf.add_argument(
         "--surface", action="append", dest="surfaces", default=None,
