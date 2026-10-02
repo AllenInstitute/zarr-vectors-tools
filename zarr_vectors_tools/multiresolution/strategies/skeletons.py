@@ -21,13 +21,24 @@ This module provides:
   :func:`zarr_vectors_tools.multiresolution.coarsen.coarsen_level` when the
   store's links convention is the skeleton convention.
 
-The coarsener treats each stored *fragment* as one connected skeleton
-piece living entirely within a single chunk.  Because coarser chunk
-grids are nested (a target chunk is the union of ``chunk_scale`` source
-chunks per axis), a simplified piece never straddles a target chunk
-boundary, so each piece maps to exactly one fragment in one target
-chunk.  Cross-chunk links are intentionally not reconstructed (the
-ingest convention is "ignore cross-chunk edges if missing").
+The coarsener merges each object's fragments across all of a target
+chunk's source children before re-splitting by actual connectivity, so
+a piece can and does span what were several source chunks.  A level-0
+cross-chunk link whose two endpoint chunks nest into the *same* target
+chunk is read and promoted into an ordinary intra-target edge.  A link
+whose endpoints land in *different* target chunks cannot be resolved
+locally by one chunk's worker, so it is instead carried forward as an
+identity-keyed anchor (source chunk, source vertex) -> (target chunk,
+target vertex) and rejoined once every target chunk has been written
+(:func:`_cross_edge_shard`, "Phase B"); a geometric coincidence join on
+rounded ``(segment_id, position)`` runs afterward as a supplementary
+recovery for records the identity join could not place (e.g. an
+endpoint whose owning chunk failed to read).  See ``open-items.md`` in
+the zarr-vectors-hackathon project for the investigation that found the
+geometric join alone silently drops any cross-chunk link whose two
+sides are not bit-identical duplicate vertices (the igneous ``.frags``
+convention) -- e.g. any precomputed-skeleton source where a boundary is
+a phase-split pair of distinct nearby vertices.
 """
 
 from __future__ import annotations
@@ -662,6 +673,14 @@ def _build_local_plan(
         for _m in _mems:
             oid_of_frag[_m] = _oid
     conns_by_oid: dict = defaultdict(list)
+    # A link whose OTHER endpoint is outside this target chunk cannot be
+    # resolved locally (the neighbouring target chunk is a separate worker's
+    # plan, decimated independently and maybe concurrently).  Its own-side
+    # endpoint is still captured here -- by SOURCE IDENTITY, i.e. exactly
+    # which (source chunk, source vertex) it was -- so Phase B can rejoin the
+    # two sides without depending on their post-decimation positions
+    # coinciding.  See the module docstring.
+    straddle_by_oid: dict = defaultdict(list)
     # ``ccl_cells`` are the source cross-chunk-link cells touching this target's
     # children (enumerated once by the coordinator and bucketed per target);
     # their records were read above, one list per cell.
@@ -672,17 +691,33 @@ def _build_local_plan(
             (ccA, viA), (ccB, viB) = rec
             ccA = tuple(int(x) for x in ccA)
             ccB = tuple(int(x) for x in ccB)
-            if ccA not in child_set or ccB not in child_set:
-                continue  # one endpoint outside this target chunk → cross-target
-            rA = _resolve(ccA, int(viA))
-            rB = _resolve(ccB, int(viB))
-            if rA is None or rB is None:
+            a_mine = ccA in child_set
+            b_mine = ccB in child_set
+            if a_mine and b_mine:
+                rA = _resolve(ccA, int(viA))
+                rB = _resolve(ccB, int(viB))
+                if rA is None or rB is None:
+                    continue
+                oa = oid_of_frag.get((ccA, rA[0]))
+                ob = oid_of_frag.get((ccB, rB[0]))
+                if oa is None or oa != ob:
+                    continue
+                conns_by_oid[oa].append((ccA, rA[0], rA[1], ccB, rB[0], rB[1]))
                 continue
-            oa = oid_of_frag.get((ccA, rA[0]))
-            ob = oid_of_frag.get((ccB, rB[0]))
-            if oa is None or oa != ob:
+            if not (a_mine or b_mine):
+                continue  # neither endpoint is ours -- not our record
+            # Exactly one endpoint is ours: a cross-TARGET link.  Resolve our
+            # own side and remember its source identity for Phase B; the
+            # other side is the neighbouring target chunk's job to capture
+            # from its own copy of this same cell.
+            scc, svi = (ccA, int(viA)) if a_mine else (ccB, int(viB))
+            r = _resolve(scc, svi)
+            if r is None:
                 continue
-            conns_by_oid[oa].append((ccA, rA[0], rA[1], ccB, rB[0], rB[1]))
+            oid = oid_of_frag.get((scc, r[0]))
+            if oid is None:
+                continue
+            straddle_by_oid[oid].append((scc, r[0], r[1], svi))
 
     groups: list[dict] = []
     for oid in sorted(members_by_oid):
@@ -717,9 +752,22 @@ def _build_local_plan(
                     (goff[(ccA, fA)] + lA, goff[(ccB, fB)] + lB)
                 )
 
+        # (d) cross-TARGET link endpoints → force-keep (explicit, not merely
+        #     incidental to the geometric on_tgt test below, which depends on
+        #     boundary_offset_nm being passed correctly) + identity anchor so
+        #     Phase B can rejoin by source identity rather than by geometric
+        #     coincidence of the surviving position.
+        straddle_ident: dict[int, tuple] = {}  # merged index -> (scc, source_vi)
+        forced: set = set()
+        for scc, fidx, lidx, svi in straddle_by_oid.get(oid, ()):
+            if (scc, fidx) not in goff:
+                continue
+            mv = goff[(scc, fidx)] + lidx
+            forced.add(mv)
+            straddle_ident[mv] = (scc, svi)
+
         # (b) coincident boundary vertices on INTERIOR faces → merge edges;
         #     vertices on OUTER target faces → force-keep for Phase B.
-        forced: set = set()
         coord_cols = []
         midx_cols = []
         for (scc, fidx) in members:
@@ -758,6 +806,7 @@ def _build_local_plan(
             "members": [(list(cc), int(fidx)) for cc, fidx in members],
             "intra_extra": [[int(a), int(b)] for a, b in intra_extra],
             "forced": sorted(forced),
+            "straddle_ident": straddle_ident,
         })
     return groups, vcache, acache
 
@@ -995,9 +1044,12 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     pieces: list = []
     total_out_vertices = 0
     anchor_meta: dict = {}   # tag -> (segment_id, coord-tuple) for outer-face verts
+    ident_meta: dict = {}    # tag -> (source_chunk, source_vertex_index), cross-target only
     tagc = 0
     k = 0
+    n_straddle_lost = 0      # a forced straddle vertex that did not survive decimation
     for g, comps, forced_pairs in plans:
+        straddle_ident = g.get("straddle_ident") or {}
         for comp, pairs in zip(comps, forced_pairs):
             simp = simps[k]
             k += 1
@@ -1019,15 +1071,25 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
                     for i, c in enumerate(simp["kept_source_indices"].tolist())
                 }
                 anchors = {}
-                for _mv, ci in pairs:
+                for mv, ci in pairs:
                     sl = kept_pos.get(ci)
                     if sl is None:
+                        if mv in straddle_ident:
+                            # A cross-target link endpoint that was force-kept
+                            # (see _build_local_plan "(d)") must survive by
+                            # construction; landing here means force-keep
+                            # itself failed to reach the decimator for this
+                            # vertex -- a regression, not an expected miss.
+                            n_straddle_lost += 1
                         continue
                     anchors[tagc] = sl
                     anchor_meta[tagc] = (
                         int(g["segment_id"]),
                         tuple(int(x) for x in np.rint(comp["positions"][ci]).astype(np.int64)),
                     )
+                    ident = straddle_ident.get(mv)
+                    if ident is not None:
+                        ident_meta[tagc] = ident
                     tagc += 1
                 if anchors:
                     piece["anchors"] = anchors
@@ -1091,6 +1153,18 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
     anchors = (
         np.asarray(sc_rows, dtype=np.int64).reshape(-1, 2 + ndim) if sc_rows else None
     )
+    # Identity sidecar for Phase B's cross-target rejoin: one row per
+    # cross-target link endpoint that survived decimation, keyed by the exact
+    # SOURCE identity the level-0 link record named (not by position) --
+    # ``[*source_chunk_coords, source_vertex_index, new_target_vertex_index]``.
+    id_rows = []
+    for tag, (src_scc, src_vi) in ident_meta.items():
+        loc = alocs.get(tag)
+        if loc is not None:
+            id_rows.append((*src_scc, int(src_vi), int(loc[1])))
+    ident_anchors = (
+        np.asarray(id_rows, dtype=np.int64).reshape(-1, ndim + 2) if id_rows else None
+    )
     return {
         "tcc": tcc,
         "input_fragments": input_fragments,
@@ -1099,6 +1173,8 @@ def _coarsen_target_chunk(payload: dict, shared: dict | None = None) -> dict:
         "fragment_count": int(len(recs)),
         "oid_rows": oid_rows,
         "anchors": anchors,
+        "ident_anchors": ident_anchors,
+        "n_straddle_lost": n_straddle_lost,
         "vertex_count": int(total_out_vertices),
         "dropped_oids": np.asarray(dropped_oids, dtype=np.int64),
     }
@@ -1145,16 +1221,42 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
 
     Each task owns a disjoint set of adjacent target-chunk pairs (the
     coordinator partitions pairs by shard, so writers never collide).  For
-    each pair it matches coincident ``(segment_id, coord)`` OUTER-face
-    vertices — the same igneous-style boundary coincidence used at L0 —
-    from the two chunks' sidecars, and writes the records via
-    :func:`write_link_cells`.
+    each pair it runs two recovery passes and writes their union via
+    :func:`write_link_cells`:
+
+    1. **Identity join** (tried first, exact).  ``payload["straddle"]``
+       carries, per pair, the level-0 cross-chunk-link *cells* whose two
+       endpoint chunks nest into this pair's two target chunks (the
+       coordinator identified these once from the same enumeration Phase A
+       used).  Each cell is re-decoded from the SOURCE level via
+       :func:`~zarr_vectors_tools.algorithms._links.read_link_cell_records`
+       — the exact same primitive Phase A used — and its two endpoints are
+       looked up in the two target chunks' identity sidecars (``(source
+       chunk, source vertex) -> new target vertex``, built in
+       :func:`_coarsen_target_chunk`).  A hit needs no assumption about
+       where the survivors ended up geometrically: it is the original
+       level-0 record, rejoined by construction.
+    2. **Geometric coincidence** (unchanged, kept as a supplement).  Matches
+       coincident ``(segment_id, coord)`` OUTER-face vertices — the same
+       igneous-style boundary coincidence used at L0 — from the two chunks'
+       position sidecars.  This is the only recovery for a record the
+       identity pass could not place (e.g. one endpoint's owning chunk
+       failed to read), but on its own it silently drops any cross-chunk
+       link whose two sides are not bit-identical duplicate vertices (a
+       phase-split boundary, as precomputed-skeleton sources use) —
+       see the module docstring.
+
+    Per pair, an identity hit is recorded before the coincidence pass runs
+    over the same pair, and the coincidence pass skips any ``(a, b)`` vertex
+    pair identity already produced — the union, not a duplicate.
 
     A record's cell is ``(offsets_segment, source_chunk)``, which maps 1:1
     to its endpoint pair, so disjoint pairs are disjoint cells and the
     partition is race-safe for any grouping.
     """
     from zarr_vectors.building import get_resolution_level, open_store, write_link_cells
+
+    from zarr_vectors_tools.algorithms._links import read_link_cell_records
 
     shared = shared or {}
     ndim = shared["ndim"]
@@ -1164,18 +1266,73 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
         tuple(int(x) for x in e["tcc"]): np.asarray(e["arr"], dtype=np.int64)
         for e in payload.get("anchors", [])
     }
+    ident_sidecar: dict[tuple[int, ...], npt.NDArray[np.int64]] = {
+        tuple(int(x) for x in e["tcc"]): np.asarray(e["arr"], dtype=np.int64)
+        for e in payload.get("ident_anchors", [])
+    }
     pairs = payload["pairs"]
+    straddle = payload.get("straddle") or [None] * len(pairs)
     table_cache: dict[tuple[int, ...], tuple | None] = {}
+    ident_cache: dict[tuple[int, ...], dict] = {}
 
     def _table(cc: tuple[int, ...]) -> tuple | None:
         if cc not in table_cache:
             table_cache[cc] = _anchor_join_table(sidecar_arrays.get(cc), ndim)
         return table_cache[cc]
 
+    def _ident_table(cc: tuple[int, ...]) -> dict:
+        # {(source_chunk, source_vertex_index): new_target_vertex_index}
+        if cc not in ident_cache:
+            d: dict = {}
+            arr = ident_sidecar.get(cc)
+            if arr is not None and len(arr):
+                for row in np.asarray(arr, dtype=np.int64).tolist():
+                    d[(tuple(row[:ndim]), int(row[ndim]))] = int(row[ndim + 1])
+            ident_cache[cc] = d
+        return ident_cache[cc]
+
+    root = None  # opened lazily -- only shards with straddle or write work need it
+    src = None   # the store's source level, a view onto the same `root`
+    link_spec = shared.get("link_spec")
+    n_identity = 0
     links: list = []
-    for A_, B_ in pairs:
+    for (A_, B_), sinfo in zip(pairs, straddle):
         A = tuple(int(x) for x in A_)
         B = tuple(int(x) for x in B_)
+        seen: set[tuple[int, int]] = set()  # (a, b) vertex pairs already emitted
+
+        # --- pass 1: identity join ---
+        if sinfo and sinfo.get("cells"):
+            if src is None:
+                root = open_store(shared["store_path"], mode="r+")
+                src = get_resolution_level(root, shared["source_level"])
+            id_a = _ident_table(A)
+            id_b = _ident_table(B)
+            for cell_raw, seg in zip(sinfo["cells"], sinfo["segments"]):
+                cell = tuple(tuple(int(x) for x in c) for c in cell_raw)
+                try:
+                    recs = read_link_cell_records(src, cell, int(seg), link_spec)
+                except Exception:
+                    continue
+                for (ccA, viA), (ccB, viB) in recs:
+                    keyA = (tuple(int(x) for x in ccA), int(viA))
+                    keyB = (tuple(int(x) for x in ccB), int(viB))
+                    vi_a = id_a.get(keyA)
+                    vi_b = id_b.get(keyB)
+                    if vi_a is None or vi_b is None:
+                        # try the other assignment -- the record's endpoint
+                        # order need not match which side is A vs B here.
+                        vi_a = id_a.get(keyB)
+                        vi_b = id_b.get(keyA)
+                    if vi_a is None or vi_b is None:
+                        continue
+                    if (vi_a, vi_b) in seen:
+                        continue
+                    seen.add((vi_a, vi_b))
+                    links.append([(A, vi_a), (B, vi_b)])
+                    n_identity += 1
+
+        # --- pass 2: geometric coincidence, supplementary ---
         ta = _table(A)
         tb = _table(B)
         if ta is None or tb is None:
@@ -1196,9 +1353,14 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
         own = p_vi[hit].tolist()
         other = t_vi[pos[hit]].tolist()
         via, vib = (own, other) if a_probes else (other, own)
-        links.extend([(A, a), (B, b)] for a, b in zip(via, vib))
+        for a, b in zip(via, vib):
+            if (a, b) in seen:
+                continue
+            seen.add((a, b))
+            links.append([(A, a), (B, b)])
     if links:
-        root = open_store(shared["store_path"], mode="r+")
+        if root is None:
+            root = open_store(shared["store_path"], mode="r+")
         level_group = get_resolution_level(root, shared["target_level"])
         # Writes only the cells these records touch and does NOT maintain
         # the family-wide counts; the coordinator's finalize_links pass
@@ -1210,11 +1372,15 @@ def _cross_edge_shard(payload: dict, shared: dict | None = None) -> dict:
         # (lower, higher) — so canonical sorting is a no-op on them and
         # placement is identical either way.  It means "endpoint order is
         # (lower, higher) and stable", NOT "endpoint order is data": these
-        # coincidence matches have no parent→child direction.
+        # matches have no parent→child direction.
         write_link_cells(
             level_group, links, ndim, delta=0, link_width=2, directed=True,
         )
-    return {"n_links": len(links)}
+    return {
+        "n_links": len(links),
+        "n_identity": n_identity,
+        "n_coincident": len(links) - n_identity,
+    }
 
 
 def _reduce_object_index_shard(payload: dict, shared: dict | None = None) -> dict:
@@ -1577,6 +1743,14 @@ def coarsen_skeleton_level(
     sharedA["link_spec"] = link_spec
     cells_by_target: dict[tuple[int, ...], list] = defaultdict(list)
     segs_by_target: dict[tuple[int, ...], list] = defaultdict(list)
+    # A cell whose two endpoint chunks nest into two DIFFERENT target chunks
+    # cannot be resolved by either chunk's Phase A task alone (see
+    # _build_local_plan); recorded here, keyed by the sorted target-chunk
+    # pair, so Phase B can re-read it against the source level and rejoin by
+    # identity rather than by geometric coincidence.  Link width is always 2
+    # (delta=0 skeleton family), so ``cell`` names exactly two chunks and
+    # ``seen_t`` has at most two distinct targets.
+    straddle_cells_by_pair: dict[tuple, list] = defaultdict(list)
     for cell, seg in zip(link_cells, link_segments):
         seen_t: set = set()
         for c in cell:
@@ -1586,6 +1760,8 @@ def coarsen_skeleton_level(
             seen_t.add(t)
             cells_by_target[t].append(cell)
             segs_by_target[t].append(seg)
+        if len(seen_t) == 2:
+            straddle_cells_by_pair[tuple(sorted(seen_t))].append((cell, seg))
     payloadsA = [
         {
             "tcc": list(tcc),
@@ -1612,6 +1788,8 @@ def coarsen_skeleton_level(
     max_in_vertices = 0
     max_in_objects = 0
     sidecar_arrays: dict[tuple[int, ...], np.ndarray] = {}
+    ident_sidecar_arrays: dict[tuple[int, ...], np.ndarray] = {}
+    total_straddle_lost = 0
     # Object-index rows from every target chunk, suffixed with the chunk they
     # came from so the reducer can name the fragment; see _coarsen_target_chunk.
     row_blocks: list[np.ndarray] = []
@@ -1631,12 +1809,26 @@ def coarsen_skeleton_level(
         anchors = res.get("anchors")
         if anchors is not None and len(anchors):
             sidecar_arrays[tcc] = anchors
+        ident_anchors = res.get("ident_anchors")
+        if ident_anchors is not None and len(ident_anchors):
+            ident_sidecar_arrays[tcc] = ident_anchors
+        total_straddle_lost += int(res.get("n_straddle_lost", 0) or 0)
         rows = res.get("oid_rows")
         if rows is not None and len(rows):
             tcc_cols = np.broadcast_to(np.asarray(tcc, dtype=np.int64), (len(rows), ndim))
             row_blocks.append(np.concatenate([rows, tcc_cols], axis=1))
     # Release phase-A result payloads as soon as we've compacted what we need.
     resultsA = []
+    if total_straddle_lost:
+        # A cross-target link endpoint was force-kept ("(d)" in
+        # _build_local_plan) yet did not survive decimation -- should be
+        # unreachable; force-keep is unconditional on such vertices. Not
+        # raised: a level with this defect is still a usable, if imperfect,
+        # pyramid, and the caller can inspect ``cross_chunk_edges_lost_force_keep``.
+        _progress(
+            f"WARNING: {total_straddle_lost} cross-target link endpoint(s) "
+            "were force-kept but absent after decimation"
+        )
 
     level_meta.vertex_count = int(total_out_vertices)
     create_resolution_level(root, target_level, level_meta)
@@ -1742,6 +1934,8 @@ def coarsen_skeleton_level(
             )
             shard_pairs[shard].append((tcc, nb))
     n_cross = 0
+    n_cross_identity = 0
+    n_cross_coincident = 0
     _tb = _time.perf_counter()
     _progress(f"phase B start: shard_groups={len(shard_pairs)}")
     if shard_pairs:
@@ -1759,22 +1953,54 @@ def coarsen_skeleton_level(
                 for c in need
                 if c in sidecar_arrays
             ]
+            id_sub = [
+                {"tcc": list(c), "arr": ident_sidecar_arrays[c]}
+                for c in need
+                if c in ident_sidecar_arrays
+            ]
+            # Straddling level-0 cells for each pair, aligned 1:1 with
+            # "pairs" below (same iteration over ``sps``) so the worker can
+            # zip them without any dict lookup of its own.
+            straddle_sub = [
+                {
+                    "cells": [
+                        [list(c) for c in cell]
+                        for cell, _seg in straddle_cells_by_pair.get(
+                            tuple(sorted((A, B))), (),
+                        )
+                    ],
+                    "segments": [
+                        seg for _cell, seg in straddle_cells_by_pair.get(
+                            tuple(sorted((A, B))), (),
+                        )
+                    ],
+                }
+                for A, B in sps
+            ]
             payloadsB.append({
                 "pairs": [(list(A), list(B)) for A, B in sps],
                 "anchors": sc_sub,
+                "ident_anchors": id_sub,
+                "straddle": straddle_sub,
             })
         sharedB = {
             "store_path": str(store_path),
+            "source_level": int(source_level),
             "target_level": int(target_level),
             "ndim": int(ndim),
             "chunk_grid_shape": list(chunk_grid_shape),
             "chunk_origin": list(chunk_origin),
+            "link_spec": link_spec,
         }
         for rb in executor(_cross_edge_shard, payloadsB, sharedB):
             n_cross += int(rb.get("n_links", 0))
+            n_cross_identity += int(rb.get("n_identity", 0))
+            n_cross_coincident += int(rb.get("n_coincident", 0))
     _timings["cross_links_phase_b"] = _time.perf_counter() - _tb
     _progress(
-        f"phase B done: links={n_cross} dt={_timings['cross_links_phase_b']:.2f}s"
+        f"phase B done: links={n_cross} "
+        f"(identity={n_cross_identity} coincident={n_cross_coincident}) "
+        f"dt={_timings['cross_links_phase_b']:.2f}s"
     )
 
     # Reconcile the whole links/0 family after the decentralized per-cell
@@ -1798,6 +2024,17 @@ def coarsen_skeleton_level(
         "objects_kept": int(len(present_oids)),
         "source_objects": n_src,
         "cross_chunk_edges": int(n_cross),
+        # Split by recovery path -- see _cross_edge_shard.  Before this fix
+        # every cross-target link went through the coincidence path alone
+        # (identity is always 0), which is what silently dropped phase-split
+        # boundaries; identity/coincident here is how to tell whether a given
+        # store's crossings were actually recovered by construction versus by
+        # accident.
+        "cross_chunk_edges_identity": int(n_cross_identity),
+        "cross_chunk_edges_coincident": int(n_cross_coincident),
+        # A force-kept cross-target endpoint that vanished before the anchor
+        # tag could resolve it -- should be 0; see the gather-loop warning.
+        "cross_chunk_edges_lost_force_keep": int(total_straddle_lost),
         "method": COARSEN_SKELETON,
         "preserves_object_ids": True,
         "target_chunk_shape": target_chunk_shape,
