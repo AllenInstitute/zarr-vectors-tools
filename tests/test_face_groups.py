@@ -1,36 +1,50 @@
 """Per-object face groups (``multiresolution/face_groups.py``).
 
-A viewer drawing one object reads its faces with a byte-range read when a
-level keeps one intra-chunk link group per vertex fragment and says so.  The
+A viewer drawing one object reads its faces with a byte-range read when every
+chunk of a level keeps one intra-chunk link group per vertex fragment and
+zarr-vectors-py has stamped the level ``fragment_link_groups``.  The
 invariants under test:
 
 * **F1** Both mesh coarseners write one group per fragment, every group's
-  corners inside its own fragment, and declare it on the level.
+  corners inside its own fragment, and the level ends up stamped.
 * **F2** Grouping is invisible to readers that concatenate groups:
   ``read_mesh`` returns the same mesh before and after ``index_mesh_faces``.
-* **F3** ``index_mesh_faces`` declares a level written by ``write_mesh``, and
-  a second run has nothing to do.
+* **F3** ``index_mesh_faces`` stamps a level whose groups do not yet follow
+  its fragments, a second run has nothing to do, and a dry run writes
+  nothing.
 * **F4** A face whose corners lie in two fragments has no per-fragment
-  grouping, so such a level is never declared.
+  grouping, so such a level is never stamped.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
-from zarr_vectors.building import get_resolution_level, open_store, read_root_metadata
-from zarr_vectors.core.arrays import read_chunk_links, read_vertex_fragment_index
+from zarr_vectors.building import (
+    get_resolution_level,
+    open_store,
+    read_chunk_links,
+    read_level_metadata,
+    read_root_metadata,
+    read_vertex_fragment_index,
+)
 from zarr_vectors.types.meshes import read_mesh, write_mesh
 
 from zarr_vectors_tools.multiresolution.coarsen import build_pyramid
 from zarr_vectors_tools.multiresolution.face_groups import (
-    LINK_GROUPS_ATTR,
-    PER_VERTEX_FRAGMENT,
-    fragment_of_rows,
+    HAS_FRAGMENT_LINK_GROUPS,
     index_mesh_faces,
-    intra_links_name,
     split_faces_by_fragment,
 )
+
+needs_link_groups = pytest.mark.skipif(
+    not HAS_FRAGMENT_LINK_GROUPS,
+    reason="zarr-vectors-py without fragment_link_groups",
+)
+
+
+def _link_groups():
+    return pytest.importorskip("zarr_vectors.core.link_groups")
 
 
 def _icosphere(n: int):
@@ -73,24 +87,41 @@ def spheres(tmp_path):
     return path
 
 
+def _stamped(path, level):
+    return read_level_metadata(open_store(str(path), mode="r"), level).fragment_link_groups
+
+
 def _assert_per_fragment(path, level):
+    link_groups = _link_groups()
     root = open_store(str(path), mode="r")
-    ndim = len(read_root_metadata(root).chunk_shape)
+    assert _stamped(path, level)
+    caps = read_root_metadata(root).format_capabilities
+    assert link_groups.CAP_FRAGMENT_LINK_GROUPS in caps
     lg = get_resolution_level(root, level)
-    meta = lg.read_array_meta(intra_links_name(ndim, 3))
-    assert meta.get(LINK_GROUPS_ATTR) == PER_VERTEX_FRAGMENT
+    name, width = link_groups.intra_links_name(lg)
     checked = 0
-    for key in meta["nonempty_chunks"]:
+    for key in lg.read_array_meta(name)["nonempty_chunks"]:
         cc = tuple(int(x) for x in key.split("."))
-        groups = read_chunk_links(lg, cc, delta=0, link_width=3)
+        groups = read_chunk_links(lg, cc, delta=0, link_width=width)
         fragments = read_vertex_fragment_index(lg, cc)
         assert len(groups) == fragments.num_fragments, key
-        owner = fragment_of_rows(fragments)
+        owner = link_groups.fragment_of_rows(fragments)
         for k, g in enumerate(groups):
-            g = np.asarray(g).reshape(-1, 3)
+            g = np.asarray(g).reshape(-1, width)
             assert (owner[g] == k).all(), (key, k)
         checked += 1
     assert checked > 0
+
+
+def _flatten_to_single_groups(path, level=0):
+    """Re-cut every chunk to one group, as writers before this did."""
+    link_groups = _link_groups()
+    lg = get_resolution_level(open_store(str(path), mode="r+"), level)
+    name, width = link_groups.intra_links_name(lg)
+    for key in lg.read_array_meta(name)["nonempty_chunks"]:
+        cc = tuple(int(x) for x in key.split("."))
+        groups = read_chunk_links(lg, cc, delta=0, link_width=width)
+        link_groups.write_link_groups(lg, cc, [sum(len(g) for g in groups)])
 
 
 def _face_set(mesh):
@@ -98,52 +129,57 @@ def _face_set(mesh):
     return {tuple(sorted(map(tuple, v[face]))) for face in np.asarray(mesh["faces"])}
 
 
+@needs_link_groups
 @pytest.mark.parametrize("method,factor", [("mesh_decimate", 4.0), ("mesh", 2.0)])
 def test_f1_pyramid_levels_group_faces_per_fragment(spheres, method, factor):
     build_pyramid(str(spheres), factors=[(factor, 1.0)], chunk_scale_factors=[2],
                   method=method)
+    _assert_per_fragment(spheres, 0)
     _assert_per_fragment(spheres, 1)
 
 
-def test_f2_f3_indexing_level_0_changes_nothing_a_reader_sees(spheres):
+@needs_link_groups
+def test_f2_f3_indexing_changes_nothing_a_reader_sees(spheres):
+    _flatten_to_single_groups(spheres)
+    assert not _stamped(spheres, 0)
     before = read_mesh(str(spheres), level=0)
     first = index_mesh_faces(str(spheres), levels=[0])
-    assert first[0].get("declared") is True
-    assert first[0]["regrouped"] > 0
+    assert first[0]["stamped"] is True
+    assert first[0]["regrouped"] > 0 and first[0]["reordered"] == 0
     _assert_per_fragment(spheres, 0)
     after = read_mesh(str(spheres), level=0)
     np.testing.assert_array_equal(before["vertices"], after["vertices"])
-    assert len(after["faces"]) == len(before["faces"])
+    np.testing.assert_array_equal(before["faces"], after["faces"])
     assert _face_set(after) == _face_set(before)
     again = index_mesh_faces(str(spheres), levels=[0])
-    assert again[0]["skipped"] == "already declared"
+    assert again[0]["skipped"] == "already stamped"
+    rechecked = index_mesh_faces(str(spheres), levels=[0], verify=True)
+    assert rechecked[0]["stamped"] and rechecked[0]["regrouped"] == 0
 
 
+@needs_link_groups
 def test_f3_dry_run_writes_nothing(spheres):
+    _flatten_to_single_groups(spheres)
     report = index_mesh_faces(str(spheres), levels=[0], dry_run=True)
-    assert report[0]["regrouped"] > 0 and not report[0].get("declared")
-    root = open_store(str(spheres), mode="r")
-    meta = get_resolution_level(root, 0).read_array_meta(intra_links_name(3, 3))
-    assert LINK_GROUPS_ATTR not in meta
+    assert report[0]["would_stamp"] and report[0]["regrouped"] > 0
+    assert not _stamped(spheres, 0)
 
 
 def test_f4_a_face_across_fragments_has_no_grouping():
-    class Fragments:
-        num_fragments = 2
-
-        def is_range(self, f):
-            return f == 0
-
-        def range(self, f):
-            return (0, 3)
-
-        def indices(self, f):
-            return [3, 5, 4]
-
-    owner = fragment_of_rows(Fragments())
-    assert owner.tolist() == [0, 0, 0, 1, 1, 1]
+    owner = np.array([0, 0, 0, 1, 1, 1])
     inside = np.array([[3, 4, 5], [0, 1, 2], [2, 1, 0]])
     groups = split_faces_by_fragment(inside, owner, 2)
     assert [g.tolist() for g in groups] == [[[0, 1, 2], [2, 1, 0]], [[3, 4, 5]]]
     assert split_faces_by_fragment(np.array([[0, 1, 3]]), owner, 2) is None
     assert split_faces_by_fragment(np.array([[0, 1, 9]]), owner, 2) is None
+    assert split_faces_by_fragment(np.array([[0, 1, 2]]), np.array([0, -1, 0]), 1) is None
+
+
+def test_f4_without_support_nothing_is_stamped(monkeypatch):
+    from zarr_vectors_tools.multiresolution import face_groups
+
+    monkeypatch.setattr(face_groups, "_stamp_fragment_link_groups", None)
+    monkeypatch.setattr(face_groups, "_index_fragment_link_groups", None)
+    assert face_groups.stamp_face_groups(object(), object()) is False
+    with pytest.raises(RuntimeError, match="fragment_link_groups"):
+        face_groups.index_mesh_faces("unused.zv")

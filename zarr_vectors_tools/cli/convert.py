@@ -799,12 +799,13 @@ def run_index_faces(args) -> int:
     from zarr_vectors_tools.multiresolution.face_groups import index_mesh_faces
 
     reports = index_mesh_faces(str(args.store), levels=args.levels,
-                               dry_run=args.dry_run)
+                               dry_run=args.dry_run, verify=args.verify)
     for r in reports:
         state = (r["skipped"] if "skipped" in r
-                 else "declared" if r.get("declared") else "would declare")
+                 else "would stamp" if r.get("would_stamp")
+                 else "stamped" if r.get("stamped") else "not stamped")
         print(f"  level {r['level']}: {r['chunks']} chunks, "
-              f"{r['regrouped']} regrouped -- {state}")
+              f"{r['regrouped']} regrouped, {r['reordered']} reordered -- {state}")
     return 0
 
 

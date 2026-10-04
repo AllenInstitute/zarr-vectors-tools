@@ -615,17 +615,23 @@ def build_parser() -> argparse.ArgumentParser:
         "index-faces",
         help="group a mesh store's faces per object, for per-object reads",
         description="Regroup each chunk's intra-chunk faces one group per "
-                    "vertex fragment (object), and declare it on the level, so "
-                    "a viewer drawing one object can read just its faces rather "
-                    "than the whole chunk. Face data is unchanged; a level where "
-                    "some face spans two objects is left undeclared. Stores "
-                    "built by `zvtools pyramid` already have it above level 0.",
+                    "vertex fragment (object), and stamp the level "
+                    "fragment_link_groups once every chunk is checked, so a "
+                    "viewer drawing one object can read just its faces rather "
+                    "than the whole chunk. Face data is unchanged, and usually "
+                    "only the link_fragments index is rewritten; a level where "
+                    "some face spans two objects is left unstamped. Meshes "
+                    "written by zarr-vectors-py and pyramids built by `zvtools "
+                    "pyramid` are already stamped.",
     )
     x.add_argument("store", help="zarr-vectors store path")
     x.add_argument("--levels", type=parse_int_list, default=None,
                    metavar="L1,L2,...", help="levels to index (default: all)")
     x.add_argument("--dry-run", action="store_true",
                    help="report what would change without writing")
+    x.add_argument("--verify", action="store_true",
+                   help="re-check levels already stamped (repairing them "
+                        "where possible) instead of skipping them")
     x.set_defaults(func=_convert.run_index_faces)
 
     # ---- merge -------------------------------------------------------------

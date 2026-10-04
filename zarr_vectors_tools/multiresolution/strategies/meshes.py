@@ -18,11 +18,11 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
 from zarr_vectors_tools.multiresolution.face_groups import (
-    declare_per_fragment_groups,
     split_faces_by_fragment,
+    stamp_face_groups,
 )
+from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
 
 # ===================================================================
 # Vertex clustering
@@ -850,7 +850,7 @@ def coarsen_mesh_level(
         wrote_intra = True
     finalize_links(level_group, delta=0)
     if wrote_intra and per_fragment:
-        declare_per_fragment_groups(level_group, ndim, link_width)
+        stamp_face_groups(level_group, root)
 
     # ---- manifests + groupings ----------------------------------------
     if has_objects:

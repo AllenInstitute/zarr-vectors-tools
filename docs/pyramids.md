@@ -137,17 +137,23 @@ level is cut too hard. On MICrONS cells already at a coarse source resolution,
 `--coarsen 2,2,2` kept the longest at 34 µm and the cells whole.
 
 Each mesh level is written with one face group per object (per vertex
-fragment) in every chunk and declares it on the level's intra-chunk face array
-(`"link_groups": "per_vertex_fragment"`), so a viewer drawing one object can
-read just its faces instead of every object's in the chunk. Level 0 comes from
-the writer that created the store; add the same grouping to it, or to a store
-built before this, with
+fragment) in every chunk, and zarr-vectors-py checks that and stamps the level
+`fragment_link_groups`, so a viewer drawing one object can read just its faces
+instead of every object's in the chunk. Level 0 is stamped by zarr-vectors-py's
+`write_mesh`; to stamp a store written some other way, or before this, run
 
 ```bash
 zvtools index-faces brain.zv            # all levels; --levels 0 for one
 ```
 
-The face data is unchanged, so other readers see no difference.
+Usually only the small `link_fragments` index is rewritten; the faces
+themselves are reordered only where a chunk did not keep each object's faces
+together, and a level where a face joins two objects is left unstamped. The
+face data is unchanged, so other readers see no difference. Any later write to
+a level's faces or fragments withdraws the stamp, and `--verify` re-checks
+levels that are already stamped. Stamping needs a zarr-vectors-py with
+`fragment_link_groups`; with an older one the groups are still written, just
+not stamped, and `index-faces` stops with an error.
 
 `--method` picks the coarsener for any store (`auto`, the default, chooses by
 geometry); the methods are listed in the [Pyramid reference](pyramid_reference.md).

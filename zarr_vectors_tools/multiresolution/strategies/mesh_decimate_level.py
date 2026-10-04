@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from ..face_groups import declare_per_fragment_groups
+from ..face_groups import stamp_face_groups
 from .mesh_decimate import decimate_mesh
 
 #: Level-metadata tag recorded for levels this strategy produced.
@@ -505,11 +505,10 @@ def _write_level_objects(
                           delta=0, link_width=link_width)
         wrote_intra = True
     finalize_links(level_group, delta=0)
-    if wrote_intra:
-        declare_per_fragment_groups(level_group, ndim, link_width)
-
     write_object_index(level_group, manifests, sid_ndim=ndim,
                        total_objects=n_src_objects)
+    if wrote_intra:
+        stamp_face_groups(level_group, root)
     return n_faces, manifests
 
 
