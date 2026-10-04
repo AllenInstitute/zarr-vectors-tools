@@ -31,6 +31,7 @@ chunk, method, and the RDP tolerance or skeleton stride), which is what
 | `method` | coarsener key from the table above |
 | `sparsity_seed` | seed for random selection, so a rebuild keeps the same objects |
 | `executor` | run chunks in parallel: `zarr_vectors_tools.parallel.process_pool_executor(n)` or `dask_executor(n)`, as a context manager (see [Large data](large_data.md)) |
+| `refinement` | `"replace"` (default) or `"add"` (CLI `--refinement`): convert the finished pyramid so each object is stored once -- see [Storing each object once](pyramids.md#storing-each-object-once-additive-pyramids). Warnings are `zarr_vectors_tools.multiresolution.additive.AdditiveRefinementWarning`; the summary gains `refinement` and an `additive` report per level |
 
 `build_pyramid` returns a summary with one entry per level in `level_specs`.
 Its `cross_level_storage` and `cross_level_depth` describe the links between
@@ -41,7 +42,8 @@ levels that were actually written, as the store's root metadata records them:
 
 | Function | Use it for |
 |---|---|
-| `multiresolution.strategies.points.build_point_subset_pyramid(store, levels=5, divisor=8.0, seed=0)` | point clouds without object ids: each level is a random 1/divisor of the one above, with every per-vertex attribute carried over |
+| `multiresolution.strategies.points.build_point_subset_pyramid(store, levels=5, divisor=8.0, seed=0)` | point clouds without object ids: each level is a random 1/divisor of the one above, with every per-vertex attribute carried over. `refinement="add"` stores each point once (exact for these nested subsets) |
+| `multiresolution.additive.make_pyramid_additive(store)` | converting a finished replacement pyramid to an additive one in place, with the same warnings; `build_pyramid(refinement="add")` calls it |
 | `multiresolution.strategies.skeletons.build_skeleton_pyramid(store, strides=[8, 8], chunk_scale_factors=[2, 2])` | skeletons, with skeleton-only options: `attr_agg`, `drop_interior_below` |
 | `multiresolution.strategies.mesh_decimate_level.build_mesh_pyramid_to_floor(store, 4.0)` | meshes: adds 4x-smaller levels until the surface cannot shrink further or `min_faces` (default 256) is reached |
 | `multiresolution.refresh.rebuild_pyramid_from_level(root, 0)` | rebuilding every level above a level that changed, with the parameters each level was built with; takes an open root group |

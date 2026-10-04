@@ -211,6 +211,54 @@ from zarr_vectors_tools.multiresolution.strategies.points import build_point_sub
 build_point_subset_pyramid("cells.zv", levels=3, divisor=8.0, seed=0)
 ```
 
+## Storing each object once (additive pyramids)
+
+A sparsity pyramid stores the objects a coarse level keeps again at every
+finer level. `--refinement add` stores each object (or point) only at the
+coarsest level that keeps it: every level but the coarsest then holds only
+what the next coarser level lacks, and readers show a level's complete
+content as the union of it and every coarser level. The pyramid costs about
+what level 0 alone did, rather than 1.14-1.33x of it, and a viewer zooming in
+fetches only what it has not drawn yet.
+
+```bash
+zvtools pyramid tracts.zv --sparsity 2,2,2 --refinement add
+```
+
+The pyramid is built as usual and then converted, finest level first.
+**Level 0 is rewritten in place**: afterwards it holds only the streamlines no
+coarser level kept, so level 0 alone is no longer the whole dataset. The
+command says so on stderr. The store lists `additive_levels` in its root's
+`required_capabilities`: zarr-vectors-py from this version reads every level
+complete (`own_level_only=True` reads one level's stored data), and a reader
+that checks the list but lacks the capability refuses the store. Older
+readers do not check it and would show level 0 incomplete.
+
+It is exact when the levels differ only in which objects they keep:
+streamline and polyline sparsity with `--coarsen 1` (each kept streamline is
+byte-identical at every level, also with `--chunk-scale`), and
+`build_point_subset_pyramid(..., refinement="add")`. It warns, with a banner
+on stderr, and builds anyway when:
+
+- the store is a mesh -- every mesh coarsener re-tessellates, so coarse and
+  fine surfaces mix in the finest view;
+- a level coarsens geometry (`--coarsen` above 1, an explicit
+  `--rdp-tolerance`, or a coarsener that bins vertices even at factor 1:
+  points, graphs, lines, skeletons) -- the objects kept there exist only in
+  coarse form, so the finest view shows them coarse;
+- a level keeps every object of the level below (`--sparsity 1`), which
+  leaves the additive level empty;
+- a point subset pyramid does not carry every attribute -- a level's
+  complete content keeps only the attributes all its levels have.
+
+Cross-level links are removed: they join one object at two levels, and an
+object of an additive pyramid is at one. An additive store cannot be
+rebuilt, refreshed or have levels removed: `zvtools pyramid --replace`,
+`rebuild_pyramid_from_level` and merges with `--pyramid rebuild` or `drop`
+refuse it (a merge with `--pyramid keep` adds the new objects to level 0,
+which is consistent). Merging *from* an additive store reads all of it.
+Sharding (`zvtools shard`, `--shard`) keeps it as it is.
+
 ## Links between levels
 
 `--cross-level-storage` links every vertex of a surviving object to the coarse
