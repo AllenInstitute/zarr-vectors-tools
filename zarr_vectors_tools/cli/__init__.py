@@ -138,6 +138,15 @@ def _add_pyramid_args(p: argparse.ArgumentParser) -> None:
         metavar="N",
         help="largest level gap to link (default 1; -1 = every pair of levels)",
     )
+    g.add_argument(
+        "--refinement", choices=("replace", "add"), default="replace",
+        help="'replace' (default): every level is complete. 'add': store each "
+             "object (or point) once, at the coarsest level that keeps it; "
+             "every level but the coarsest then holds only what the next "
+             "coarser one lacks, and readers show the union. LEVEL 0 IS "
+             "REWRITTEN IN PLACE. Exact for streamline/polyline sparsity "
+             "with --coarsen 1; warns for meshes and for coarsened levels",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

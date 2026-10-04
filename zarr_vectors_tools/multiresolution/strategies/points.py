@@ -207,6 +207,7 @@ def build_point_subset_pyramid(
     shard_shape: int | tuple[int, ...] | None = None,
     resume: bool = False,
     progress: bool = False,
+    refinement: str = "replace",
 ) -> dict[str, Any]:
     """Build coarser levels, each a random subset of the level above.
 
@@ -249,6 +250,12 @@ def build_point_subset_pyramid(
             against that reproduction before anything is written. Without
             this, an existing level is an error.
         progress: Print per-level and per-batch progress.
+        refinement: ``"replace"`` (default) or ``"add"``: after building,
+            make every level but the coarsest hold only the points no
+            coarser level has, so each point is stored once and a level's
+            complete content is the union over its chain.  Exact for these
+            nested subsets.  **Level 0 is rewritten in place.**  See
+            :mod:`zarr_vectors_tools.multiresolution.additive`.
 
     Returns:
         Summary dict with ``levels_created`` and a ``level_specs`` list of
@@ -257,6 +264,18 @@ def build_point_subset_pyramid(
     import zarr_vectors.building as B
     from zarr_vectors.constants import VERTEX_ATTRIBUTES
 
+    from zarr_vectors_tools.multiresolution.additive import (
+        check_refinement,
+        refuse_additive,
+        supports_additive,
+    )
+
+    check_refinement(refinement)
+    if refinement == "add" and not supports_additive():
+        raise CoarseningError(
+            "refinement='add' needs a zarr-vectors-py that writes additive levels"
+        )
+    refuse_additive(store_path, "build_point_subset_pyramid")
     root = open_store(str(store_path), "r+")
     root_meta = read_root_metadata(root)
     src_group = get_resolution_level(root, source_level)
@@ -271,6 +290,7 @@ def build_point_subset_pyramid(
     unknown = [a for a in carried if a not in available]
     if unknown:
         raise CoarseningError(f"attributes not at level {source_level}: {unknown}")
+    attribute_names_carried = list(carried)
 
     # Reference read: positions define the row order every later attribute
     # read must agree with.  A key attribute, when present, lets that
@@ -439,13 +459,26 @@ def build_point_subset_pyramid(
 
     _stamp_root_cross_level(root)
 
-    return {
+    result: dict[str, Any] = {
         "levels_created": len(per_level),
         "level_specs": per_level,
         "attributes_carried": len(carried),
         "divisor": divisor,
         "seed": seed,
+        "refinement": refinement,
     }
+    if refinement == "add":
+        from zarr_vectors_tools.multiresolution.additive import make_pyramid_additive
+
+        dropped = sorted(set(available) - set(attribute_names_carried))
+        concerns = (
+            [f"attribute(s) {dropped} are not carried to the coarse levels, so "
+             f"they drop out of every level's complete content (a union keeps "
+             f"only what all its levels have)"]
+            if dropped else []
+        )
+        result["additive"] = make_pyramid_additive(store_path, concerns=concerns)
+    return result
 
 
 def _attribute_complete(B, level_group, name: str) -> bool:

@@ -410,6 +410,10 @@ def _reproduce_pyramid(
     try:
         for index in levels:
             meta = read_level_metadata(parent.store, index)
+            # A part is rebuilt as an ordinary pyramid from its complete
+            # level 0; an additive parent's "add" must not be copied onto it.
+            if getattr(meta, "refinement", "replace") != "replace":
+                meta.refinement = "replace"
             # strict=False: the cross-level checks compare against levels
             # that are seeded one at a time, and the rebuild replaces each
             # of these groups before anything reads it as data.

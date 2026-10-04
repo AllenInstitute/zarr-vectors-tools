@@ -144,6 +144,12 @@ def rebuild_pyramid_from_level(
     above = [lv for lv in levels if lv > source_level]
     if not above:
         return []
+    from zarr_vectors_tools.multiresolution.additive import refuse_additive
+
+    # Each additive level holds only what the next coarser one lacks, so a
+    # level rebuilt from the one below would duplicate objects (or, removed
+    # first, take the objects only it held with it).
+    refuse_additive(root, "rebuild_pyramid_from_level")
 
     if source_level not in levels:
         raise EditError(

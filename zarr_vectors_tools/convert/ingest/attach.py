@@ -140,6 +140,7 @@ def attach_attributes(
     overwrite: bool = False,
     shard_shape: int | tuple[int, ...] | None = None,
     progress: bool = False,
+    _own_level: bool = False,
 ) -> dict[str, Any]:
     """Write new per-vertex attributes into an existing store.
 
@@ -152,7 +153,12 @@ def attach_attributes(
             ``key_attribute`` is treated as a direct row index into
             ``values`` — the positional mode, for adding more columns from
             the file the store was built from.
-        level: Resolution level to write into.
+        level: Resolution level to write into.  On an additive level
+            (``refinement: "add"``), whose complete content spans the
+            coarser levels of its chain, every level of the chain is
+            written, each matching its own vertices -- otherwise the
+            vertices stored at the coarser levels would have no value and
+            the attribute would drop out of the level's complete content.
         key_attribute: Per-vertex attribute holding the join key (or the
             row index when ``keys`` is None).
         missing: ``"fill"`` (default) writes ``fill_value`` for vertices
@@ -184,6 +190,22 @@ def attach_attributes(
 
     if not values:
         raise IngestError("attach_attributes requires at least one attribute")
+    chain = [int(level)] if _own_level else _additive_chain(store_path, level)
+    if len(chain) > 1:
+        parts = [
+            attach_attributes(
+                store_path, values, keys=keys, level=lv,
+                key_attribute=key_attribute, missing=missing,
+                fill_value=fill_value, overwrite=overwrite,
+                shard_shape=shard_shape, progress=progress, _own_level=True,
+            )
+            for lv in chain
+        ]
+        summary = dict(parts[0])
+        for key in ("vertices_matched", "vertices_unmatched", "chunk_count"):
+            summary[key] = sum(int(p[key]) for p in parts)
+        summary["levels"] = chain
+        return summary
 
     store_path = str(store_path)
     arrays = {name: np.asarray(v) for name, v in values.items()}
@@ -289,6 +311,19 @@ def attach_attributes(
         "rows_available": n_rows,
         "sharded": shard_shape is not None,
     }
+
+
+def _additive_chain(store_path: Any, level: int) -> list[int]:
+    """The levels an additive level's complete content spans (``[level]``
+    for an ordinary level, or with a zarr-vectors-py without them)."""
+    try:
+        from zarr_vectors.building import level_chain
+    except ImportError:
+        return [int(level)]
+    try:
+        return list(level_chain(str(store_path), int(level)))
+    except Exception:  # noqa: BLE001 - the open below reports a bad store
+        return [int(level)]
 
 
 def _write_session(B, root, level_group, level: int, shard_shape):

@@ -14,6 +14,7 @@ the CLI to a Python script for its last step.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -106,8 +107,16 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
         extra["sparsity_attribute"] = args.sparsity_attribute
     if getattr(args, "method", None) is not None:
         extra["method"] = args.method
+    refinement = getattr(args, "refinement", "replace") or "replace"
+    if refinement != "replace":
+        extra["refinement"] = refinement
 
-    with executor_ctx(args.workers, args.workers_backend) as ex:
+    from zarr_vectors_tools.multiresolution.additive import (
+        level_zero_notice,
+        warnings_as_banner,
+    )
+
+    with executor_ctx(args.workers, args.workers_backend) as ex, warnings_as_banner():
         result = build_pyramid(
             str(args.output),
             factors=factors,
@@ -119,6 +128,29 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
             **extra,
         )
     print(f"  pyramid: {result.get('levels_created', '?')} coarser level(s) built")
+    if refinement == "add":
+        print(level_zero_notice(args.output), file=sys.stderr, flush=True)
+
+
+def _make_inline_pyramid_additive(args, factors, coarsener: str, geometry: str) -> None:
+    """``--refinement add`` for an ingest that built its pyramid itself
+    (TRK, precomputed skeletons): convert it once it is written."""
+    if (getattr(args, "refinement", "replace") or "replace") != "add" or not factors:
+        return
+    from zarr_vectors_tools.multiresolution.additive import (
+        additive_concerns,
+        level_zero_notice,
+        make_pyramid_additive,
+        warnings_as_banner,
+    )
+
+    concerns = additive_concerns(
+        geometry_types=[geometry], coarsener=coarsener, factors=factors,
+        coarsen_mode=args.coarsen_mode, rdp_tolerances=args.rdp_tolerance,
+    )
+    with warnings_as_banner():
+        make_pyramid_additive(str(args.output), concerns=concerns)
+    print(level_zero_notice(args.output), file=sys.stderr, flush=True)
 
 
 def _check_method(args, fmt, factors) -> str | None:
@@ -227,6 +259,7 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     _print_summary("ingested trk (streamlines)", summary)
     if factors is not None:
         print(f"  pyramid: {len(factors)} coarser level(s) built")
+    _make_inline_pyramid_additive(args, factors, "polyline", "streamline")
     return 0
 
 
@@ -332,6 +365,7 @@ def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
     _print_summary("ingested precomputed (skeleton)", summary)
     if strides:
         print(f"  pyramid: {len(strides)} coarser level(s) built")
+    _make_inline_pyramid_additive(args, factors, "skeleton", "skeleton")
 
 
 def _convert_precomputed_meshes(args, fmt, factors, chunk_scale) -> None:

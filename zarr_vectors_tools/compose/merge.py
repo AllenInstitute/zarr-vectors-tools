@@ -238,6 +238,17 @@ def merge_stores(
             target, opened,
             create=create, cell_size=cell_size, bounds=bounds,
         )
+        if pyramid != "keep" and not created:
+            # An additive target's coarse levels hold objects level 0 does
+            # not: dropping or rebuilding them would lose those objects.
+            # Merging into level 0 and keeping the pyramid is consistent --
+            # the merged objects simply live at level 0.
+            from zarr_vectors_tools.multiresolution.additive import refuse_additive
+
+            try:
+                refuse_additive(dataset.store, f"merge with pyramid={pyramid!r}")
+            except Exception as exc:  # noqa: BLE001 - StoreError
+                raise IngestError(f"{exc} Pass pyramid='keep'.") from None
     except Exception:
         for source in opened:
             source.close()

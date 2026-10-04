@@ -424,6 +424,11 @@ def coarsen_level(
     ``stride`` (keep every k-th vertex) rather than a vertex aggregation
     factor.
     """
+    from zarr_vectors_tools.multiresolution.additive import refuse_additive
+
+    # Every level of an additive pyramid lacks what the next coarser one
+    # holds, so coarsening one from another would lose or duplicate objects.
+    refuse_additive(store_path, "coarsen_level")
     root_meta = read_root_metadata(open_store(str(store_path), mode="r"))
     # Dispatch via the coarsener registry (see ``register_coarsener``) so new
     # or improved per-geometry coarseners can be plugged in without editing
@@ -2178,6 +2183,7 @@ def check_pyramid_request(
     method: str | None = None,
     rdp_tolerances: Sequence[float] | None = None,
     start_level: int = 0,
+    refinement: str = "replace",
 ) -> list[float] | None:
     """Refuse a :func:`build_pyramid` request before anything is written.
 
@@ -2192,6 +2198,24 @@ def check_pyramid_request(
             f"start_level must be between 0 and {len(factors)} (the number of "
             f"levels factors describes), got {start_level}"
         )
+    from zarr_vectors_tools.multiresolution.additive import (
+        check_refinement,
+        refuse_additive,
+        supports_additive,
+    )
+
+    check_refinement(refinement)
+    if refinement == "add" and not supports_additive():
+        raise ValueError(
+            "refinement='add' needs a zarr-vectors-py that writes additive "
+            "levels; the installed one does not"
+        )
+    try:
+        refuse_additive(store_path, "build_pyramid")
+    except ValueError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - StoreError from zarr-vectors-py
+        raise ValueError(str(exc)) from None
     if cross_level_storage not in VALID_XLEVEL_STORAGE:
         raise ValueError(
             f"cross_level_storage={cross_level_storage!r} not in "
@@ -2268,6 +2292,7 @@ def build_pyramid(
     start_level: int = 0,
     on_level_done: Callable[[int, dict[str, Any]], None] | None = None,
     sparsity_attribute: str | None = None,
+    refinement: str = "replace",
 ) -> dict[str, Any]:
     """Build a multi-resolution pyramid for an existing store.
 
@@ -2335,6 +2360,16 @@ def build_pyramid(
             each level is written, so a caller can record progress.
         sparsity_attribute: The object attribute ``sparsity_strategy=
             "attribute"`` ranks by; see :func:`coarsen_level`.
+        refinement: ``"replace"`` (default): every level is complete.
+            ``"add"``: build the pyramid as usual, then make every level
+            but the coarsest additive -- holding only the objects (or
+            points) no coarser level has -- so each is stored once.
+            **Level 0 is rewritten in place** and alone is no longer the
+            whole dataset.  Warns (``AdditiveRefinementWarning``) for a
+            mesh, for any level that coarsens geometry, and for a level that
+            drops nothing; streamline/polyline object sparsity with
+            ``coarsen_factor`` 1 is exact and does not warn.  See
+            :mod:`zarr_vectors_tools.multiresolution.additive`.
 
     Returns:
         Summary dict.  ``method`` is the coarsener that built the levels
@@ -2344,6 +2379,11 @@ def build_pyramid(
         (points, graphs, lines) writes any, so other geometries report
         ``0`` and ``"none"``.
     """
+    from zarr_vectors_tools.multiresolution.additive import (
+        additive_concerns,
+        make_pyramid_additive,
+    )
+
     tolerances = check_pyramid_request(
         store_path,
         factors=factors,
@@ -2356,7 +2396,18 @@ def build_pyramid(
         method=method,
         rdp_tolerances=rdp_tolerances,
         start_level=start_level,
+        refinement=refinement,
     )
+    concerns: list[str] = []
+    if refinement == "add":
+        root_meta = read_root_metadata(open_store(str(store_path), mode="r"))
+        concerns = additive_concerns(
+            geometry_types=list(root_meta.geometry_types or []),
+            coarsener=method or select_coarsener_key(root_meta),
+            factors=factors,
+            coarsen_mode=coarsen_mode,
+            rdp_tolerances=tolerances,
+        )
 
     # Families reaching a level about to be rebuilt describe vertices that
     # are about to change.
@@ -2419,13 +2470,21 @@ def build_pyramid(
     )
 
     methods = sorted({str(s["method"]) for s in summaries if s.get("method")})
-    return {
+    result: dict[str, Any] = {
         "levels_created": len(summaries),
         "level_specs": summaries,
         "method": ", ".join(methods) or COARSEN_PER_OBJECT,
         "cross_level_depth": written_depth,
         "cross_level_storage": written_storage,
+        "refinement": refinement,
     }
+    if refinement == "add":
+        result["additive"] = make_pyramid_additive(store_path, concerns=concerns)
+        # The conversion removes the cross-level families: an object of an
+        # additive pyramid lives at one level, so there is nothing to join.
+        result["cross_level_depth"] = 0
+        result["cross_level_storage"] = XLEVEL_NONE
+    return result
 
 
 # ===================================================================

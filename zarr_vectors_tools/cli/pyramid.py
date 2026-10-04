@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from ._args import (
     build_factors,
     check_pyramid_method,
@@ -107,6 +109,10 @@ def run_pyramid(args) -> int:
         options["cross_level_depth"] = args.cross_level_depth
     if method is not None:
         options["method"] = method
+    refinement = getattr(args, "refinement", "replace") or "replace"
+    if refinement != "replace":
+        options["refinement"] = refinement
+    _refuse_additive_store(args.store)
 
     # Everything build_pyramid would refuse is refused before --replace
     # removes the old levels, so a typo does not cost the existing pyramid.
@@ -116,7 +122,12 @@ def run_pyramid(args) -> int:
         raise SystemExit(f"error: {exc}") from None
     _clear_existing_levels(args.store, replace=args.replace)
 
-    with executor_ctx(args.workers, args.workers_backend) as ex:
+    from zarr_vectors_tools.multiresolution.additive import (
+        level_zero_notice,
+        warnings_as_banner,
+    )
+
+    with executor_ctx(args.workers, args.workers_backend) as ex, warnings_as_banner():
         result = build_pyramid(
             str(args.store),
             compressor=(None if args.compressor == "none" else args.compressor),
@@ -133,7 +144,20 @@ def run_pyramid(args) -> int:
         f"built {result.get('levels_created', '?')} coarser level(s) "
         f"(method={', '.join(methods)})"
     )
+    if refinement == "add":
+        print(level_zero_notice(args.store), file=sys.stderr, flush=True)
     return 0
+
+
+def _refuse_additive_store(store) -> None:
+    """``zvtools pyramid`` on a store that is already additive: its levels
+    cannot be removed or rebuilt one from another."""
+    from zarr_vectors_tools.multiresolution.additive import refuse_additive
+
+    try:
+        refuse_additive(str(store), "building a pyramid")
+    except Exception as exc:  # noqa: BLE001 - StoreError from zarr-vectors-py
+        raise SystemExit(f"error: {exc}") from None
 
 
 def run_validate(args) -> int:
