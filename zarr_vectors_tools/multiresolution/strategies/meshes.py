@@ -19,6 +19,10 @@ import numpy as np
 import numpy.typing as npt
 
 from zarr_vectors_tools.multiresolution.metanodes import generate_metanodes
+from zarr_vectors_tools.multiresolution.face_groups import (
+    declare_per_fragment_groups,
+    split_faces_by_fragment,
+)
 
 # ===================================================================
 # Vertex clustering
@@ -817,7 +821,10 @@ def coarsen_mesh_level(
             level_group, cross_records, ndim, delta=0, link_width=link_width,
         )
     # Intra-chunk faces: one numpy array per cell, never materialised as
-    # Python objects.
+    # Python objects.  Written one group per vertex fragment (each object's
+    # metavertex span), so a reader can fetch one object's faces alone.
+    wrote_intra = False
+    per_fragment = True
     for (base, off_key), arrs in sorted(pending.items()):
         if not all(off == zero for off in off_key):
             continue
@@ -825,15 +832,25 @@ def coarsen_mesh_level(
         # metavertices; keep each triple once.
         stacked = np.unique(np.concatenate(arrs, axis=0), axis=0)
         faces_out += int(stacked.shape[0])
+        spans = out_frag_members.get(base) or [(0, len(out_vertices[base]))]
+        fragment_of = np.full(spans[-1][1], -1, dtype=np.int64)
+        for f, (a, b) in enumerate(spans):
+            fragment_of[a:b] = f
+        groups = split_faces_by_fragment(stacked, fragment_of, len(spans))
+        if groups is None:
+            groups, per_fragment = [stacked], False
         create_links_array(
             level_group, link_width, delta=0, sid_ndim=ndim,
             offsets=[zero] * (link_width - 1),
         )
         write_chunk_links(
-            level_group, base, [stacked], dtype=np.int64, delta=0,
+            level_group, base, groups, dtype=np.int64, delta=0,
             link_width=link_width,
         )
+        wrote_intra = True
     finalize_links(level_group, delta=0)
+    if wrote_intra and per_fragment:
+        declare_per_fragment_groups(level_group, ndim, link_width)
 
     # ---- manifests + groupings ----------------------------------------
     if has_objects:

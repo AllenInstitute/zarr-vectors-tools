@@ -34,6 +34,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from ..face_groups import declare_per_fragment_groups
 from .mesh_decimate import decimate_mesh
 
 #: Level-metadata tag recorded for levels this strategy produced.
@@ -444,7 +445,7 @@ def _write_level_objects(
             )
 
     # ---- faces: bucket by (base chunk, per-corner offsets) --------------
-    pending: dict[tuple, list[npt.NDArray]] = {}
+    pending: dict[tuple, list[tuple[int, npt.NDArray]]] = {}
     for oid, (v, f) in sorted(meshes.items()):
         if len(f) == 0:
             continue
@@ -465,7 +466,7 @@ def _write_level_objects(
             ok = tuple(tuple(int(x) for x in uniq[u, ndim * (k + 1):ndim * (k + 2)])
                        for k in range(link_width - 1))
             arr = np.stack([c[sel] for c in cor_l], axis=1)
-            pending.setdefault((b, ok), []).append(arr)
+            pending.setdefault((b, ok), []).append((oid, arr))
 
     create_links_family(level_group, delta=0, link_width=link_width,
                         sid_ndim=ndim)
@@ -476,7 +477,7 @@ def _write_level_objects(
     for (b, ok), arrs in sorted(pending.items()):
         if all(o == zero for o in ok):
             continue
-        stacked = np.concatenate(arrs, axis=0)
+        stacked = np.concatenate([a for _oid, a in arrs], axis=0)
         n_faces += len(stacked)
         ends = [tuple(b)] + [tuple(int(x) + int(y) for x, y in zip(b, o))
                              for o in ok]
@@ -485,16 +486,27 @@ def _write_level_objects(
     if cross:
         write_links(level_group, cross, ndim, delta=0, link_width=link_width)
 
+    wrote_intra = False
     for (b, ok), arrs in sorted(pending.items()):
         if not all(o == zero for o in ok):
             continue
-        stacked = np.concatenate(arrs, axis=0)
-        n_faces += len(stacked)
+        # One group per vertex fragment, in fragment order (an object with
+        # no faces inside this chunk gets an empty group), so a reader can
+        # fetch one object's faces without the rest of the cell.
+        by_oid = dict(arrs)
+        groups = [
+            by_oid.get(oid, np.zeros((0, link_width), dtype=np.int64))
+            for oid, _rows in sorted(per_chunk[b])
+        ]
+        n_faces += sum(len(g) for g in groups)
         create_links_array(level_group, link_width, delta=0, sid_ndim=ndim,
                            offsets=[zero] * (link_width - 1))
-        write_chunk_links(level_group, b, [stacked], dtype=dtype_links,
+        write_chunk_links(level_group, b, groups, dtype=dtype_links,
                           delta=0, link_width=link_width)
+        wrote_intra = True
     finalize_links(level_group, delta=0)
+    if wrote_intra:
+        declare_per_fragment_groups(level_group, ndim, link_width)
 
     write_object_index(level_group, manifests, sid_ndim=ndim,
                        total_objects=n_src_objects)

@@ -131,6 +131,24 @@ closer than the median edge length times the factor merge): 61,452 → 19,376 �
 4,814 with `--coarsen 2,2`, but clustered levels have holes and non-manifold
 edges. In Python, pass `method="mesh_decimate"` to `build_pyramid`.
 
+Thin structures such as neurites collapse into long sliver triangles when a
+level is cut too hard. On MICrONS cells already at a coarse source resolution,
+`--coarsen 4,4,4` left edges up to 138 µm at level 2 against a 3 µm median;
+`--coarsen 2,2,2` kept the longest at 34 µm and the cells whole.
+
+Each mesh level is written with one face group per object (per vertex
+fragment) in every chunk and declares it on the level's intra-chunk face array
+(`"link_groups": "per_vertex_fragment"`), so a viewer drawing one object can
+read just its faces instead of every object's in the chunk. Level 0 comes from
+the writer that created the store; add the same grouping to it, or to a store
+built before this, with
+
+```bash
+zvtools index-faces brain.zv            # all levels; --levels 0 for one
+```
+
+The face data is unchanged, so other readers see no difference.
+
 `--method` picks the coarsener for any store (`auto`, the default, chooses by
 geometry); the methods are listed in the [Pyramid reference](pyramid_reference.md).
 

@@ -794,6 +794,20 @@ def run_shard(args) -> int:
     return 0
 
 
+def run_index_faces(args) -> int:
+    """``zvtools index-faces STORE`` -- per-object face groups."""
+    from zarr_vectors_tools.multiresolution.face_groups import index_mesh_faces
+
+    reports = index_mesh_faces(str(args.store), levels=args.levels,
+                               dry_run=args.dry_run)
+    for r in reports:
+        state = (r["skipped"] if "skipped" in r
+                 else "declared" if r.get("declared") else "would declare")
+        print(f"  level {r['level']}: {r['chunks']} chunks, "
+              f"{r['regrouped']} regrouped -- {state}")
+    return 0
+
+
 def run_synapses(args) -> int:
     """``zvtools synapses TABLE SKELETONS OUTPUT``."""
     from zarr_vectors_tools.convert.ingest.synapses import ingest_synapses
