@@ -804,6 +804,10 @@ def run_index_faces(args) -> int:
         state = (r["skipped"] if "skipped" in r
                  else "would stamp" if r.get("would_stamp")
                  else "stamped" if r.get("stamped") else "not stamped")
+        if r.get("withdrawn"):
+            state += " (stamp withdrawn)"
+        elif r.get("would_withdraw"):
+            state += " (would withdraw the stamp)"
         print(f"  level {r['level']}: {r['chunks']} chunks, "
               f"{r['regrouped']} regrouped, {r['reordered']} reordered -- {state}")
     return 0

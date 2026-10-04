@@ -149,9 +149,18 @@ zvtools index-faces brain.zv            # all levels; --levels 0 for one
 Usually only the small `link_fragments` index is rewritten; the faces
 themselves are reordered only where a chunk did not keep each object's faces
 together, and a level where a face joins two objects is left unstamped. The
-face data is unchanged, so other readers see no difference. Any later write to
-a level's faces or fragments withdraws the stamp, and `--verify` re-checks
-levels that are already stamped. Stamping needs a zarr-vectors-py with
+face data is unchanged, so other readers see no difference. A level is also
+left unstamped where its objects' vertex fragments overlap, or where its face
+groups do not hold every face of a chunk exactly once.
+
+Any later write to a level's faces or fragments withdraws the stamp: an edit,
+a `zvtools merge` (which edits level 0), a rechunk. Run `zvtools index-faces`
+again afterwards. `zvtools shard`, and the `--shard` pass of `zvtools
+convert`, rewrite the same bytes into shards (or back out of them); a
+zarr-vectors-py that restores the stamp after repacking keeps it, and with an
+older one rerun `zvtools index-faces` after sharding. `--verify` re-checks
+levels that are already stamped, repairs them where it can, and withdraws the
+stamp from a level it cannot repair. Stamping needs a zarr-vectors-py with
 `fragment_link_groups`; with an older one the groups are still written, just
 not stamped, and `index-faces` stops with an error.
 

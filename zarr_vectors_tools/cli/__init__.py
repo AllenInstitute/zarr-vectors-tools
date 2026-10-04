@@ -630,8 +630,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--dry-run", action="store_true",
                    help="report what would change without writing")
     x.add_argument("--verify", action="store_true",
-                   help="re-check levels already stamped (repairing them "
-                        "where possible) instead of skipping them")
+                   help="re-check levels already stamped instead of skipping "
+                        "them: repair them where possible, and withdraw the "
+                        "stamp where not")
     x.set_defaults(func=_convert.run_index_faces)
 
     # ---- merge -------------------------------------------------------------

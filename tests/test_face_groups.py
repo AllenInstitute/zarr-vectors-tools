@@ -183,3 +183,24 @@ def test_f4_without_support_nothing_is_stamped(monkeypatch):
     assert face_groups.stamp_face_groups(object(), object()) is False
     with pytest.raises(RuntimeError, match="fragment_link_groups"):
         face_groups.index_mesh_faces("unused.zv")
+
+
+def _restores_claims_after_repack() -> bool:
+    from zarr_vectors.core.group import Group
+
+    return hasattr(Group, "level_claims")
+
+
+@needs_link_groups
+@pytest.mark.skipif(
+    not _restores_claims_after_repack(),
+    reason="zarr-vectors-py that withdraws claims when it repacks shards",
+)
+def test_f5_the_convert_shard_pass_keeps_the_stamps(spheres):
+    from zarr_vectors_tools.cli.convert import _maybe_shard
+
+    build_pyramid(str(spheres), factors=[(2.0, 1.0)], chunk_scale_factors=[2],
+                  method="mesh")
+    _maybe_shard(2, spheres)
+    _assert_per_fragment(spheres, 0)
+    _assert_per_fragment(spheres, 1)
