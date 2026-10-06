@@ -2449,8 +2449,7 @@ def _skeleton_coarsener(
     attribute_values: Any = None,
 ) -> dict[str, Any]:
     """Skeleton stores: route to the skeleton-aware decimator.  ``coarsen_factor``
-    is the decimation stride (1 being the identity, as elsewhere), and the
-    random sparsity strategy degrades to deterministic ``"length"``.
+    is the decimation stride (1 being the identity, as elsewhere).
     ``coarsen_mode`` is accepted for signature parity with other coarseners
     but has no effect here — this coarsener always decimates."""
     from zarr_vectors_tools.multiresolution.strategies.skeletons import (
@@ -2469,9 +2468,13 @@ def _skeleton_coarsener(
         stride=max(1, int(round(coarsen_factor))),
         sparsity_factor=sparsity_factor,
         chunk_scale_factor=csf,
-        sparsity_strategy=(
-            sparsity_strategy if sparsity_strategy != "random" else "length"
-        ),
+        # ``sparsity_strategy`` is honoured as given. It used to silently
+        # degrade "random" to deterministic "length" here -- a caller asking
+        # for random sampling got fragment-count ranking instead, and the
+        # store's own metadata was the only place that said so. See
+        # open-items.md item 11: this was the same proxy-for-length bug
+        # reaching callers who never asked for "length" at all.
+        sparsity_strategy=sparsity_strategy,
         sparsity_seed=sparsity_seed,
         compressor=compressor,
         executor=executor,

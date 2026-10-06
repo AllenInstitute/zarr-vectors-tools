@@ -26,6 +26,37 @@ def compute_lengths(polylines: list[np.ndarray]) -> np.ndarray:
     return out
 
 
+def compute_cable_lengths(
+    vertices: list[np.ndarray], edges: list[np.ndarray]
+) -> np.ndarray:
+    """Total edge length of each object, ``(O,)`` float32.
+
+    Distinct from :func:`compute_lengths`: that sums *consecutive* vertex
+    diffs, which is only correct for an ordered, unbranched polyline. A
+    skeleton is a graph — it can branch — so its length is the sum over its
+    explicit edge list instead (the same "sum of segment Euclidean
+    distances" quantity, computed the way a branching structure requires).
+    An ordered polyline with implicit ``(i, i+1)`` edges is the special case
+    where the two definitions agree.
+
+    Args:
+        vertices: List of ``(n_k, D)`` per-object vertex arrays.
+        edges: List of ``(m_k, 2)`` per-object edge index arrays, indexing
+            into the matching ``vertices[k]``.
+
+    Returns:
+        ``(O,)`` float32 array of cable lengths. An object with no edges
+        (a single point, or absent geometry) is ``0.0``.
+    """
+    out = np.zeros((len(vertices),), dtype=np.float32)
+    for i, (v, e) in enumerate(zip(vertices, edges)):
+        if len(e) == 0:
+            continue
+        diffs = v[e[:, 0]] - v[e[:, 1]]
+        out[i] = float(np.sqrt((diffs * diffs).sum(axis=1)).sum())
+    return out
+
+
 def compute_endpoints(polylines: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """First and last vertex of each polyline.
 

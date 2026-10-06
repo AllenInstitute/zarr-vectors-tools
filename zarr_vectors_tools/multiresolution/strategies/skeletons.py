@@ -1821,7 +1821,11 @@ def coarsen_skeleton_level(
             chunk_shape = source × factor).  Default 2 (nested 2× grid).
         sparsity_strategy: Object-selection strategy (see
             :mod:`zarr_vectors_tools.multiresolution.object_selection`).
-            ``"length"`` drops shortest skeletons first.
+            ``"length"`` drops shortest skeletons first, by real cable
+            length (``object_attributes/length`` or ``cable_length``) when
+            the source level has it, else by fragment (branch) count as a
+            weaker fallback -- see the sparsity keep-set logic below for
+            when each applies.
         sparsity_seed: RNG seed.
         attribute_values: Per-object values for the ``"attribute"``
             sparsity strategy.
@@ -1983,18 +1987,61 @@ def coarsen_skeleton_level(
             "on the source level; re-ingest or migrate the source level first"
         )
 
-    # Sparsity keep-set (O(objects)).  The "length" strategy needs per-object
-    # sizes — the only path that still reads all manifests (O(fragments)), and
-    # only when sparsity is active.
+    # Sparsity keep-set (O(objects)).  The "length" strategy needs a cheap
+    # per-object signal; this mirrors strategies/polylines.py's "Phase 0"
+    # structure (same problem, same fix) rather than inventing a second one.
     if sparsity_factor > 1.0 and n_src > 1:
-        manifest_lens = np.array(
-            [len(m) for m in read_all_object_manifests(src)], dtype=np.float64
-        )
-        lengths = manifest_lens if sparsity_strategy == "length" else None
-        # Objects already emptied by an earlier pyramid level's sparsity
-        # drop must not be re-"kept" here — see `apply_sparsity`'s
-        # `alive_mask` docstring.
-        alive_mask = manifest_lens > 0
+        # Prefer a real per-object length, written at ingest
+        # (object_index.build_object_index, given cable_lengths) or by
+        # zvtools' skeleton metrics (algorithms/skeleton_metrics.py, which
+        # persists the same quantity as "cable_length"). A missing array
+        # raises StoreError on current core (KeyError on older cores);
+        # treat both as "no real length recorded".
+        length_arr = None
+        for attr_name in ("length", "cable_length"):
+            try:
+                length_arr = np.asarray(
+                    read_object_attributes(src, attr_name), dtype=np.float64,
+                )
+                break
+            except (KeyError, StoreError):
+                continue
+
+        if length_arr is not None:
+            alive_mask = length_arr > 0
+            lengths = length_arr if sparsity_strategy == "length" else None
+        elif source_level == 0:
+            # No fallback at level 0: there is nothing cheaper to fall back
+            # TO (the manifest-count proxy below exists only because a
+            # coarser level has no vertex data left to have computed a real
+            # length from in the first place). Silently substituting
+            # fragment count here is exactly the bug this raise replaces --
+            # see open-items.md item 11: `sparsity_strategy="length"` was
+            # silently ranking by fragment (branch) count instead of length,
+            # invisible for a year because nothing ever raised.
+            alive_mask = np.ones(n_src, dtype=bool)
+            lengths = None
+            if sparsity_strategy == "length":
+                raise ValueError(
+                    "'length' sparsity strategy requires object_attributes/"
+                    "length at level 0 (ingest with a reader/writer that "
+                    "records per-object cable length, or run zvtools' "
+                    "skeleton metrics with write=True first)"
+                )
+        else:
+            # Coarser source level, no real length recorded (e.g. this
+            # pyramid predates length being written): fall back to the
+            # O(fragments) manifest read. A coarser level's fragment count
+            # is a weaker, staler proxy than level 0's real length would be
+            # -- the level above already decimated -- but it is still a
+            # sparsity-aware per-object signal, which plain vertex count at
+            # a coarse level would not be.
+            manifest_lens = np.array(
+                [len(m) for m in read_all_object_manifests(src)], dtype=np.float64
+            )
+            alive_mask = manifest_lens > 0
+            lengths = manifest_lens if sparsity_strategy == "length" else None
+
         kept = apply_sparsity(
             n_src, 1.0 / sparsity_factor, sparsity_strategy,
             seed=sparsity_seed, lengths=lengths, alive_mask=alive_mask,
