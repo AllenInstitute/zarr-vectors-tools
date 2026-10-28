@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.random import random
 from zarr_vectors.exceptions import IngestError
 from zarr_vectors.types.polylines import write_polylines
 from zarr_vectors.typing import BinShape, ChunkShape
@@ -200,7 +201,7 @@ def ingest_linc_trk(
     chunk_shape: ChunkShape,
     *,
     lut_path: str | Path,
-    mapping_path: str | Path,
+    mapping_path: str | Path | None = None,
     bin_shape: BinShape | None = None,
     dtype: str = "float32",
     preserve_header: bool = True,
@@ -215,10 +216,14 @@ def ingest_linc_trk(
     determines which group it belongs to. Integral floating-point label
     IDs are accepted and converted to ``int64``.
 
-    The mapping JSON maps the input TRK filename to its expected atlas
-    label ID. The LUT maps atlas label IDs to group metadata, including
+    The LUT (text file) maps atlas label IDs to group metadata, including
     the group name and RGBA color. A group is created for each unique
     label ID present in the TRK.
+
+    The mapping JSON is optional. When supplied, it maps the input TRK
+    filename to its expected atlas label ID and is used only as a
+    consistency check. When omitted, the group information is taken
+    entirely from the TRK ``label_id`` attribute and the LUT.
 
     Args:
         input_path: Path to the input .trk file.
@@ -226,8 +231,9 @@ def ingest_linc_trk(
         chunk_shape: Spatial chunk size per dimension (3D).
         lut_path: Path to the label lookup table containing label IDs,
             names, and RGBA colors.
-        mapping_path: Path to the JSON file mapping TRK filenames to
-            their expected atlas label IDs.
+        mapping_path: Optional path to the JSON file mapping TRK
+            filenames to their expected atlas label IDs. If None, no
+            filename/label cross-check is performed.
         bin_shape: Optional spatial bin size.
         dtype: Dtype for position data.
         preserve_header: If True, store the TRK header in
@@ -248,24 +254,28 @@ def ingest_linc_trk(
 
     Raises:
         IngestError: If the TRK does not contain ``label_id``, a label ID
-            is invalid, the input filename is missing from the mapping,
-            a mapped label does not occur in the TRK, or a TRK label is
-            missing from the LUT.
+            is invalid, or a TRK label is missing from the LUT. When
+            ``mapping_path`` is given, also if the input filename is
+            missing from the mapping or the mapped label does not occur
+            in the TRK.
         FileNotFoundError: If the input TRK file does not exist.
     """
     input_path = Path(input_path)
 
-    # LINC-specific metadata files.
+    # LINC-specific metadata. The LUT is always required; the mapping
+    # JSON is an optional cross-check.
     lut = _read_lut(lut_path)
-    mapping = _read_mapping(mapping_path)
 
-    try:
-        mapped_label_id = mapping[input_path.name]
-    except KeyError as e:
-        raise IngestError(
-            f"TRK filename {input_path.name!r} is not present in "
-            f"the mapping JSON"
-        ) from e
+    mapped_label_id: int | None = None
+    if mapping_path is not None:
+        mapping = _read_mapping(mapping_path)
+        try:
+            mapped_label_id = mapping[input_path.name]
+        except KeyError as e:
+            raise IngestError(
+                f"TRK filename {input_path.name!r} is not present in "
+                f"the mapping JSON"
+            ) from e
 
     # Shared TRK loading.
     trk = _load_trk(input_path)
@@ -279,15 +289,17 @@ def ingest_linc_trk(
 
     label_ids = _coerce_label_ids(dps["label_id"])
 
-    if mapped_label_id not in set(label_ids.tolist()):
+    if (
+        mapped_label_id is not None
+        and mapped_label_id not in set(label_ids.tolist())
+    ):
         raise IngestError(
             f"Mapping JSON assigns {input_path.name!r} to label "
             f"{mapped_label_id}, but that label does not occur in "
             f"the TRK label_id attribute"
         )
 
-    # Shared TRK extraction. Tell the helper that label_id must remain
-    # integer-valued rather than being converted to float32.
+    # Shared TRK extraction.
     (
         polylines,
         vertex_attributes,
@@ -325,12 +337,29 @@ def ingest_linc_trk(
         dtype=np.int64,
     )
 
+    # Groups come from the TRK labels; names/colors come from the LUT.
+    # _make_group_attributes raises IngestError for labels not in the LUT.
     groups = _make_groups(label_ids)
     group_attributes = _make_group_attributes(
         groups,
         lut,
     )
+    vertex_colors_r = [np.array([lut[j[0]]['color'][0] for j in i])
+                       for i in vertex_attributes['label_id']]
+    vertex_colors_g = [np.array([lut[j[0]]['color'][1] for j in i])
+                       for i in vertex_attributes['label_id']]
+    vertex_colors_b = [np.array([lut[j[0]]['color'][2] for j in i])
+                       for i in vertex_attributes['label_id']]
+    color_variance = [np.array([random()]*len(i))
+                      for i in vertex_attributes['label_id']]
+    vertex_attributes['vertex_color_r'] = vertex_colors_r
+    vertex_attributes['vertex_color_g'] = vertex_colors_g
+    vertex_attributes['vertex_color_b'] = vertex_colors_b
+    vertex_attributes['vertex_variance'] = color_variance
 
+    object_colors = np.array([lut[int(i)]['color']
+                              for i in object_attributes['label_id']])
+    object_attributes['object_color'] = object_colors
     result = write_polylines(
         str(output_path),
         polylines,
