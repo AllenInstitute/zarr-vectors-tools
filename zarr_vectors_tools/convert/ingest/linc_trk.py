@@ -40,8 +40,7 @@ def _read_lut(path: str | Path) -> dict[int, dict[str, Any]]:
             fields = line.split()
             if len(fields) < 6:
                 raise IngestError(
-                    f"Invalid LUT line {line_number} in '{path}': "
-                    f"expected at least 6 fields"
+                    f"Invalid LUT line {line_number} in '{path}': expected at least 6 fields"
                 )
 
             try:
@@ -49,14 +48,10 @@ def _read_lut(path: str | Path) -> dict[int, dict[str, Any]]:
                 name = " ".join(fields[1:-4])
                 rgba = tuple(int(x) for x in fields[-4:])
             except ValueError as e:
-                raise IngestError(
-                    f"Invalid LUT line {line_number} in '{path}'"
-                ) from e
+                raise IngestError(f"Invalid LUT line {line_number} in '{path}'") from e
 
             if any(x < 0 or x > 255 for x in rgba):
-                raise IngestError(
-                    f"Invalid RGBA value on LUT line {line_number}: {rgba}"
-                )
+                raise IngestError(f"Invalid RGBA value on LUT line {line_number}: {rgba}")
 
             lut[label_id] = {
                 "name": name,
@@ -72,22 +67,16 @@ def _read_mapping(path: str | Path) -> dict[str, int]:
         raw = json.load(f)
 
     if not isinstance(raw, dict):
-        raise IngestError(
-            f"Expected a JSON object in '{path}', got {type(raw).__name__}"
-        )
+        raise IngestError(f"Expected a JSON object in '{path}', got {type(raw).__name__}")
 
     mapping: dict[str, int] = {}
 
     for filename, label_id in raw.items():
         if not isinstance(filename, str):
-            raise IngestError(
-                f"JSON mapping contains a non-string filename: {filename!r}"
-            )
+            raise IngestError(f"JSON mapping contains a non-string filename: {filename!r}")
 
         if isinstance(label_id, bool) or not isinstance(label_id, int):
-            raise IngestError(
-                f"JSON mapping for {filename!r} is not an integer: {label_id!r}"
-            )
+            raise IngestError(f"JSON mapping for {filename!r} is not an integer: {label_id!r}")
 
         mapping[filename] = label_id
 
@@ -108,8 +97,7 @@ def _coerce_label_ids(values: Any) -> np.ndarray:
 
         if label_ids.shape[1] != 1:
             raise IngestError(
-                "data_per_streamline['label_id'] must contain "
-                "one integer per streamline"
+                "data_per_streamline['label_id'] must contain one integer per streamline"
             )
 
         label_ids = label_ids[:, 0]
@@ -119,36 +107,24 @@ def _coerce_label_ids(values: Any) -> np.ndarray:
 
         if np.any(label_ids < info.min) or np.any(label_ids > info.max):
             raise IngestError(
-                "data_per_streamline['label_id'] contains values "
-                "outside the int64 range"
+                "data_per_streamline['label_id'] contains values outside the int64 range"
             )
 
         return label_ids.astype(np.int64, copy=False)
 
     if not np.issubdtype(label_ids.dtype, np.floating):
-        raise IngestError(
-            "data_per_streamline['label_id'] must contain integers"
-        )
+        raise IngestError("data_per_streamline['label_id'] must contain integers")
 
     if not np.all(np.isfinite(label_ids)):
-        raise IngestError(
-            "data_per_streamline['label_id'] must contain integers"
-        )
+        raise IngestError("data_per_streamline['label_id'] must contain integers")
 
     if not np.all(label_ids == np.floor(label_ids)):
-        raise IngestError(
-            "data_per_streamline['label_id'] must contain integers"
-        )
+        raise IngestError("data_per_streamline['label_id'] must contain integers")
 
     info = np.iinfo(np.int64)
 
-    if (
-        np.any(label_ids < info.min)
-        or np.any(label_ids > info.max)
-    ):
-        raise IngestError(
-            "data_per_streamline['label_id'] contains values outside the int64 range"
-        )
+    if np.any(label_ids < info.min) or np.any(label_ids > info.max):
+        raise IngestError("data_per_streamline['label_id'] contains values outside the int64 range")
 
     return label_ids.astype(np.int64)
 
@@ -182,8 +158,7 @@ def _make_group_attributes(
             metadata = lut[label_id]
         except KeyError as e:
             raise IngestError(
-                f"Label ID {label_id} occurs in the TRK but is "
-                f"missing from the LUT"
+                f"Label ID {label_id} occurs in the TRK but is missing from the LUT"
             ) from e
 
         names[label_id] = metadata["name"]
@@ -273,8 +248,7 @@ def ingest_linc_trk(
             mapped_label_id = mapping[input_path.name]
         except KeyError as e:
             raise IngestError(
-                f"TRK filename {input_path.name!r} is not present in "
-                f"the mapping JSON"
+                f"TRK filename {input_path.name!r} is not present in the mapping JSON"
             ) from e
 
     # Shared TRK loading.
@@ -283,16 +257,11 @@ def ingest_linc_trk(
     dps = trk.tractogram.data_per_streamline
 
     if "label_id" not in dps:
-        raise IngestError(
-            "LINC TRK requires data_per_streamline['label_id']"
-        )
+        raise IngestError("LINC TRK requires data_per_streamline['label_id']")
 
     label_ids = _coerce_label_ids(dps["label_id"])
 
-    if (
-        mapped_label_id is not None
-        and mapped_label_id not in set(label_ids.tolist())
-    ):
+    if mapped_label_id is not None and mapped_label_id not in set(label_ids.tolist()):
         raise IngestError(
             f"Mapping JSON assigns {input_path.name!r} to label "
             f"{mapped_label_id}, but that label does not occur in "
@@ -344,22 +313,23 @@ def ingest_linc_trk(
         groups,
         lut,
     )
-    vertex_colors_r = [np.array([lut[j[0]]['color'][0] for j in i])
-                       for i in vertex_attributes['label_id']]
-    vertex_colors_g = [np.array([lut[j[0]]['color'][1] for j in i])
-                       for i in vertex_attributes['label_id']]
-    vertex_colors_b = [np.array([lut[j[0]]['color'][2] for j in i])
-                       for i in vertex_attributes['label_id']]
-    color_variance = [np.array([random()]*len(i))
-                      for i in vertex_attributes['label_id']]
-    vertex_attributes['vertex_color_r'] = vertex_colors_r
-    vertex_attributes['vertex_color_g'] = vertex_colors_g
-    vertex_attributes['vertex_color_b'] = vertex_colors_b
-    vertex_attributes['vertex_variance'] = color_variance
+    vertex_colors_r = [
+        np.array([lut[j[0]]["color"][0] for j in i]) for i in vertex_attributes["label_id"]
+    ]
+    vertex_colors_g = [
+        np.array([lut[j[0]]["color"][1] for j in i]) for i in vertex_attributes["label_id"]
+    ]
+    vertex_colors_b = [
+        np.array([lut[j[0]]["color"][2] for j in i]) for i in vertex_attributes["label_id"]
+    ]
+    color_variance = [np.array([random()] * len(i)) for i in vertex_attributes["label_id"]]
+    vertex_attributes["vertex_color_r"] = vertex_colors_r
+    vertex_attributes["vertex_color_g"] = vertex_colors_g
+    vertex_attributes["vertex_color_b"] = vertex_colors_b
+    vertex_attributes["vertex_variance"] = color_variance
 
-    object_colors = np.array([lut[int(i)]['color']
-                              for i in object_attributes['label_id']])
-    object_attributes['object_color'] = object_colors
+    object_colors = np.array([lut[int(i)]["color"] for i in object_attributes["label_id"]])
+    object_attributes["object_color"] = object_colors
     result = write_polylines(
         str(output_path),
         polylines,
