@@ -74,7 +74,29 @@ See [`results/summary.md`](results/summary.md) for the table and
 Python 3.13 / numpy 2.5 and Pyodide 314.0.7 (Python 3.14, numpy 2.4) under
 Node 22.
 
-RESULTS_PLACEHOLDER
+### What they say
+
+| Question | Answer |
+|---|---|
+| P1 column filter, P3 operator flip, publish | **Pass everywhere**, with a large margin. Under Pyodide, P1 takes about 1 ms, P3 under 1 ms and publish about 1 ms, against gates of 50, 16 and 20 ms. numpy is enough for these. |
+| P2 region queries on the real hemisphere, Pyodide | **Borderline.** A 5 mm sphere has a median of 78 ms against the 100 ms gate, but p90 is 146 ms. A disk takes 130 ms, a 10 mm mask 306 ms and a slab 121 ms. Pyodide tests about 1.3 M segments per second, against 3 M/s in CPython. That rate is what a faster kernel would multiply. |
+| P2 on the synthetic sets | 10^5: 4.5 ms (sphere) in Pyodide. 10^6: 22 ms in CPython. Pyodide could not build the 10^6 index at all (next row). |
+| Memory, Pyodide | **Fails.** Holding level 0 whole plus a global index peaks at 1.0 GB (10^5) and 2.6 GB (real hemisphere). At 10^6 the 4 GB wasm heap runs out while building the index: numpy could not allocate 433 MiB for its 113 M filings. |
+| First result | **Fails everywhere.** Building the index takes 5 s (10^5), 34 s (real) and 54 s (10^6, CPython). |
+| Correctness | The indexed engine matches the oracle on every set and runtime it finished. |
+
+So G1's question has a split answer. numpy under Pyodide is fast enough
+for column filters, boolean algebra, statistics and publishing. It is
+borderline for exact region tests on dense real data. And holding level 0
+whole in the browser fails on memory and start-up time, whatever the
+language. The browser engine has to evaluate regions chunk by chunk,
+using the store's own chunk grid as the spatial index with a bounded
+geometry cache, and a filter-ready store must carry the per-streamline
+columns precomputed, as the filter plan proposes. The case for a compiled
+kernel is the region tests alone: about 1.3 M segments per second under
+Pyodide is the number to beat, and this harness can measure a TypeScript
+or Rust kernel on the same sets.
+
 
 ## Caveats
 

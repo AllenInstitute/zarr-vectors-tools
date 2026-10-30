@@ -62,11 +62,14 @@ def run_one(runtime: str, name: str, pyodide_dir: str | None) -> dict:
     done = subprocess.run(cmd, capture_output=True, text=True)
     lines = [ln for ln in done.stdout.splitlines() if ln.startswith("{")]
     if done.returncode != 0 or not lines:
-        # The last line naming an error, not the minified JS around it.
+        # The last error message, wherever it sits: Node can print it on the
+        # same line as Pyodide's minified source.
         text = (done.stderr + "\n" + done.stdout).splitlines()
-        errors = [ln.strip()[:300] for ln in text
-                  if re.match(r"\s*(\w+(Error|Exception)|Aborted|RangeError)\b", ln)]
+        errors = re.findall(r"(?:\b[\w.]*(?:Error|Exception)|Aborted)\b:? [^\n]{0,200}",
+                            done.stderr + "\n" + done.stdout)
         error = errors[-1] if errors else f"exit {done.returncode}"
+        log = RESULTS / f"{name}-{runtime}.log"
+        log.write_text("\n".join(ln[:2000] for ln in text) + "\n")
         print(f"  {runtime} {name}: {error}", file=sys.stderr)
         return {"error": error}
     return json.loads(lines[-1])
@@ -138,7 +141,9 @@ def main() -> None:
     if "pyodide" in args.runtimes and not args.pyodide_dir:
         parser.error("--pyodide-dir is needed to run under Pyodide")
     RESULTS.mkdir(exist_ok=True)
-    measurements: dict = {"sets": {}}
+    # Merge into earlier results, so one set or runtime can be re-measured alone.
+    previous = RESULTS / "measurements.json"
+    measurements: dict = json.loads(previous.read_text()) if previous.exists() else {"sets": {}}
     if (DATA / "real.json").exists():
         measurements["real_store"] = json.loads((DATA / "real.json").read_text())["store"]
     for name in sets:
