@@ -25,11 +25,44 @@ export_trk("tracts.zv", "roi_tracts.trk", object_ids=through.tolist())
 | `mask` / `box` | the region (pass exactly one): a NIfTI path, a nibabel image, or a 3-D array with `mask_affine`; or `(min_corner, max_corner)` in RAS mm |
 | `mode` | `"path"` (default): any part inside; `"endpoints"`: either end; `"both_endpoints"`: both ends |
 | `sample_spacing` | mm between points tested along each segment; default: half the smallest voxel edge or box side |
+| `reach` | how far past the region the chunks read extend, in store units; default: one chunk on every side |
 
-It returns sorted object ids, reading only the chunks the region touches. A
-TRK store kept in TrackVis voxel mm is mapped to RAS first. A segment longer
-than a chunk can jump over a region: at a heavily simplified `level`, select
-at a finer one. A mask needs nibabel (`[trk]` extra).
+It returns sorted object ids, reading only the chunks near the region. A
+segment can cross the region with neither end inside it and one end in a
+chunk the region does not touch, so the neighbouring chunks are read too; if
+you know the store's step length, `reach=step` gives the same answer from
+fewer chunks. A TRK store kept in TrackVis voxel mm is mapped to RAS first. A
+segment longer than `reach` can jump over a region: at a heavily simplified
+`level`, select at a finer one. A mask needs nibabel (`[trk]` extra).
+
+## Filter trees
+
+`zarr_vectors_tools.filtering` evaluates TrackVis-style filters: regions
+(sphere, box, slab, disk with an angle window, voxel mask), column
+comparisons and group membership, combined with AND, OR and NOT. A filter
+is a tree with a versioned JSON form, which is what other engines (such as
+a browser viewer's) are tested against.
+
+```python
+from zarr_vectors_tools.filtering import (
+    Column, Disk, IndexedEngine, Passes, Sphere, load_tractogram, summarize, to_json,
+)
+
+tracts = load_tractogram("tracts.zv")                  # level 0, RAS mm
+tree = (Passes(Sphere((10, 30, 20), 5)) & Column("length", ">", 40)) \
+    - Passes(Disk((0, 30, 20), (1, 0, 0), 8, angle=(0, 45)))
+engine = IndexedEngine(tracts)                         # grid index + cached leaves
+accepted = engine.evaluate(tree)                       # bool per streamline
+summarize(accepted, tracts, ["length"])                # count, mean, std, min, max
+to_json(tree)                                          # {"format": "zvf-predicate", ...}
+```
+
+`filtering.evaluate` is the brute-force oracle: it tests every segment and
+defines the answer. `IndexedEngine` tests only the segments near each region
+and caches every leaf, so flipping an operator is only boolean algebra; it
+is tested to agree with the oracle exactly. The subpackage needs only numpy
+(the store is read only by `load_tractogram`), so it also runs under
+Pyodide. What each region means, exactly, is in the API reference.
 
 ## Bundle summaries
 

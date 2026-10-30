@@ -9,6 +9,9 @@ dist/
 .venv/
 venv/
 
+# Benchmark inputs cached by benchmarks/filtering/run.py
+benchmarks/filtering/data/
+
 # Pytest
 .pytest_cache/
 

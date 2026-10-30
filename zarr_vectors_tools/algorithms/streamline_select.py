@@ -2,16 +2,22 @@
 
 "Streamlines that pass through this ROI" is the core query of tractography.
 A store answers it without reading the tractogram: the region's bounding box
-names the few chunks it touches, and only those are read.  Every vertex read
+names the few chunks near it, and only those are read.  Every vertex read
 is tested against the region, and so are points sampled along each segment,
 so a coarse level whose simplified segments step over a small ROI still
 finds the streamlines that cross it.
 
-The one thing that reading only those chunks can miss is a segment whose two
-ends both lie in chunks the region does not touch -- a segment longer than a
-chunk, jumping clean over the region.  At level 0 vertices are far closer
-together than a chunk; at a heavily simplified coarse level, select at a
-finer level if the region is smaller than a chunk.
+Reading only the chunks the region touches is not enough.  A segment can
+cross the region with neither end inside it and one end in a chunk the
+region does not touch -- a streamline passing just inside the region near a
+chunk face -- and a read cropped to the touched chunks drops that segment.
+So the chunks within ``reach`` of the region are read too.  By default that
+is one chunk on every side, which tests whole every segment shorter than a
+chunk; passing the store's step length reads fewer chunks for the same
+answer.  What can still be missed is a segment longer than ``reach``
+jumping clean over the region.  At level 0 vertices are far closer together
+than a chunk; at a heavily simplified coarse level, select at a finer level
+if the region is smaller than a chunk.
 
 Regions are in world (RAS millimetre) coordinates -- a NIfTI mask with its
 own affine, or a box.  A TRK store kept in TrackVis voxel millimetres is
@@ -40,6 +46,7 @@ def select_streamlines(
     mode: str = "path",
     level: int = 0,
     sample_spacing: float | None = None,
+    reach: float | None = None,
 ) -> npt.NDArray[np.int64]:
     """Object ids of the streamlines that meet a region.
 
@@ -56,6 +63,15 @@ def select_streamlines(
         sample_spacing: Distance between the points tested along each
             segment, in millimetres.  Default: half the mask's smallest voxel
             edge, or half the box's smallest side.
+        reach: How far past the region's bounding box, in store units, the
+            chunks read extend.  A segment that meets the region and is no
+            longer than ``reach`` is tested whole, wherever its ends lie.
+            Default: one chunk edge per axis -- the touched chunks and their
+            neighbours -- which covers every segment shorter than a chunk.
+            A store's step length is enough and reads fewer chunks; 0 reads
+            only the chunks the region touches, and can then miss a
+            streamline whose segment crosses the region with neither end
+            inside it and one end outside those chunks.
 
     Returns:
         Sorted, unique object ids.
@@ -91,6 +107,8 @@ def select_streamlines(
     spacing = float(sample_spacing) if sample_spacing is not None else region.default_spacing
     if spacing <= 0:
         raise ValueError(f"sample_spacing must be above 0, got {sample_spacing}")
+    if reach is not None and not reach >= 0:
+        raise ValueError(f"reach must be 0 or more, got {reach}")
 
     # Store coordinates to RAS: the identity unless the positions are still
     # TrackVis voxel millimetres.
@@ -104,7 +122,10 @@ def select_streamlines(
         level_meta = None
     chunk_shape = get_level_chunk_shape(root_meta, level_meta)
     lo, hi = _box_in_store(region.ras_bounds, np.linalg.inv(to_ras))
-    chunks = _chunks_in_box(level_group, chunk_shape, lo, hi)
+    if np.any(hi < lo):  # an empty mask
+        return np.zeros(0, dtype=np.int64)
+    grow = np.asarray(chunk_shape, dtype=np.float64) if reach is None else float(reach)
+    chunks = _chunks_in_box(level_group, chunk_shape, lo - grow, hi + grow)
     if not chunks:
         return np.zeros(0, dtype=np.int64)
 
