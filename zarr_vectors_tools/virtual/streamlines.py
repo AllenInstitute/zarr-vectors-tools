@@ -85,7 +85,10 @@ class Level:
     cell_counts: list = field(default_factory=list)
     cell_values: list = field(default_factory=list)
     cell_rows: list = field(default_factory=list)  # rows so far, per cell
-    blocks: list = field(default_factory=list)  # per object: list of (cell, fragment)
+    cell_counts_flat: list = field(default_factory=list)  # one entry per fragment so far, per cell
+    obj_runs: list = field(default_factory=list)  # per batch: runs of each object
+    run_cell: list = field(default_factory=list)  # per batch: each run's cell
+    run_frag: list = field(default_factory=list)  # per batch: each run's fragment in its cell
     bridges: dict = field(default_factory=dict)  # offset name -> {cell: [a, b, a, b, ...]}
     lo: np.ndarray = field(default_factory=lambda: np.full(3, np.inf))
     hi: np.ndarray = field(default_factory=lambda: np.full(3, -np.inf))
@@ -103,54 +106,119 @@ class Level:
             self.cell_counts.append([])
             self.cell_values.append([[] for _ in self.value_names])
             self.cell_rows.append(0)
+            self.cell_counts_flat.append([])
         return i
 
-    def add(self, obj: int, points: np.ndarray, values: np.ndarray) -> None:
-        n = len(points)
-        if obj % self.keep_every != 0 or n == 0:
-            self.blocks.append([])
-            return
+    def add_batch(self, first_obj: int, points: np.ndarray, offsets: np.ndarray, values: np.ndarray) -> None:
+        """Bins a batch of streamlines (objects first_obj, first_obj + 1, ...), all at once."""
+        offsets = np.asarray(offsets, np.int64)
+        counts = np.diff(offsets)
+        n = len(counts)
+        objs = first_obj + np.arange(n)
+        keep_obj = (objs % self.keep_every == 0) & (counts > 0)
+        point_obj = np.repeat(np.arange(n), counts)
+        index = np.arange(len(points)) - np.repeat(offsets[:-1], counts)
+        keep = keep_obj[point_obj]
         if self.point_step > 1:
-            keep = (np.arange(n) % self.point_step == 0) | (np.arange(n) == n - 1)
-            points, values = points[keep], values[keep]
-        cells = np.floor(points.astype(np.float64) / self.chunk).astype(np.int64)
-        change = np.ones(len(points), bool)
-        change[1:] = np.any(cells[1:] != cells[:-1], axis=1)
+            keep &= (index % self.point_step == 0) | (index == counts[point_obj] - 1)
+        P = points[keep]
+        V = values[keep] if self.value_names else None
+        pobj = point_obj[keep]
+        runs_per_obj = np.zeros(n, np.int64)
+        if len(P) == 0:
+            self.obj_runs.append(runs_per_obj)
+            return
+        cells = np.floor(P.astype(np.float64) / self.chunk).astype(np.int64)
+        change = np.ones(len(P), bool)
+        change[1:] = (pobj[1:] != pobj[:-1]) | np.any(cells[1:] != cells[:-1], axis=1)
         starts = np.flatnonzero(change)
-        ends = np.concatenate([starts[1:], [len(points)]])
-        blocks = []
-        prev = None
-        for s, e in zip(starts, ends):
-            key = tuple(int(v) for v in cells[s])
-            ci = self._cell(key)
-            fragment = len(self.cell_owners[ci])
-            row = self.cell_rows[ci]
-            self.cell_rows[ci] += int(e - s)
-            self.cell_owners[ci].append(obj)
-            self.cell_counts[ci].append(int(e - s))
-            self.cell_vertices[ci].append(points[s:e])
-            for k in range(len(self.value_names)):
-                self.cell_values[ci][k].append(values[s:e, k])
-            blocks.append((ci, fragment))
-            if prev is not None:
-                prev_cell, prev_last = prev
-                offset = [key[k] - self.cell_at[prev_cell][k] for k in range(3)]
-                name = ".".join(f"+{d}" if d > 0 else str(d) for d in offset)
-                self.bridges.setdefault(name, {}).setdefault(prev_cell, []).extend([prev_last, row])
-            prev = (ci, row + int(e - s) - 1)
-        self.blocks.append(blocks)
-        self.vertex_count += len(points)
-        self.present += 1
-        self.lo = np.minimum(self.lo, points.min(axis=0))
-        self.hi = np.maximum(self.hi, points.max(axis=0))
+        lens = np.diff(np.append(starts, len(P)))
+        robj = pobj[starts]
+        rxyz = cells[starts]
+        # Cell indices, new cells numbered in the order first met.
+        uniq, first, inverse = np.unique(rxyz, axis=0, return_index=True, return_inverse=True)
+        inverse = inverse.reshape(-1)
+        index_of = np.empty(len(uniq), np.int64)
+        for u in np.argsort(first, kind="stable"):
+            index_of[u] = self._cell(tuple(int(v) for v in uniq[u]))
+        rcell = index_of[inverse]
+        # Each run's fragment number and first row in its cell, in scan order.
+        order = np.argsort(rcell, kind="stable")
+        sc = rcell[order]
+        heads = np.flatnonzero(np.r_[True, sc[1:] != sc[:-1]])
+        sizes = np.diff(np.append(heads, len(sc)))
+        rank = np.arange(len(sc)) - np.repeat(heads, sizes)
+        sorted_lens = lens[order]
+        before = np.cumsum(sorted_lens) - sorted_lens
+        within = before - np.repeat(before[heads], sizes)
+        base_frag = np.array([len(self.cell_counts_flat[c]) for c in sc[heads]], np.int64)
+        base_rows = np.array([self.cell_rows[c] for c in sc[heads]], np.int64)
+        frag = np.empty(len(rcell), np.int64)
+        row = np.empty(len(rcell), np.int64)
+        frag[order] = np.repeat(base_frag, sizes) + rank
+        row[order] = np.repeat(base_rows, sizes) + within
+        # The cells' vertices, owners and run lengths, a group of runs at a time.
+        run_of_point = np.repeat(np.arange(len(starts)), lens)
+        point_order = np.argsort(rcell[run_of_point], kind="stable")
+        P_sorted = P[point_order]
+        V_sorted = V[point_order] if V is not None else None
+        point_heads = np.r_[0, np.cumsum(np.add.reduceat(sorted_lens, heads))]
+        for g, h in enumerate(heads):
+            c = int(sc[h])
+            runs = order[h : h + sizes[g]]
+            a, b = point_heads[g], point_heads[g + 1]
+            self.cell_vertices[c].append(P_sorted[a:b])
+            if V_sorted is not None:
+                for k in range(len(self.value_names)):
+                    self.cell_values[c][k].append(V_sorted[a:b, k])
+            self.cell_owners[c].append(objs[robj[runs]])
+            self.cell_counts[c].append(lens[runs])
+            self.cell_counts_flat[c].extend([0] * len(runs))
+            self.cell_rows[c] += int(b - a)
+        # Bridges: each crossing from one run to the next of the same streamline.
+        cross = np.flatnonzero(robj[1:] == robj[:-1])
+        if len(cross):
+            src, dst = cross, cross + 1
+            offsets3 = rxyz[dst] - rxyz[src]
+            names_u, name_of = np.unique(offsets3, axis=0, return_inverse=True)
+            name_of = name_of.reshape(-1)
+            names = [".".join(f"+{d}" if d > 0 else str(d) for d in o) for o in names_u.tolist()]
+            key = name_of.astype(np.int64) * (len(self.cell_at) + 1) + rcell[src]
+            keys_u, key_first, key_of = np.unique(key, return_index=True, return_inverse=True)
+            key_of = key_of.reshape(-1)
+            by_key = np.argsort(key_of, kind="stable")
+            key_heads = np.flatnonzero(np.r_[True, key_of[by_key][1:] != key_of[by_key][:-1]])
+            key_sizes = np.diff(np.append(key_heads, len(by_key)))
+            pair_rows = np.stack([row[src] + lens[src] - 1, row[dst]], axis=1)
+            group_of_key = {int(key_of[by_key[h]]): (h, key_sizes[k]) for k, h in enumerate(key_heads)}
+            for u in np.argsort(key_first, kind="stable"):
+                h, size = group_of_key[int(u)]
+                members = by_key[h : h + size]
+                first_pair = members[0]
+                bucket = self.bridges.setdefault(names[int(name_of[first_pair])], {})
+                bucket.setdefault(int(rcell[src[first_pair]]), []).extend(pair_rows[members].ravel().tolist())
+        # Each object's runs, in walk order: (cell, fragment).
+        runs_per_obj = np.bincount(robj, minlength=n)
+        self.obj_runs.append(runs_per_obj)
+        self.run_cell.append(rcell)
+        self.run_frag.append(frag)
+        self.vertex_count += len(P)
+        self.present += int(keep_obj.sum())
+        self.lo = np.minimum(self.lo, P.min(axis=0))
+        self.hi = np.maximum(self.hi, P.max(axis=0))
 
     def finish(self) -> None:
-        """Joins each cell's runs into arrays (they are kept as lists while reading)."""
-        self.cell_row_offsets = []
+        """Joins what was gathered batch by batch into arrays."""
         for ci in range(len(self.cell_at)):
             self.cell_vertices[ci] = np.concatenate(self.cell_vertices[ci]).astype("<f4")
             self.cell_values[ci] = [np.concatenate(v).astype("<f4") if v else np.zeros(0, "<f4") for v in self.cell_values[ci]]
-            self.cell_owners[ci] = np.asarray(self.cell_owners[ci], "<u4")
+            self.cell_owners[ci] = np.concatenate(self.cell_owners[ci]).astype("<u4")
+            self.cell_counts[ci] = np.concatenate(self.cell_counts[ci]).astype(np.int64)
+        self.cell_counts_flat = []
+        runs = np.concatenate(self.obj_runs) if self.obj_runs else np.zeros(0, np.int64)
+        self.obj_start = np.concatenate([[0], np.cumsum(runs)]).astype(np.int64)
+        self.run_cell = np.concatenate(self.run_cell) if self.run_cell else np.zeros(0, np.int64)
+        self.run_frag = np.concatenate(self.run_frag) if self.run_frag else np.zeros(0, np.int64)
 
     def grid(self, lo, hi):
         origin = [int(np.floor(v / self.chunk)) for v in lo]
@@ -206,19 +274,24 @@ class StreamlineStore:
         lengths, points_per, props = [], [], []
         obj = 0
         for batch in tractogram.batches():
-            off = batch.offsets
-            for s in range(len(off) - 1):
-                a, b = int(off[s]), int(off[s + 1])
-                pts = batch.points[a:b]
-                vals = batch.scalars[a:b]
-                for level in self.levels:
-                    level.add(obj, pts, vals if level.value_names else np.zeros((b - a, 0), np.float32))
-                d = np.diff(pts.astype(np.float64), axis=0)
-                lengths.append(float(np.sum(np.sqrt(np.sum(d * d, axis=1)))) if len(d) else 0.0)
-                points_per.append(b - a)
-                props.append(batch.properties[s])
-                obj += 1
+            off = np.asarray(batch.offsets, np.int64)
+            n = len(off) - 1
+            for level in self.levels:
+                level.add_batch(obj, batch.points, off, batch.scalars)
+            # Arc lengths, summed point by point in walk order (as the browser does).
+            counts = np.diff(off)
+            owner = np.repeat(np.arange(n), counts)
+            d = np.diff(batch.points.astype(np.float64), axis=0)
+            seg = np.sqrt((d[:, 0] * d[:, 0] + d[:, 1] * d[:, 1]) + d[:, 2] * d[:, 2])
+            inside = owner[1:] == owner[:-1]
+            lengths.append(np.bincount(owner[1:][inside], weights=seg[inside], minlength=n))
+            points_per.append(counts)
+            props.append(np.asarray(batch.properties, np.float32).reshape(n, -1))
+            obj += n
         self.count = obj
+        lengths = np.concatenate(lengths) if lengths else np.zeros(0)
+        points_per = np.concatenate(points_per) if points_per else np.zeros(0)
+        props = np.concatenate(props) if props else np.zeros((0, len(tractogram.property_names)), np.float32)
         for level in self.levels:
             level.finish()
         base = self.levels[0]
@@ -464,8 +537,8 @@ class StreamlineStore:
         return None
 
     def _manifest(self, level: Level, o: int) -> bytes:
-        blocks = level.blocks[o]
-        out = [struct.pack("<I", len(blocks))]
-        for ci, fragment in blocks:
+        a, b = int(level.obj_start[o]), int(level.obj_start[o + 1])
+        out = [struct.pack("<I", b - a)]
+        for ci, fragment in zip(level.run_cell[a:b].tolist(), level.run_frag[a:b].tolist()):
             out.append(struct.pack("<qqqBq", *level.cell_at[ci], 0, fragment))
         return b"".join(out)
