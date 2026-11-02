@@ -99,3 +99,27 @@ def test_server_answers_keys_ranges_and_listings(trk):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_mesh_store_is_valid_and_keeps_every_face(tmp_path):
+    from zarr_vectors.types.meshes import read_mesh
+    from zarr_vectors.validate import validate
+
+    # A cube of quads (12 triangles) and a tetrahedron, as two .obj objects, off the origin.
+    cube = np.array([[x, y, z] for z in (0, 2) for y in (0, 2) for x in (0, 2)], float) - [1, 1, 1]
+    quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+    tet = np.array([[0, 0, 0], [1.5, 0, 0], [0, 1.5, 0], [0, 0, 1.5]]) + 5
+    lines = ["o cube"] + [f"v {x} {y} {z}" for x, y, z in cube] + ["f " + " ".join(str(i + 1) for i in q) for q in quads]
+    lines += ["o tetrahedron"] + [f"v {x} {y} {z}" for x, y, z in tet] + ["f -4 -2 -3", "f -4 -3 -1", "f -4 -1 -2", "f -3 -2 -1"]
+    path = tmp_path / "two.obj"
+    path.write_text("\n".join(lines) + "\n")
+    store = open_virtual(path)
+    assert store.count == 2
+    root = tmp_path / "mesh.zarrvectors"
+    _write(store, root)
+    assert validate(str(root), level=3).ok
+    mesh = read_mesh(str(root))
+    assert mesh["face_count"] == 16 and mesh["vertex_count"] == 12
+    offset = json.loads(store.get("zarr.json"))["attributes"]["zarr_vectors"]["coordinate_offset"]
+    corners = np.asarray(mesh["vertices"], float) + offset
+    assert sorted(map(tuple, corners.round(4))) == sorted(map(tuple, np.concatenate([cube, tet]).round(4)))

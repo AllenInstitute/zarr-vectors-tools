@@ -100,7 +100,7 @@ def serve(paths: list[str | Path], host: str = "127.0.0.1", port: int = 8000) ->
     for p in paths:
         path = Path(p)
         stores[path.name] = open_virtual(path)
-        print(f"{path.name}: {stores[path.name].count:,} streamlines")
+        print(f"{path.name}: {stores[path.name].count:,} objects")
     server = ThreadingHTTPServer((host, port), make_handler(stores))
     for name in stores:
         print(f"  http://{host}:{server.server_port}/{urllib.parse.quote(name)}/|zarr-vectors:")
