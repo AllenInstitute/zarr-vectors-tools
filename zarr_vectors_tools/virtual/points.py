@@ -3,7 +3,9 @@
 
 The browser's layout (ngplatform's Zarr Vectors plugin,
 ``src/virtual/points.ts``), chunk for chunk: one cell holds everything,
-moved to the cell's corner (``coordinate_offset``).
+moved to the cell's corner (``coordinate_offset``); a point table too large
+to make objects of is split into cells about eight across instead, each
+cell's points in file order.
 
 A skeleton store has one object per tree (segment ids 1..N in file then
 root order), each one fragment whose rows are its nodes in depth-first
@@ -130,7 +132,7 @@ def parse_point_table(text: str):
 class CellStore:
     """Points or a skeleton in one cell, as a read-only zarr-vectors store: ``get(key)``, ``list(prefix)``, ``keys()``."""
 
-    def __init__(self, kind, positions, object_rows, vertex_attributes, object_columns, links, unit, name):
+    def __init__(self, kind, positions, object_rows, vertex_attributes, object_columns, links, unit, name, cells_across=None):
         self.kind = kind
         self.name = name
         self.object_rows = object_rows
@@ -144,9 +146,23 @@ class CellStore:
         self.vertices = (world - self.offset).astype("<f4")
         self.lo = [float(v) for v in self.vertices.min(axis=0)] if len(world) else [0.0] * 3
         self.hi = [float(v) for v in self.vertices.max(axis=0)] if len(world) else [0.0] * 3
+        span = max(self.hi)
         self.chunk = 1
-        while self.chunk <= max(self.hi):
+        while self.chunk <= span:
             self.chunk *= 2
+        if cells_across is not None and object_rows is None and len(self.links) == 0 and kind == "point_cloud":
+            while self.chunk > 1 and self.chunk * cells_across > 2 * span:
+                self.chunk //= 2
+        # Each cell's rows, in order, by key "i.j.k" (sorted as strings, as the browser does).
+        at = np.floor(self.vertices.astype(np.float64) / self.chunk).astype(np.int64) if len(world) else np.zeros((0, 3), np.int64)
+        keys = [f"{i}.{j}.{k}" for i, j, k in at]
+        groups: dict = {}
+        for v, key in enumerate(keys):
+            groups.setdefault(key, []).append(v)
+        if not keys:
+            groups["0.0.0"] = []
+        self.cells = {key: np.asarray(groups[key], np.int64) for key in sorted(groups)}
+        self.shape = [int(math.floor(h / self.chunk)) + 1 for h in self.hi]
         self.count = len(object_rows) if object_rows is not None else 0
         paths = ["0/vertices", "0/vertex_fragments"] + [f"0/vertex_attributes/{a}" for a in self.vertex_attributes]
         if kind == "skeleton":
@@ -173,31 +189,51 @@ class CellStore:
 
     def keys(self):
         out = ["zarr.json"] + [f"{d}/zarr.json" for d in sorted(self.directories)]
-        cells = ["vertices", "vertex_fragments"] + [f"vertex_attributes/{a}" for a in self.vertex_attributes]
+        arrays = ["vertices", "vertex_fragments"] + [f"vertex_attributes/{a}" for a in self.vertex_attributes]
         if self.kind == "skeleton":
-            cells.append("links/0/0.0.0")
+            arrays.append("links/0/0.0.0")
         if self.count > 0:
-            cells.append("fragment_attributes/object_id")
+            arrays.append("fragment_attributes/object_id")
             out += [f"0/object_index/manifests/c/{k}" for k in range(-(-self.count // MANIFEST_ROWS))]
             for a in ["object_index/object_ids", "object_attributes/segment_id"] + [f"object_attributes/{c}" for c in self.object_columns]:
                 out += [f"0/{a}/c/{k}" for k in range(-(-self.count // COLUMN_ROWS))]
-        out += [f"0/{a}/c/0/0/0" for a in cells]
+        out += [f"0/{a}/c/{cell.replace('.', '/')}" for a in arrays for cell in self.cells]
         return [k for k in out if self.get(k) is not None]
 
-    @staticmethod
-    def _per_cell(attributes):
+    def _per_cell(self, attributes):
         return {
-            "zarr_format": 3, "node_type": "array", "shape": [1, 1, 1], "data_type": "variable_length_bytes",
+            "zarr_format": 3, "node_type": "array", "shape": self.shape, "data_type": "variable_length_bytes",
             "chunk_grid": {"name": "regular", "configuration": {"chunk_shape": [1, 1, 1]}},
             "chunk_key_encoding": {"name": "default", "configuration": {"separator": "/"}},
             "fill_value": "", "codecs": [{"name": "vlen-bytes", "configuration": {}}],
-            "attributes": {"nonempty_chunks": ["0.0.0"], "chunk_grid_origin": [0, 0, 0], **attributes},
+            "attributes": {"nonempty_chunks": list(self.cells), "chunk_grid_origin": [0, 0, 0], **attributes},
         }
+
+    def _cell_chunk(self, array, rows):
+        """A cell's chunk of a per-cell array: its rows' vertices or values, its fragments, its links."""
+        if rows is None:
+            return None
+        whole = len(rows) == len(self.vertices)
+        gather = lambda values: values if whole else values[rows]  # noqa: E731
+        if array == "vertices":
+            return element(gather(self.vertices).tobytes())
+        if array == "vertex_fragments":
+            return element(fragment_index(self.object_rows if self.object_rows is not None else [len(rows)]))
+        if array == "links/0/0.0.0":
+            return element(self.links.tobytes()) if self.kind == "skeleton" else None
+        if array == "fragment_attributes/object_id":
+            return element(np.arange(self.count, dtype="<u8").tobytes()) if self.count else None
+        name = array.split("/", 1)[1] if array.startswith("vertex_attributes/") else None
+        values = self.vertex_attributes.get(name) if name else None
+        return None if values is None else element(np.asarray(gather(np.asarray(values, "<f4")), "<f4").tobytes())
 
     def get(self, key: str):
         j = lambda v: json.dumps(v, separators=(",", ":")).encode()  # noqa: E731
         if key != "zarr.json" and re.sub(r"/(zarr\.json|c/.*)$", "", key) not in self.directories:
             return None
+        m = re.match(r"^0/(vertices|vertex_fragments|vertex_attributes/[^/]+|links/0/0\.0\.0|fragment_attributes/object_id)/c/(\d+)/(\d+)/(\d+)$", key)
+        if m:
+            return self._cell_chunk(m.group(1), self.cells.get(f"{m.group(2)}.{m.group(3)}.{m.group(4)}"))
         c = self.chunk
         skeleton = self.kind == "skeleton"
         n_links = len(self.links) // 2
@@ -225,30 +261,23 @@ class CellStore:
             }})),
             "0/vertices/zarr.json": lambda: j(self._per_cell({"zv_array": "vertices", "dtype": "float32", "encoding": "raw"})),
             "0/vertex_fragments/zarr.json": lambda: j(self._per_cell({"zv_array": "vertex_fragments", "encoding": "fragment_index_v1"})),
-            "0/vertices/c/0/0/0": lambda: element(self.vertices.tobytes()),
-            "0/vertex_fragments/c/0/0/0": lambda: element(fragment_index(self.object_rows if self.object_rows is not None else [len(self.vertices)])),
             "0/links/0/zarr.json": lambda: j(_group({"zv_array": "links_family", "level_delta": 0, "link_width": 2, "directed": True, "store": "canonical", "sid_ndim": 3, "num_links": n_links, "num_physical_records": n_links})),
             "0/links/0/0.0.0/zarr.json": lambda: j(self._per_cell({"zv_array": "links", "dtype": "int32", "offsets": [[0, 0, 0]], "has_perm": False, "link_width": 2, "level_delta": 0})),
-            "0/links/0/0.0.0/c/0/0/0": lambda: element(self.links.tobytes()),
             "0/object_index/zarr.json": lambda: j(_group({"zv_array": "object_index", "num_objects": self.count, "num_present": self.count, "sid_ndim": 3, "layout": "vlen_manifests_v2", "object_ids_sorted": True})),
             "0/object_index/manifests/zarr.json": lambda: j({**_column(self.count, MANIFEST_ROWS, "variable_length_bytes", ""), "codecs": [{"name": "vlen-bytes", "configuration": {}}]}),
             "0/object_index/object_ids/zarr.json": lambda: j(_column(self.count, COLUMN_ROWS, "int64", 0)),
             "0/object_attributes/segment_id/zarr.json": lambda: j(_column(self.count, COLUMN_ROWS, "uint64", U64_MAX, {"zv_array": "object_attribute", "name": "segment_id", "dtype": "uint64", "shape": [self.count], "fill_sentinel_meaning": "absent"})),
             "0/fragment_attributes/object_id/zarr.json": lambda: j(self._per_cell({"zv_array": "fragment_attribute", "name": "object_id", "dtype": "uint64", "row_shape": []})),
-            "0/fragment_attributes/object_id/c/0/0/0": lambda: element(np.arange(self.count, dtype="<u8").tobytes()),
         }
         if key in fixed:
             return fixed[key]()
         if re.match(r"^0/(links|object_attributes|vertex_attributes|fragment_attributes)/zarr\.json$", key):
             return j(_group())
-        m = re.match(r"^0/vertex_attributes/([^/]+)/(zarr\.json|c/0/0/0)$", key)
+        m = re.match(r"^0/vertex_attributes/([^/]+)/zarr\.json$", key)
         if m:
-            values = self.vertex_attributes.get(m.group(1))
-            if values is None:
+            if m.group(1) not in self.vertex_attributes:
                 return None
-            if m.group(2) == "zarr.json":
-                return j(self._per_cell({"zv_array": "attribute", "name": m.group(1), "dtype": "float32", "row_shape": []}))
-            return element(np.asarray(values, "<f4").tobytes())
+            return j(self._per_cell({"zv_array": "attribute", "name": m.group(1), "dtype": "float32", "row_shape": []}))
         m = re.match(r"^0/object_attributes/([^/]+)/zarr\.json$", key)
         if m and m.group(1) in self.object_columns:
             return j(_column(self.count, COLUMN_ROWS, "float32", "NaN", {"zv_array": "object_attribute", "name": m.group(1), "dtype": "float32", "shape": [self.count], "fill_sentinel_meaning": "absent"}))
@@ -351,6 +380,7 @@ def point_store(positions, columns, unit, name: str) -> CellStore:
         [],
         unit or mesh_unit(extent),
         name,
+        cells_across=None if objects else 8,
     )
 
 
