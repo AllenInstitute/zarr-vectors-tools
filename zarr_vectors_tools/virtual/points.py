@@ -83,6 +83,37 @@ def parse_swc(text: str) -> list[dict]:
     return nodes
 
 
+def parse_swc_collection(text: str):
+    """Several SWC files as one (a folder's ``@all.swc``): each file's text after a
+    ``# @file <name>`` line, its ids numbered apart.  Files that do not parse are
+    left out.  Returns (nodes, file names, each node's file index, skipped names)."""
+    parts = re.split(r"^# @file (.*)$", text, flags=re.M)
+    nodes, files, owner, skipped = [], [], [], []
+    base = 0
+    for i in range(1, len(parts), 2):
+        name = parts[i].strip()
+        try:
+            mine = parse_swc(parts[i + 1])
+        except ValueError:
+            skipped.append(name)
+            continue
+        renumber = {n["id"]: base + k + 1 for k, n in enumerate(mine)}
+        for n in mine:
+            nodes.append({**n, "id": renumber[n["id"]], "parent": -1 if n["parent"] == -1 else renumber[n["parent"]]})
+            owner.append(len(files))
+        files.append(name)
+        base += len(mine)
+    if not nodes:
+        raise ValueError("no SWC file in the folder could be read")
+    return nodes, files, owner, skipped
+
+
+def collection_text(folder: Path, suffix: str) -> str:
+    """A folder's files of one kind as one text, as the browser hands a collection over."""
+    names = sorted(p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() == suffix and not p.name.startswith("@all"))
+    return "".join(f"# @file {n}\n{(folder / n).read_text(errors='replace')}\n" for n in names)
+
+
 def parse_point_table(text: str):
     """Positions (float64, n x 3), the other numeric columns [(name, float32 values)], and the unit if the names say it."""
     lines = [l.strip() for l in text.split("\n")]
@@ -132,12 +163,13 @@ def parse_point_table(text: str):
 class CellStore:
     """Points or a skeleton in one cell, as a read-only zarr-vectors store: ``get(key)``, ``list(prefix)``, ``keys()``."""
 
-    def __init__(self, kind, positions, object_rows, vertex_attributes, object_columns, links, unit, name, cells_across=None):
+    def __init__(self, kind, positions, object_rows, vertex_attributes, object_columns, links, unit, name, cells_across=None, text_columns=()):
         self.kind = kind
         self.name = name
         self.object_rows = object_rows
         self.vertex_attributes = dict(vertex_attributes)
         self.object_columns = dict(object_columns)
+        self.text_columns = dict(text_columns)
         self.links = np.asarray(links, "<i4").reshape(-1)
         self.unit = unit
         world = np.asarray(positions, np.float64).reshape(-1, 3)
@@ -170,6 +202,7 @@ class CellStore:
         if self.count > 0:
             paths += ["0/object_index/manifests", "0/object_index/object_ids", "0/object_attributes/segment_id", "0/fragment_attributes/object_id"]
             paths += [f"0/object_attributes/{c}" for c in self.object_columns]
+            paths += [f"0/object_attributes/{c}" for c in self.text_columns]
         self.directories = set()
         for p in paths:
             parts = p.split("/")
@@ -195,7 +228,7 @@ class CellStore:
         if self.count > 0:
             arrays.append("fragment_attributes/object_id")
             out += [f"0/object_index/manifests/c/{k}" for k in range(-(-self.count // MANIFEST_ROWS))]
-            for a in ["object_index/object_ids", "object_attributes/segment_id"] + [f"object_attributes/{c}" for c in self.object_columns]:
+            for a in ["object_index/object_ids", "object_attributes/segment_id"] + [f"object_attributes/{c}" for c in [*self.object_columns, *self.text_columns]]:
                 out += [f"0/{a}/c/{k}" for k in range(-(-self.count // COLUMN_ROWS))]
         out += [f"0/{a}/c/{cell.replace('.', '/')}" for a in arrays for cell in self.cells]
         return [k for k in out if self.get(k) is not None]
@@ -279,6 +312,8 @@ class CellStore:
                 return None
             return j(self._per_cell({"zv_array": "attribute", "name": m.group(1), "dtype": "float32", "row_shape": []}))
         m = re.match(r"^0/object_attributes/([^/]+)/zarr\.json$", key)
+        if m and m.group(1) in self.text_columns:
+            return j({**_column(self.count, COLUMN_ROWS, "string", ""), "codecs": [{"name": "vlen-utf8", "configuration": {}}]})
         if m and m.group(1) in self.object_columns:
             return j(_column(self.count, COLUMN_ROWS, "float32", "NaN", {"zv_array": "object_attribute", "name": m.group(1), "dtype": "float32", "shape": [self.count], "fill_sentinel_meaning": "absent"}))
         m = re.match(r"^0/(object_index/manifests|object_index/object_ids|object_attributes/[^/]+)/c/(\d+)$", key)
@@ -300,6 +335,9 @@ class CellStore:
             ids = np.full(COLUMN_ROWS, U64_MAX, "<u8")
             ids[:n] = np.arange(first + 1, first + n + 1)
             return ids.tobytes()
+        text = self.text_columns.get(array.split("/", 1)[1])
+        if text is not None:
+            return vlen_chunk([t.encode() for t in text[first : first + COLUMN_ROWS]], COLUMN_ROWS)
         values = self.object_columns.get(array.split("/", 1)[1])
         if values is None:
             return None
@@ -308,7 +346,7 @@ class CellStore:
         return out.tobytes()
 
 
-def skeleton_store(nodes: list[dict], name: str) -> CellStore:
+def skeleton_store(nodes: list[dict], name: str, files=None) -> CellStore:
     """An SWC file's trees: one object each, its nodes depth-first from the root."""
     index = {n["id"]: i for i, n in enumerate(nodes)}
     children = [[] for _ in nodes]
@@ -362,6 +400,7 @@ def skeleton_store(nodes: list[dict], name: str) -> CellStore:
         pairs,
         "micrometer",
         name,
+        text_columns=[] if files is None else [("file", [files[0][files[1][r]] for r in roots])],
     )
 
 
@@ -390,6 +429,10 @@ def is_point_file(path: str | Path) -> bool:
 
 def open_point_file(path: str | Path, name: str | None = None) -> CellStore:
     path = Path(path)
+    if path.name.lower() == "@all.swc" and not path.exists():
+        # A folder's SWC files as one store, each neuron's file a property.
+        nodes, files, owner, _ = parse_swc_collection(collection_text(path.parent, ".swc"))
+        return skeleton_store(nodes, name or "neurons", (files, owner))
     text = path.read_text(errors="replace")
     stem = name or path.stem
     if path.suffix.lower() == ".swc":

@@ -74,7 +74,8 @@ To view a store, see
 
 `zarr_vectors_tools.virtual` reads a tractogram (TrackVis `.trk`, MRtrix
 `.tck`, `.trx`), a mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces),
-SWC neurons (skeletons, one object per tree) or a point table (`.csv`, `.tsv`, `.xyz`) as a zarr-vectors store
+SWC neurons (skeletons, one object per tree; `folder/@all.swc` for every SWC file in a folder as one store,
+each neuron's file a property) or a point table (`.csv`, `.tsv`, `.xyz`) as a zarr-vectors store
 without converting it: the file is
 read once and binned into cells, and every key is made when asked. The
 stores are valid 0.9.2 stores, and the same, chunk for chunk, as the ones

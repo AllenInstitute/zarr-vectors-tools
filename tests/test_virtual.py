@@ -177,3 +177,19 @@ def test_point_table_store_reads_back_with_its_columns(tmp_path):
     assert np.asarray(points["vertex_attributes"]["volume"]).ravel().tolist() == [10, 20, 30]
     # Each point an object, so a region can select them.
     assert np.frombuffer(store.get("0/object_attributes/segment_id/c/0"), "<u8")[:3].tolist() == [1, 2, 3]
+
+
+def test_swc_folder_is_one_store_with_each_neurons_file(tmp_path):
+    from zarr_vectors.validate import validate
+
+    for i in range(3):
+        (tmp_path / f"cell_{i}.swc").write_text(f"1 1 {10 * i} 0 0 2 -1\n2 3 {10 * i + 5} 1 0 1 1\n3 3 {10 * i + 9} 2 1 1 2\n")
+    (tmp_path / "broken.swc").write_text("1 1 x 0 0 1 -1\n")
+    store = open_virtual(tmp_path / "@all.swc")
+    assert store.count == 3
+    root = tmp_path / "neurons.zarrvectors"
+    _write(store, root)
+    assert validate(str(root), level=3).ok
+    import zarr
+
+    assert list(zarr.open_array(str(root / "0/object_attributes/file"), mode="r")[:]) == ["cell_0.swc", "cell_1.swc", "cell_2.swc"]

@@ -10,8 +10,8 @@ and is a valid format 0.9.2 store (``zarr_vectors.validate(level=3)``).
 Tractograms (TrackVis ``.trk``, MRtrix ``.tck``, ``.trx``), meshes
 (``.obj`` by object, ``.stl``, ``.ply``, GIFTI ``.gii`` and FreeSurfer
 surfaces such as ``lh.pial``, anatomical ones in scanner RAS), SWC neurons
-(skeletons, one object per tree) and point tables (``.csv``, ``.tsv``,
-``.xyz``)::
+(skeletons, one object per tree; ``folder/@all.swc`` reads every SWC file in
+a folder as one store) and point tables (``.csv``, ``.tsv``, ``.xyz``)::
 
     from zarr_vectors_tools.virtual import open_virtual
     store = open_virtual("tracts.trk")
@@ -27,7 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .meshes import MeshStore, is_mesh_file
-from .points import CellStore, is_point_file, open_point_file, parse_point_table, parse_swc, point_store, skeleton_store
+from .points import CellStore, is_point_file, open_point_file, parse_point_table, parse_swc, parse_swc_collection, point_store, skeleton_store
 from .streamlines import StreamlineStore, cell_size, fragment_index
 from .tractograms import open_tck, open_tractogram, open_trk, open_trx
 
@@ -58,6 +58,7 @@ __all__ = [
     "open_virtual",
     "parse_point_table",
     "parse_swc",
+    "parse_swc_collection",
     "point_store",
     "skeleton_store",
 ]
