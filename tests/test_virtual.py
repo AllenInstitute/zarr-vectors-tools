@@ -123,3 +123,57 @@ def test_mesh_store_is_valid_and_keeps_every_face(tmp_path):
     offset = json.loads(store.get("zarr.json"))["attributes"]["zarr_vectors"]["coordinate_offset"]
     corners = np.asarray(mesh["vertices"], float) + offset
     assert sorted(map(tuple, corners.round(4))) == sorted(map(tuple, np.concatenate([cube, tet]).round(4)))
+
+
+def test_swc_store_is_valid_and_keeps_every_edge(tmp_path):
+    from zarr_vectors.types.graphs import read_graph
+    from zarr_vectors.validate import validate
+
+    # Two trees; the second lists a child before its root, and branches.
+    swc = """# two neurons
+1 1 10 10 10 3 -1
+2 3 14 11 10 1 1
+3 3 19 12 11 0.9 2
+4 3 16 15 10 0.8 2
+203 4 38 44 22 0.6 207
+208 4 45 41 23 0.6 207
+205 1 40 30 20 2.5 -1
+207 4 41 39 22 0.8 205
+"""
+    path = tmp_path / "forest.swc"
+    path.write_text(swc)
+    store = open_virtual(path)
+    assert store.count == 2
+    root = tmp_path / "forest.zarrvectors"
+    _write(store, root)
+    assert validate(str(root), level=3).ok
+    graph = read_graph(str(root))
+    offset = np.asarray(json.loads(store.get("zarr.json"))["attributes"]["zarr_vectors"]["coordinate_offset"], float)
+    p = np.asarray(graph["positions"], float) + offset
+    got = sorted(tuple(sorted([tuple(p[a]), tuple(p[b])])) for a, b in np.asarray(graph["edges"]).reshape(-1, 2))
+    nodes = {int(r[0]): (tuple(map(float, r[2:5])), int(r[6])) for r in (l.split() for l in swc.splitlines() if l and not l.startswith("#"))}
+    want = sorted(tuple(sorted([pos, nodes[q][0]])) for pos, q in nodes.values() if q in nodes)
+    assert got == want
+    ids = np.frombuffer(store.get("0/object_attributes/segment_id/c/0"), "<u8")[:2]
+    assert ids.tolist() == [1, 2]
+
+
+def test_point_table_store_reads_back_with_its_columns(tmp_path):
+    from zarr_vectors.types.points import read_points
+    from zarr_vectors.validate import validate
+
+    path = tmp_path / "cells.csv"
+    path.write_text("id,x_um,y_um,z_um,volume,type\n1,1.5,2.5,3.5,10,neuron\n2,-4,20,9,20,glia\n3,33,17,5,30,neuron\n")
+    store = open_virtual(path)
+    root = tmp_path / "cells.zarrvectors"
+    _write(store, root)
+    assert validate(str(root), level=3).ok
+    attrs = json.loads(store.get("zarr.json"))["attributes"]
+    assert attrs["multiscales"][0]["axes"][0]["unit"] == "micrometer"
+    assert store.list("0/vertex_attributes/") == ["id/", "volume/", "zarr.json"]
+    points = read_points(str(root), attribute_names=["volume"])
+    xyz = np.asarray(points["positions"], float) + attrs["zarr_vectors"]["coordinate_offset"]
+    assert xyz.round(3).tolist() == [[1.5, 2.5, 3.5], [-4, 20, 9], [33, 17, 5]]
+    assert np.asarray(points["vertex_attributes"]["volume"]).ravel().tolist() == [10, 20, 30]
+    # Each point an object, so a region can select them.
+    assert np.frombuffer(store.get("0/object_attributes/segment_id/c/0"), "<u8")[:3].tolist() == [1, 2, 3]

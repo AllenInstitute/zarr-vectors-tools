@@ -7,9 +7,11 @@ layout matches, chunk for chunk, the one the browser makes from the same
 file (ngplatform's Zarr Vectors plugin reads local tractograms this way),
 and is a valid format 0.9.2 store (``zarr_vectors.validate(level=3)``).
 
-Tractograms (TrackVis ``.trk``, MRtrix ``.tck``, ``.trx``) and meshes
+Tractograms (TrackVis ``.trk``, MRtrix ``.tck``, ``.trx``), meshes
 (``.obj`` by object, ``.stl``, ``.ply``, GIFTI ``.gii`` and FreeSurfer
-surfaces such as ``lh.pial``, anatomical ones in scanner RAS)::
+surfaces such as ``lh.pial``, anatomical ones in scanner RAS), SWC neurons
+(skeletons, one object per tree) and point tables (``.csv``, ``.tsv``,
+``.xyz``)::
 
     from zarr_vectors_tools.virtual import open_virtual
     store = open_virtual("tracts.trk")
@@ -25,20 +27,24 @@ from __future__ import annotations
 from pathlib import Path
 
 from .meshes import MeshStore, is_mesh_file
+from .points import CellStore, is_point_file, open_point_file, parse_point_table, parse_swc, point_store, skeleton_store
 from .streamlines import StreamlineStore, cell_size, fragment_index
 from .tractograms import open_tck, open_tractogram, open_trk, open_trx
 
-VIRTUAL_SUFFIXES = (".trk", ".tck", ".trx", ".obj", ".stl", ".ply", ".gii")
+VIRTUAL_SUFFIXES = (".trk", ".tck", ".trx", ".obj", ".stl", ".ply", ".gii", ".swc", ".csv", ".tsv", ".xyz")
 
 
-def open_virtual(path: str | Path) -> StreamlineStore | MeshStore:
+def open_virtual(path: str | Path) -> StreamlineStore | MeshStore | CellStore:
     """A file as a virtual zarr-vectors store, read once now."""
     if is_mesh_file(path):
         return MeshStore(path)
+    if is_point_file(path):
+        return open_point_file(path)
     return StreamlineStore(open_tractogram(path))
 
 
 __all__ = [
+    "CellStore",
     "MeshStore",
     "StreamlineStore",
     "VIRTUAL_SUFFIXES",
@@ -48,5 +54,10 @@ __all__ = [
     "open_tractogram",
     "open_trk",
     "open_trx",
+    "open_point_file",
     "open_virtual",
+    "parse_point_table",
+    "parse_swc",
+    "point_store",
+    "skeleton_store",
 ]

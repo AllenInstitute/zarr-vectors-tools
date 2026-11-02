@@ -67,13 +67,14 @@ To view a store, see
 | `compose` | merging stores and files into a store, and splitting one apart |
 | `algorithms` | graph search, components and clustering; mesh summaries and queries; streamline, skeleton and parcel summaries |
 | `headers` | format headers kept for round-trip export |
-| `virtual` | tractograms and meshes read as zarr-vectors stores without converting them, and served over HTTP (`zvtools virtual serve`) |
+| `virtual` | tractograms, meshes, SWC neurons and point tables read as zarr-vectors stores without converting them, and served over HTTP (`zvtools virtual serve`) |
 | `cli` | the `zvtools` command line |
 
 ## Virtual stores
 
 `zarr_vectors_tools.virtual` reads a tractogram (TrackVis `.trk`, MRtrix
-`.tck`, `.trx`) or a mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces) as a zarr-vectors store
+`.tck`, `.trx`), a mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces),
+SWC neurons (skeletons, one object per tree) or a point table (`.csv`, `.tsv`, `.xyz`) as a zarr-vectors store
 without converting it: the file is
 read once and binned into cells, and every key is made when asked. The
 stores are valid 0.9.2 stores, and the same, chunk for chunk, as the ones
