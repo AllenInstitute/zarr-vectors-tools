@@ -67,7 +67,26 @@ To view a store, see
 | `compose` | merging stores and files into a store, and splitting one apart |
 | `algorithms` | graph search, components and clustering; mesh summaries and queries; streamline, skeleton and parcel summaries |
 | `headers` | format headers kept for round-trip export |
+| `virtual` | tractograms read as zarr-vectors stores without converting them, and served over HTTP (`zvtools virtual serve`) |
 | `cli` | the `zvtools` command line |
+
+## Virtual stores
+
+`zarr_vectors_tools.virtual` reads a tractogram (TrackVis `.trk`, MRtrix
+`.tck`, `.trx`) as a zarr-vectors store without converting it: the file is
+read once and binned into cells, and every key is made when asked. The
+stores are valid 0.9.2 stores, and the same, chunk for chunk, as the ones
+ngplatform makes in the browser from local files.
+
+```bash
+zvtools virtual serve tracts.trk    # http://127.0.0.1:8000/tracts.trk/|zarr-vectors:
+```
+
+```python
+from zarr_vectors_tools.virtual import open_virtual
+store = open_virtual("tracts.trk")
+store.get("zarr.json"); store.list("0/object_attributes/")
+```
 
 ## Development
 

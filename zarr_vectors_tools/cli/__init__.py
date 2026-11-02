@@ -778,7 +778,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print each step's zvtools command, and stop")
     r.set_defaults(func=_pipeline.run)
 
+    # virtual
+    vt = sub.add_parser(
+        "virtual", help="serve files as zarr-vectors stores, without converting them",
+        description="Read tractograms (.trk, .tck, .trx) once and serve each as a "
+                    "virtual zarr-vectors store over HTTP, for any Neuroglancer with "
+                    "the zarr-vectors data source.  Nothing is written.",
+    )
+    vsub = vt.add_subparsers(dest="virtual_command", required=True)
+    vs = vsub.add_parser("serve", help="serve files at http://host:port/<name>/|zarr-vectors:")
+    vs.add_argument("files", nargs="+", help=".trk, .tck or .trx files")
+    vs.add_argument("--host", default="127.0.0.1")
+    vs.add_argument("--port", type=int, default=8000)
+    vs.set_defaults(func=_run_virtual_serve)
+
     return parser
+
+
+def _run_virtual_serve(args) -> int:
+    from zarr_vectors_tools.virtual.serve import serve
+
+    serve(args.files, host=args.host, port=args.port)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
