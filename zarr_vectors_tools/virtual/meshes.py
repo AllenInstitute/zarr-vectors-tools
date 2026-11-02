@@ -1,4 +1,5 @@
-"""Mesh files (.obj, .stl, .ply) as virtual zarr-vectors 0.9.3 mesh stores.
+"""Mesh files (.obj, .stl, .ply, GIFTI .gii, FreeSurfer surfaces) as virtual
+zarr-vectors 0.9.3 mesh stores.
 
 The browser's layout (ngplatform's Zarr Vectors plugin,
 ``src/virtual/meshes.ts``), chunk for chunk: one cell holds the whole mesh;
@@ -167,9 +168,106 @@ def parse_ply(data: bytes, name: str):
     return _single(positions.ravel(), np.array(triangles, np.uint32), name)
 
 
+#: Surfaces in no anatomical space: left where the file puts them.
+NOT_ANATOMICAL = re.compile(r"inflated|sphere|flat", re.I)
+#: FreeSurfer surface file names (lh.pial, rh.white, ...).
+FREESURFER_SURFACE = re.compile(r"^(lh|rh)\.(pial|white|orig|smoothwm|inflated|very_inflated|sphere|sphere\.reg|midthickness|graymid|pial\.T1|orig\.nofix|inflated_pre|qsphere\.nofix)$", re.I)
+
+
+def parse_freesurfer(data: bytes, name: str):
+    """A FreeSurfer triangle surface; an anatomical one moved by a valid footer's c_ras."""
+    if data[:3] != b"\xff\xff\xfe":
+        raise ValueError("not a FreeSurfer triangle surface")
+    at = data.index(b"\n", 3)
+    if data[at + 1 : at + 2] != b"\n":
+        raise ValueError("a FreeSurfer surface without its created-by line")
+    at += 2
+    nv, nf = struct.unpack(">ii", data[at : at + 8])
+    at += 8
+    positions = np.frombuffer(data, ">f4", 3 * nv, at).astype(np.float32)
+    at += 12 * nv
+    triangles = np.frombuffer(data, ">i4", 3 * nf, at).astype(np.uint32)
+    at += 12 * nf
+    footer = data[at:].decode("latin1")
+    cras = re.search(r"cras\s*=\s*(\S+)\s+(\S+)\s+(\S+)", footer)
+    if re.search(r"valid\s*=\s*1", footer) and cras and not NOT_ANATOMICAL.search(name):
+        c = np.array([float(v) for v in cras.groups()])
+        positions = (positions.reshape(-1, 3).astype(np.float64) + c).astype(np.float32).ravel()
+    return _single(positions, triangles, name)
+
+
+def _cdata(text: str) -> str:
+    m = re.match(r"^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$", text)
+    return (m.group(1) if m else text).strip()
+
+
+def parse_gifti(text: str, name: str):
+    """A GIFTI surface; an anatomical one moved by its matrix when that leads to a named space."""
+    import base64
+    import zlib
+
+    if not re.search(r"<GIFTI[\s>]", text):
+        raise ValueError("not a GIFTI file")
+    positions = triangles = matrix = None
+    geometric = ""
+    for m in re.finditer(r"<DataArray\b([^>]*)>([\s\S]*?)</DataArray>", text):
+        attrs = dict(re.findall(r'(\w+)\s*=\s*"([^"]*)"', m.group(1)))
+        intent = attrs.get("Intent", "")
+        if intent not in ("NIFTI_INTENT_POINTSET", "NIFTI_INTENT_TRIANGLE"):
+            continue
+        dims = [int(attrs.get("Dim0", 0)), int(attrs.get("Dim1", 1) or 1)]
+        encoding = attrs.get("Encoding", "")
+        body = _cdata((re.search(r"<Data>([\s\S]*?)</Data>", m.group(2)) or [None, ""])[1])
+        is_float = attrs.get("DataType") == "NIFTI_TYPE_FLOAT32"
+        if encoding == "ASCII":
+            values = np.array([float(v) for v in body.split()], np.float32 if is_float else np.int32)
+        elif encoding in ("Base64Binary", "GZipBase64Binary"):
+            raw = base64.b64decode("".join(body.split()))
+            if encoding == "GZipBase64Binary":
+                raw = zlib.decompress(raw)
+            endian = ">" if attrs.get("Endian") == "BigEndian" else "<"
+            values = np.frombuffer(raw[: len(raw) // 4 * 4], endian + ("f4" if is_float else "i4")).astype(np.float32 if is_float else np.int32)
+        else:
+            raise ValueError(f"a GIFTI array stored as {encoding or 'nothing'} (ASCII and base64 only)")
+        if attrs.get("ArrayIndexingOrder") == "ColumnMajorOrder" and dims[1] > 1:
+            values = values.reshape(dims[1], dims[0]).T.ravel()
+        if intent == "NIFTI_INTENT_POINTSET":
+            positions = values.astype(np.float32)
+            g = re.search(r"<Name>\s*(?:<!\[CDATA\[)?GeometricType(?:\]\]>)?\s*</Name>\s*<Value>\s*(?:<!\[CDATA\[)?([^<\]]*)", m.group(2))
+            geometric = g.group(1) if g else ""
+            x = re.search(r"<CoordinateSystemTransformMatrix>([\s\S]*?)</CoordinateSystemTransformMatrix>", m.group(2))
+            xform = x.group(1) if x else ""
+            target = _cdata((re.search(r"<TransformedSpace>([\s\S]*?)</TransformedSpace>", xform) or [None, ""])[1])
+            data = [float(v) for v in _cdata((re.search(r"<MatrixData>([\s\S]*?)</MatrixData>", xform) or [None, ""])[1]).split()]
+            if len(data) == 16 and target not in ("", "NIFTI_XFORM_UNKNOWN"):
+                matrix = data
+        else:
+            triangles = values.astype(np.uint32)
+    if positions is None:
+        raise ValueError("a GIFTI file without a surface (no NIFTI_INTENT_POINTSET array)")
+    identity = matrix is None or all(abs(v - (1 if i % 5 == 0 else 0)) < 1e-6 for i, v in enumerate(matrix))
+    if not identity and not NOT_ANATOMICAL.search(geometric or name):
+        p = positions.reshape(-1, 3).astype(np.float64)
+        out = np.empty_like(p)
+        for r in range(3):
+            out[:, r] = ((matrix[4 * r] * p[:, 0] + matrix[4 * r + 1] * p[:, 1]) + matrix[4 * r + 2] * p[:, 2]) + matrix[4 * r + 3]
+        positions = out.astype(np.float32).ravel()
+    return _single(positions, triangles if triangles is not None else np.zeros(0, np.uint32), name)
+
+
+def mesh_name(path: Path) -> str:
+    """The name a mesh file is shown by: without .surf.gii, .gii, .obj, .stl or .ply."""
+    return re.sub(r"\.(surf\.gii|gii|obj|stl|ply)$", "", path.name, flags=re.I)
+
+
+def is_mesh_file(path: str | Path) -> bool:
+    name = Path(path).name
+    return bool(re.search(r"\.(obj|stl|ply|gii)$", name, re.I) or FREESURFER_SURFACE.match(name))
+
+
 def parse_mesh(path: str | Path):
     path = Path(path)
-    name = path.stem
+    name = mesh_name(path)
     data = path.read_bytes()
     suffix = path.suffix.lower()
     if suffix == ".obj":
@@ -178,7 +276,11 @@ def parse_mesh(path: str | Path):
         return parse_stl(data, name)
     if suffix == ".ply":
         return parse_ply(data, name)
-    raise ValueError(f"{path}: not a mesh file (.obj, .stl or .ply)")
+    if suffix == ".gii":
+        return parse_gifti(data.decode(), name)
+    if FREESURFER_SURFACE.match(path.name):
+        return parse_freesurfer(data, path.name)
+    raise ValueError(f"{path}: not a mesh file (.obj, .stl, .ply, .gii or a FreeSurfer surface)")
 
 
 def mesh_unit(extent: float) -> str:
@@ -190,7 +292,7 @@ class MeshStore:
 
     def __init__(self, path: str | Path, name: str | None = None):
         positions, triangles, owner, objects = parse_mesh(path)
-        self.name = name or Path(path).stem
+        self.name = name or mesh_name(Path(path))
         n_obj = len(objects)
         faces_of = [np.flatnonzero(owner == o) for o in range(n_obj)]
         used = []

@@ -73,7 +73,7 @@ To view a store, see
 ## Virtual stores
 
 `zarr_vectors_tools.virtual` reads a tractogram (TrackVis `.trk`, MRtrix
-`.tck`, `.trx`) or a mesh (`.obj`, `.stl`, `.ply`) as a zarr-vectors store
+`.tck`, `.trx`) or a mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces) as a zarr-vectors store
 without converting it: the file is
 read once and binned into cells, and every key is made when asked. The
 stores are valid 0.9.2 stores, and the same, chunk for chunk, as the ones

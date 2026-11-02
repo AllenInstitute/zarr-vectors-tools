@@ -8,7 +8,8 @@ file (ngplatform's Zarr Vectors plugin reads local tractograms this way),
 and is a valid format 0.9.2 store (``zarr_vectors.validate(level=3)``).
 
 Tractograms (TrackVis ``.trk``, MRtrix ``.tck``, ``.trx``) and meshes
-(``.obj`` by object, ``.stl``, ``.ply``)::
+(``.obj`` by object, ``.stl``, ``.ply``, GIFTI ``.gii`` and FreeSurfer
+surfaces such as ``lh.pial``, anatomical ones in scanner RAS)::
 
     from zarr_vectors_tools.virtual import open_virtual
     store = open_virtual("tracts.trk")
@@ -23,16 +24,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .meshes import MeshStore
+from .meshes import MeshStore, is_mesh_file
 from .streamlines import StreamlineStore, cell_size, fragment_index
 from .tractograms import open_tck, open_tractogram, open_trk, open_trx
 
-VIRTUAL_SUFFIXES = (".trk", ".tck", ".trx", ".obj", ".stl", ".ply")
+VIRTUAL_SUFFIXES = (".trk", ".tck", ".trx", ".obj", ".stl", ".ply", ".gii")
 
 
 def open_virtual(path: str | Path) -> StreamlineStore | MeshStore:
     """A file as a virtual zarr-vectors store, read once now."""
-    if Path(path).suffix.lower() in (".obj", ".stl", ".ply"):
+    if is_mesh_file(path):
         return MeshStore(path)
     return StreamlineStore(open_tractogram(path))
 
