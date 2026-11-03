@@ -224,11 +224,12 @@ def zv_write_graphs(path, data, *, codec=CODEC, object_ids=True,
 
 
 def zv_write_meshes(path, data, *, codec=CODEC, object_ids=True,
-                    chunk=None):
+                    chunk=None, shard_shape=None):
     write_mesh(str(path), data["vertices"], data["faces"],
                chunk_shape=_cs(chunk), bin_shape=_bs(chunk), bounds=H.BOUNDS,
                compressor=codec,
-               object_ids=data["object_ids"] if object_ids else None)
+               object_ids=data["object_ids"] if object_ids else None,
+               shard_shape=shard_shape)
 
 
 ZV_WRITERS = {
@@ -498,7 +499,10 @@ def block_timing(rows, sizes, ws):
             over = _fetch_overshoot(geom, store, oid, data)
             api = {"points": "bbox= around the point",
                    "streamlines": "object_ids=",
-                   "meshes": "chunks= then filter (no object_ids= on read_mesh)"}
+                   "meshes": ("object_ids="
+                              if mesh_fetch_route(store, oid) == "object_ids="
+                              else "chunks= then filter (no object_ids= on "
+                                   "read_mesh)")}
             add("fetch_one", "zarr-vectors", m, hw, k,
                 detail=f"{api[geom]}; reads {over:.0f}x the object")
             m, hw, k = H.repeat(lambda: _comp_fetch_one(geom, cfile, oid, data),
@@ -567,21 +571,43 @@ def _mesh_object_chunks(data, oid, chunk=None):
     return [tuple(int(x) for x in c) for c in np.unique(cc, axis=0)]
 
 
+# Whether the installed ``read_mesh`` can scope a read by object.  Decided
+# on first use rather than by version, because what matters is what the
+# install does: zarr-vectors before the object read was added declared
+# ``object_ids=`` and raised ``NotImplementedError`` for it.  Running this
+# script against such an install is how the "before" numbers are made.
+_MESH_BY_OBJECT: bool | None = None
+
+
+def mesh_fetch_route(store, oid) -> str:
+    """``"object_ids="`` or, on an install without it, ``"chunks="``."""
+    global _MESH_BY_OBJECT
+    if _MESH_BY_OBJECT is None:
+        try:
+            read_mesh(str(store), object_ids=[int(oid)])
+            _MESH_BY_OBJECT = True
+        except NotImplementedError:
+            _MESH_BY_OBJECT = False
+    return "object_ids=" if _MESH_BY_OBJECT else "chunks="
+
+
 def _zv_fetch_one(geom, store, oid, data, chunk=None):
     """Fetch exactly one object, by the cheapest route the public API has.
 
-    All three geometries return the whole object and nothing less.  What
-    differs is how much extra comes with it: points and streamlines
-    return the object alone, while ``read_mesh`` has no ``object_ids=``
-    filter, so a mesh patch has to arrive inside its chunks and be
-    filtered locally.  ``fetch_overshoot`` records that amplification per
-    row so the mesh series is read for what it is.
+    All three geometries return the whole object and nothing less.  Points
+    and streamlines, and meshes on a current install, come back alone.  A
+    mesh on an install whose ``read_mesh`` cannot scope by object arrives
+    inside its chunks and is filtered locally, and ``fetch_overshoot``
+    records that amplification per row so the series is read for what
+    it is.
     """
     if geom == "points":
         return read_points(str(store),
                            bbox=_point_bbox(data["positions"][int(oid)]))
     if geom == "streamlines":
         return read_polylines(str(store), object_ids=[int(oid)])
+    if mesh_fetch_route(store, oid) == "object_ids=":
+        return read_mesh(str(store), object_ids=[int(oid)])
     got = read_mesh(str(store), chunks=_mesh_object_chunks(data, oid, chunk))
     want = data["vertices"][data["object_ids"] == oid]
     keep = np.isin(got["vertices"].view([("", got["vertices"].dtype)] * 3),
@@ -597,6 +623,9 @@ def _fetch_overshoot(geom, store, oid, data, chunk=None):
     elif geom == "streamlines":
         n_read = sum(sum(len(f) for f in o) for o in got["polylines"])
         n_want = len(data["polylines"][int(oid)])
+    elif mesh_fetch_route(store, oid) == "object_ids=":
+        n_read = len(got["vertices"])
+        n_want = int((data["object_ids"] == oid).sum())
     else:
         n_read = len(read_mesh(
             str(store),
@@ -916,7 +945,11 @@ def block_fragments(rows, ws):
         store = ws.store("fr_mesh")
         zv_write_meshes(store, mesh_data, chunk=side)
         chunks = _mesh_object_chunks(mesh_data, mesh_oid, side)
-        n_read = len(read_mesh(str(store), chunks=chunks)["vertices"])
+        if mesh_fetch_route(store, mesh_oid) == "object_ids=":
+            n_read = len(_zv_fetch_one("meshes", store, mesh_oid, mesh_data,
+                                       side)["vertices"])
+        else:
+            n_read = len(read_mesh(str(store), chunks=chunks)["vertices"])
         m, hw, runs = H.repeat(
             lambda: _zv_fetch_one("meshes", store, mesh_oid, mesh_data, side),
             5)
@@ -1036,6 +1069,178 @@ def block_chunked(rows, sizes, ws):
                     n_runs("fetch_one", n))
                 add("fetch_one", m, hw, k, "by_id: one file, one read")
             ws.clear(f"c_{tag}_{n}")
+
+
+# --------------------------------------------------------------------
+# Block 9 -- meshes versus Neuroglancer precomputed
+# --------------------------------------------------------------------
+#
+# The mesh comparison that matters.  STL is what a mesh store replaces on
+# disk; precomputed legacy meshes are what it competes with for serving,
+# and that format's whole design is that one mesh is one fragment -- two
+# reads unsharded, three ranged reads sharded.  A chunked store reaches
+# the same object through its object index and fragment indices, so the
+# question is what that indirection costs.
+#
+# Both sides are measured compressed and raw, and unsharded and
+# sharded, because the answer depends on it: a compressed chunk must be
+# decoded whole, while an uncompressed one can be range-read down to the
+# object's own rows, which is the like-for-like comparison with an
+# uncompressed precomputed fragment.  Sharding packs the 125 chunk cells
+# of each zarr-vectors array into one shard, and every precomputed mesh
+# into one shard, so the two sharded layouts are the same shape.
+#
+# Wall time here is a warm local disk, which hides most of what differs.
+# The rows that carry over to object storage are ``fetch_one_bytes`` and
+# ``fetch_one_requests``: every request a read sends -- data, ranged
+# data, metadata, listings -- counted through the store, on both sides.
+
+MESH_SHARD = (int(round(H.DOMAIN / H.CHUNK[0])),) * 3    # whole grid, one shard
+
+ZV_MESH_VARIANTS = (
+    ("zarr-vectors (zstd)", dict(codec="zstd")),
+    ("zarr-vectors (zstd, sharded)", dict(codec="zstd", shard_shape=MESH_SHARD)),
+    ("zarr-vectors (no codec)", dict(codec=None)),
+    ("zarr-vectors (no codec, sharded)", dict(codec=None, shard_shape=MESH_SHARD)),
+)
+PC_MESH_VARIANTS = (
+    ("precomputed mesh", None),
+    ("precomputed mesh (sharded)", "raw"),
+    ("precomputed mesh (sharded, gzip)", "gzip"),
+)
+
+# Objects a fetch_one cycles through, spread over the id range, so no
+# run is timed against the chunk the previous run left warmest.
+MESH_PROBES = 16
+
+
+def _zv_mesh_fetch(store, oid, data, route):
+    """One mesh, vertices and faces, from a zarr-vectors store.
+
+    ``store`` is a path or a zarr Store (the counting one); ``route`` is
+    :func:`mesh_fetch_route`'s answer.  Through ``object_ids=`` where the
+    install has it; otherwise the object's chunks are read and the object
+    cut out of them locally -- vertices *and* faces, so both routes
+    deliver the same product as precomputed.
+    """
+    if route == "object_ids=":
+        got = read_mesh(store, object_ids=[int(oid)])
+        return {"vertices": got["vertices"], "faces": got["faces"]}
+    got = read_mesh(store, chunks=_mesh_object_chunks(data, oid))
+    want = data["vertices"][data["object_ids"] == oid]
+    view = [("", got["vertices"].dtype)] * 3
+    keep = np.isin(got["vertices"].view(view), want.view(view)).ravel()
+    remap = np.full(len(keep), -1, dtype=np.int64)
+    remap[keep] = np.arange(int(keep.sum()))
+    faces = remap[got["faces"]]
+    return {"vertices": got["vertices"][keep],
+            "faces": faces[(faces >= 0).all(axis=1)]}
+
+
+def _mesh_face_set(m):
+    return {tuple(map(tuple, m["vertices"][f].tolist())) for f in m["faces"]}
+
+
+def block_mesh_precomputed(rows, sizes, ws):
+    geom = "meshes"
+    if geom not in GEOM_ALL:
+        return
+    for n in sizes:
+        data = H.GENERATORS[geom](n)
+        nv, no = data["n_vertices"], data["n_objects"]
+        probes = np.unique(np.linspace(0, no - 1, min(MESH_PROBES, no)).astype(int))
+        log(f"  mesh/precomputed N={n:>9,}  ({nv:,} verts, {no:,} meshes)")
+
+        def add(impl, op, value, *, unit="s", hw=0.0, runs=1, detail=""):
+            rows.add(block="mesh_precomputed", geometry=geom, n_target=n,
+                     n_vertices=nv, n_objects=no, op=op, impl=impl, unit=unit,
+                     value=round(value, 6) if unit == "s" else value,
+                     ci_hw=round(hw, 6), n_runs=runs, detail=detail)
+
+        reference = {}
+        variants = (
+            [(label, "zv", kw) for label, kw in ZV_MESH_VARIANTS]
+            + [(label, "pc", enc) for label, enc in PC_MESH_VARIANTS]
+        )
+        for label, kind, cfg in variants:
+            tag = "m_" + "".join(c if c.isalnum() else "_" for c in label)
+
+            if kind == "zv":
+                def write(path, _kw=cfg):
+                    zv_write_meshes(path, data, **_kw)
+                def make(t_):
+                    return ws.store(t_)
+            else:
+                sharding = (None if cfg is None else
+                            F.precomputed_mesh_sharding(no, data_encoding=cfg))
+
+                def write(path, _sh=sharding):
+                    F.precomputed_mesh_write(path, data["vertices"], data["faces"],
+                                             data["object_ids"], sharding=_sh)
+                def make(t_):
+                    return ws.file(t_)
+
+            m, hw, k = H.repeat(lambda p: write(p), n_runs("write_full", n),
+                                setup=lambda i: make(f"{tag}_w{i}"),
+                                teardown=lambda p: ws.clear(p.parent.name))
+            add(label, "write_full", m, hw=hw, runs=k)
+
+            target = make(tag)
+            write(target)
+            add(label, "bytes", H.path_bytes(target), unit="bytes")
+
+            if kind == "zv":
+                route = mesh_fetch_route(str(target), int(probes[0]))
+
+                def fetch(oid, _t=str(target), _r=route):
+                    return _zv_mesh_fetch(_t, oid, data, _r)
+
+                def counted(oid, _t=target, _r=route):
+                    store = H.counting_store(_t)
+                    out = _zv_mesh_fetch(store, oid, data, _r)
+                    return out, type(store).requests, type(store).bytes
+
+                def read_all(_t=str(target)):
+                    return read_mesh(_t)
+            else:
+                route = "by id"
+
+                def fetch(oid, _t=target):
+                    return F.precomputed_mesh_read_one(H.FileFetch(_t), oid)
+
+                def counted(oid, _t=target):
+                    fe = H.FileFetch(_t)
+                    out = F.precomputed_mesh_read_one(fe, oid)
+                    return out, fe.requests, fe.bytes
+
+                def read_all(_t=target):
+                    return F.precomputed_mesh_read_full(H.FileFetch(_t))
+
+            m, hw, k = H.repeat(read_all, n_runs("read_full", n))
+            add(label, "read_full", m, hw=hw, runs=k)
+
+            m, hw, k = H.repeat(lambda i: fetch(int(probes[i % len(probes)])),
+                                n_runs("fetch_one", n), setup=lambda i: i)
+            add(label, "fetch_one", m, hw=hw, runs=k, detail=route)
+
+            reqs, nbytes = [], []
+            for oid in probes.tolist():
+                got, r, b = counted(oid)
+                reqs.append(r)
+                nbytes.append(b)
+                # Every implementation must hand back the same mesh, or
+                # the timings compare different products.
+                ref = reference.setdefault(oid, _mesh_face_set(got))
+                if _mesh_face_set(got) != ref:
+                    raise AssertionError(
+                        f"{label} returned a different mesh {oid} at N={n:,}")
+            add(label, "fetch_one_requests", float(np.mean(reqs)), unit="requests",
+                runs=len(probes), detail=route)
+            add(label, "fetch_one_bytes", float(np.mean(nbytes)), unit="bytes",
+                runs=len(probes), detail=route)
+            log(f"    {label:34s} fetch_one {m * 1e3:8.2f} ms  "
+                f"{np.mean(reqs):6.1f} req  {np.mean(nbytes):>12,.0f} B  ({route})")
+            ws.clear(tag)
 
 # --------------------------------------------------------------------
 # Block 5 -- round-trip fidelity
@@ -1172,7 +1377,7 @@ def main():
     ap.add_argument("--out", default=str(RESULTS / "measurements.csv"))
     ap.add_argument("--blocks",
                     default="storage,timing,spatial,chunks,fragments,"
-                            "chunked,fidelity")
+                            "chunked,mesh_precomputed,fidelity")
     ap.add_argument("--geometries", default=None,
                     help="comma-separated subset to measure, e.g. 'points'; "
                          "used with --append to re-measure one geometry")
@@ -1231,6 +1436,9 @@ def main():
         if "chunked" in wanted:
             log("== versus other chunked formats ==")
             block_chunked(rows, sizes, ws)
+        if "mesh_precomputed" in wanted:
+            log("== meshes versus precomputed ==")
+            block_mesh_precomputed(rows, sizes, ws)
         if "fidelity" in wanted:
             log("== round-trip fidelity ==")
             block_fidelity(rows, sizes, ws)
