@@ -1152,6 +1152,9 @@ OP_LABEL = {
     "fetch_one": "fetch one object (s)",
     "replace_one": "replace one object (s)",
     "bbox_query": "bounding-box query (s)",
+    "fetch_one_requests": "fetch one object: requests",
+    "fetch_one_bytes": "fetch one object: bytes fetched",
+    "bytes": "on-disk size (bytes)",
 }
 
 
@@ -1227,6 +1230,34 @@ def supplementary(df) -> pd.DataFrame:
                 "ratio_to_zarr_vectors": (round(r["value"] / ref, 3)
                                           if ref == ref and ref > 0 else ""),
                 "runs": int(r["n_runs"]), "note": note,
+            })
+
+    # Meshes against precomputed meshes: timings, plus what one read asks
+    # its store for -- the rows that carry over to object storage.  Ratios
+    # are to the deployed zstd store, as everywhere else in the table.
+    meshpc = df[df["block"] == "mesh_precomputed"]
+    for (n, op), grp in meshpc.groupby(["n_target", "op"]):
+        zvr = grp[grp["impl"] == ZV_ZSTD]
+        ref = float(zvr["value"].iloc[0]) if len(zvr) else np.nan
+        for _, r in grp.iterrows():
+            unit = r["unit"]
+            value = (f"{r['value']:.5f} ± {r['ci_hw']:.5f}" if unit == "s"
+                     else f"{r['value']:,.1f}" if unit == "requests"
+                     else f"{int(r['value']):,}")
+            rows.append({
+                "geometry": GEOM_LABEL[r["geometry"]],
+                "vertices": int(r["n_vertices"]),
+                "objects": int(r["n_objects"]),
+                "measurement": OP_LABEL.get(op, op),
+                "implementation": r["impl"],
+                "value": value,
+                "per_vertex": (round(r["value"] / r["n_vertices"], 2)
+                               if op == "bytes" else ""),
+                "ratio_to_zarr_vectors": (round(r["value"] / ref, 3)
+                                          if ref == ref and ref > 0 else ""),
+                "runs": int(r["n_runs"]),
+                "note": ("vs precomputed meshes" + (
+                    "" if pd.isna(r["detail"]) else f"; {r['detail']}")),
             })
 
     out = pd.DataFrame(rows)
