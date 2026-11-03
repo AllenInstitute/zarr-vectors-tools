@@ -497,14 +497,15 @@ def block_timing(rows, sizes, ws):
             m, hw, k = H.repeat(lambda: _zv_fetch_one(geom, store, oid, data),
                                 r)
             over = _fetch_overshoot(geom, store, oid, data)
-            api = {"points": "bbox= around the point",
-                   "streamlines": "object_ids=",
-                   "meshes": ("object_ids="
-                              if mesh_fetch_route(store, oid) == "object_ids="
-                              else "chunks= then filter (no object_ids= on "
-                                   "read_mesh)")}
+            if geom == "points":
+                api = "bbox= around the point"
+            elif geom == "streamlines" or (
+                    mesh_fetch_route(store, oid) == "object_ids="):
+                api = "object_ids="
+            else:
+                api = "chunks= then filter (no object_ids= on read_mesh)"
             add("fetch_one", "zarr-vectors", m, hw, k,
-                detail=f"{api[geom]}; reads {over:.0f}x the object")
+                detail=f"{api}; reads {over:.0f}x the object")
             m, hw, k = H.repeat(lambda: _comp_fetch_one(geom, cfile, oid, data),
                                 r)
             add("fetch_one", comp, m, hw, k, detail=_fetch_note(geom))
