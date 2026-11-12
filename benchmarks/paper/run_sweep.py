@@ -316,6 +316,31 @@ def bbox_for_fraction(fraction: float):
     return lo.tolist(), (lo + side).tolist()
 
 
+# A chunked read costs what the chunks a box touches hold, so one box
+# position samples one alignment with the grid: a centred box shrinking
+# with N touched 125, then 27, then 1 of the 200-unit chunks, and the
+# mesh curve stepped with it (31 -> 162 -> 48 ms from 10^5 to 10^7).
+# Every region query is therefore timed over BOX_PLACEMENTS boxes of the
+# same volume at seeded random positions, round-robin, and reported as
+# the mean: the expected cost of a box of that size, not of one place.
+BOX_PLACEMENTS = 8
+
+
+def boxes_for_fraction(fraction: float, k: int = BOX_PLACEMENTS):
+    """``k`` boxes covering ``fraction`` of the domain, placed at random."""
+    side = H.DOMAIN * float(fraction) ** (1 / 3)
+    rng = np.random.default_rng(int(round(float(fraction) * 1e9)) + 7)
+    los = rng.uniform(0.0, max(0.0, H.DOMAIN - side), size=(k, 3))
+    return [(lo.tolist(), (lo + side).tolist()) for lo in los]
+
+
+def repeat_boxes(fn, boxes, n_min):
+    """``H.repeat`` over ``boxes`` in turn; each is used equally often."""
+    k = len(boxes)
+    runs = k * max(1, -(-int(n_min) // k))
+    return H.repeat(lambda b: fn(*b), runs, setup=lambda i: boxes[i % k])
+
+
 # --------------------------------------------------------------------
 # Row accumulation
 # --------------------------------------------------------------------
@@ -761,15 +786,17 @@ def block_spatial(rows, sizes, ws):
         cfile = ws.file(f"spc_{geom}", COMPETITOR_SUFFIX[geom])
         _comp_write(geom, cfile, data)
         for frac in FRACTIONS:
-            low, high = bbox_for_fraction(frac)
+            boxes = boxes_for_fraction(frac)
             log(f"  spatial {geom:12s} N={n:>9,} fraction={frac}")
-            m, hw, k = H.repeat(lambda: _zv_bbox(geom, store, low, high), 7)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _zv_bbox(geom, store, lo, hi), boxes, 7)
             rows.add(block="spatial_fraction", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl="zarr-vectors", unit="s",
                      value=round(m, 6), ci_hw=round(hw, 6), n_runs=k,
                      detail=frac)
-            m, hw, k = H.repeat(lambda: _comp_bbox(geom, cfile, low, high), 7)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _comp_bbox(geom, cfile, lo, hi), boxes, 7)
             rows.add(block="spatial_fraction", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl=COMPETITOR[geom], unit="s",
@@ -783,20 +810,22 @@ def block_spatial(rows, sizes, ws):
         for n in sizes:
             data = H.GENERATORS[geom](n)
             frac = min(1.0, FIXED_SELECTION / max(1, data["n_objects"]))
-            low, high = bbox_for_fraction(frac)
+            boxes = boxes_for_fraction(frac)
             store = ws.store(f"fx_{geom}_{n}")
             ZV_WRITERS[geom](store, data)
             cfile = ws.file(f"fxc_{geom}_{n}", COMPETITOR_SUFFIX[geom])
             _comp_write(geom, cfile, data)
             log(f"  fixed   {geom:12s} N={n:>9,} fraction={frac:.5f}")
             r = n_runs("bbox_query", n)
-            m, hw, k = H.repeat(lambda: _zv_bbox(geom, store, low, high), r)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _zv_bbox(geom, store, lo, hi), boxes, r)
             rows.add(block="spatial_fixed", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl="zarr-vectors", unit="s",
                      value=round(m, 6), ci_hw=round(hw, 6), n_runs=k,
                      detail=round(frac, 6))
-            m, hw, k = H.repeat(lambda: _comp_bbox(geom, cfile, low, high), r)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _comp_bbox(geom, cfile, lo, hi), boxes, r)
             rows.add(block="spatial_fixed", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl=COMPETITOR[geom], unit="s",
@@ -818,7 +847,7 @@ def block_spatial(rows, sizes, ws):
         for n in sizes:
             data = H.GENERATORS[geom](n)
             frac = min(1.0, FIXED_VERTICES / max(1, data["n_vertices"]))
-            low, high = bbox_for_fraction(frac)
+            boxes = boxes_for_fraction(frac)
             store = ws.store(f"eq_{geom}_{n}")
             ZV_WRITERS[geom](store, data)
             cfile = ws.file(f"eqc_{geom}_{n}", COMPETITOR_SUFFIX[geom])
@@ -826,10 +855,10 @@ def block_spatial(rows, sizes, ws):
             log(f"  equal   {geom:12s} N={n:>9,} fraction={frac:.6f}")
             r = n_runs("bbox_query", n)
             for impl, fn in (("zarr-vectors",
-                              lambda: _zv_bbox(geom, store, low, high)),
+                              lambda lo, hi: _zv_bbox(geom, store, lo, hi)),
                              (COMPETITOR[geom],
-                              lambda: _comp_bbox(geom, cfile, low, high))):
-                m, hw, k = H.repeat(fn, r)
+                              lambda lo, hi: _comp_bbox(geom, cfile, lo, hi))):
+                m, hw, k = repeat_boxes(fn, boxes, r)
                 rows.add(block="spatial_volume", geometry=geom, n_target=n,
                          n_vertices=data["n_vertices"],
                          n_objects=data["n_objects"], op="bbox_query",
@@ -1009,14 +1038,28 @@ def _long_streamline():
                     axis=1).astype(np.float32)
 
 
-def _large_patch():
+# Where the patch sits against the grid decides how many cells it spans
+# (8, 24, 16, 48 ... for one centred placement as the grid refines), and
+# its fetch time followed that count rather than the grid.  It is planted
+# at FRAG_PLACEMENTS seeded positions per grid and the mean reported.
+FRAG_PLACEMENTS = 4
+
+
+def _patch_offsets():
+    rng = np.random.default_rng(11)
+    return rng.uniform(0.0, H.DOMAIN - FRAG_MESH_SPAN - 1.0,
+                       size=(FRAG_PLACEMENTS, 2))
+
+
+def _large_patch(offset=None):
     """A 48x48 patch spanning ``FRAG_MESH_SPAN`` units, gently curved."""
     side, span = FRAG_MESH_SIDE, FRAG_MESH_SPAN
+    if offset is None:
+        offset = ((H.DOMAIN - span) / 2.0,) * 2
     u, v = np.meshgrid(np.linspace(0.0, span, side),
                        np.linspace(0.0, span, side), indexing="ij")
     w = H.DOMAIN / 2.0 + 100.0 * np.sin(3.0 * np.pi * u / span)
-    verts = np.stack([u + (H.DOMAIN - span) / 2.0,
-                      v + (H.DOMAIN - span) / 2.0, w], -1).reshape(-1, 3)
+    verts = np.stack([u + offset[0], v + offset[1], w], -1).reshape(-1, 3)
     i = np.arange(side - 1)
     ii, jj = np.meshgrid(i, i, indexing="ij")
     a = (ii * side + jj).ravel()
@@ -1039,14 +1082,16 @@ def block_fragments(rows, ws):
     line_oid = len(line_base)
 
     mesh = H.GENERATORS["meshes"](FRAG_N)
-    pv, pf = _large_patch()
     mesh_oid = int(mesh["object_ids"].max()) + 1
-    mesh_data = {
-        "vertices": np.concatenate([mesh["vertices"], pv]),
-        "faces": np.concatenate([mesh["faces"], pf + len(mesh["vertices"])]),
-        "object_ids": np.concatenate(
-            [mesh["object_ids"], np.full(len(pv), mesh_oid, np.int64)]),
-    }
+
+    def mesh_with_patch(offset):
+        pv, pf = _large_patch(offset)
+        return {
+            "vertices": np.concatenate([mesh["vertices"], pv]),
+            "faces": np.concatenate([mesh["faces"], pf + len(mesh["vertices"])]),
+            "object_ids": np.concatenate(
+                [mesh["object_ids"], np.full(len(pv), mesh_oid, np.int64)]),
+        }
 
     def add(geom, side, m, hw, runs, span, n_read, note):
         rows.add(block="fragments", geometry=geom,
@@ -1084,21 +1129,30 @@ def block_fragments(rows, ws):
             f"{FRAG_LINE_VERTS}-vertex streamline")
         ws.clear("fr_lines")
 
-        # ---- one large mesh patch ----------------------------------
-        store = ws.store("fr_mesh")
-        zv_write_meshes(store, mesh_data, chunk=side)
-        chunks = _mesh_object_chunks(mesh_data, mesh_oid, side)
-        if mesh_fetch_route(store, mesh_oid) == "object_ids=":
-            n_read = len(_zv_fetch_one("meshes", store, mesh_oid, mesh_data,
-                                       side)["vertices"])
-        else:
-            n_read = len(read_mesh(src(store), chunks=chunks)["vertices"])
-        m, hw, runs = H.repeat(
-            lambda: _zv_fetch_one("meshes", store, mesh_oid, mesh_data, side),
-            5)
-        add("meshes", side, m, hw, runs, len(chunks), n_read,
-            f"{FRAG_MESH_SIDE ** 2}-vertex patch")
-        ws.clear("fr_mesh")
+        # ---- one large mesh patch, at several placements ------------
+        means, spans_, total_runs, n_read = [], [], 0, 0
+        for offset in _patch_offsets():
+            mesh_data = mesh_with_patch(offset)
+            store = ws.store("fr_mesh")
+            zv_write_meshes(store, mesh_data, chunk=side)
+            chunks = _mesh_object_chunks(mesh_data, mesh_oid, side)
+            if mesh_fetch_route(store, mesh_oid) == "object_ids=":
+                n_read = len(_zv_fetch_one("meshes", store, mesh_oid,
+                                           mesh_data, side)["vertices"])
+            else:
+                n_read = len(read_mesh(src(store), chunks=chunks)["vertices"])
+            m, _hw, runs = H.repeat(
+                lambda: _zv_fetch_one("meshes", store, mesh_oid, mesh_data,
+                                      side), 5)
+            means.append(m)
+            spans_.append(len(chunks))
+            total_runs += runs
+            ws.clear("fr_mesh")
+        m, hw = H.mean_ci95(means)
+        add("meshes", side, m, hw, total_runs, int(round(np.mean(spans_))),
+            n_read, f"{FRAG_MESH_SIDE ** 2}-vertex patch at "
+                    f"{FRAG_PLACEMENTS} placements, spans "
+                    f"{min(spans_)}-{max(spans_)} chunks; mean")
 
 
 # --------------------------------------------------------------------
@@ -1166,7 +1220,7 @@ def block_chunked(rows, sizes, ws):
         data = H.GENERATORS[geom](n)
         nv, no = data["n_vertices"], data["n_objects"]
         frac = min(1.0, FIXED_SELECTION / max(1, no))
-        low, high = bbox_for_fraction(frac)
+        boxes = boxes_for_fraction(frac)
         log(f"  chunked {geom} N={n:>9,} (box fraction {frac:.6f})")
 
         for fmt in CHUNKED_FORMATS:
@@ -1201,9 +1255,9 @@ def block_chunked(rows, sizes, ws):
                                 n_runs("read_full", n))
             add("read_full", m, hw, k)
 
-            m, hw, k = H.repeat(
-                lambda: _chunked_read_bbox(fmt, target, low, high),
-                n_runs("bbox_query", n))
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _chunked_read_bbox(fmt, target, lo, hi),
+                boxes, n_runs("bbox_query", n))
             add("bbox_query", m, hw, k, f"box fraction {frac:.6f}")
 
             if fmt == "precomputed annotations":

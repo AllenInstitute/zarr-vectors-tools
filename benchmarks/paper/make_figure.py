@@ -190,6 +190,16 @@ def is_zv(series):
     return series.str.startswith(ZV)
 
 
+def is_zv_main(series):
+    """The deployed configuration only: ``zarr-vectors`` exactly.
+
+    The timing block also records variants -- no codec, by id, chunked
+    by id -- under labels that start ``zarr-vectors (``.  They belong in
+    the supplementary table, not drawn into the main line.
+    """
+    return series == ZV
+
+
 def best_competitor(storage: pd.DataFrame) -> pd.DataFrame:
     """Smallest *single-file* competitor per (geometry, N), raw and gzipped.
 
@@ -241,7 +251,8 @@ def precomputed_ratio(storage):
 def series(df, block, geom, op, impl_is_zv, xkey="n_vertices"):
     sub = df[(df["block"] == block) & (df["geometry"] == geom)
              & (df["op"] == op)]
-    sub = sub[is_zv(sub["impl"]) == impl_is_zv].sort_values(xkey)
+    keep = is_zv_main(sub["impl"]) if impl_is_zv else ~is_zv(sub["impl"])
+    sub = sub[keep].sort_values(xkey)
     return sub
 
 
@@ -603,7 +614,7 @@ def _chunked_curves(df, op, only=CHUNKED_PLOTTED):
     block = {"write_full": "bulk", "read_full": "bulk",
              "fetch_one": "object"}[op]
     zv = df[(df["block"] == block) & (df["geometry"] == "points")
-            & (df["op"] == op) & is_zv(df["impl"])].sort_values("n_vertices")
+            & (df["op"] == op) & is_zv_main(df["impl"])].sort_values("n_vertices")
     out = {"zarr-vectors": zv} if len(zv) else {}
     ch = df[(df["block"] == "chunked") & (df["op"] == op)]
     for fmt in CHUNKED_STYLE:
@@ -1205,7 +1216,9 @@ def supplementary(df) -> pd.DataFrame:
         timing["detail"].astype(str), "")
     for (block, geom, n, op, _), grp in timing.groupby(
             ["block", "geometry", "n_target", "op", "_key"]):
-        zvr = grp[is_zv(grp["impl"])]
+        zvr = grp[is_zv_main(grp["impl"])]
+        if not len(zvr):
+            zvr = grp[is_zv(grp["impl"])]
         ref = float(zvr["value"].iloc[0]) if len(zvr) else np.nan
         for _, r in grp.iterrows():
             note = "" if pd.isna(r["detail"]) else str(r["detail"])
