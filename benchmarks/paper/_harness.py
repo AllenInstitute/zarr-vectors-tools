@@ -18,6 +18,7 @@ pins how many objects there are, and every measured row can report both.
 
 from __future__ import annotations
 
+import gc
 import gzip
 import platform
 import shutil
@@ -131,17 +132,31 @@ def repeat(fn, n_runs: int, *, setup=None, teardown=None,
     """
     samples: list[float] = []
     i = 0
-    while True:
-        ctx = setup(i) if setup is not None else None
-        try:
-            dt, _ = timed(fn, ctx) if setup is not None else timed(fn)
-            samples.append(dt)
-        finally:
-            if teardown is not None:
-                teardown(ctx)
-        i += 1
-        if i >= n_runs and (sum(samples) >= min_total or i >= MAX_RUNS):
-            break
+    # The sweep holds whole datasets in memory -- a 10^7-vertex streamline
+    # set is 833,000 arrays -- and a full garbage collection walks every
+    # live object, so when one landed inside a timed call it charged that
+    # call for the sweep's own data: 3.0 s to 4.3 s for one read, with a
+    # 73 % confidence interval.  Everything alive before the first sample
+    # is frozen out of the collector, and each sample starts from a
+    # collected heap.  What an operation allocates is still collected
+    # during it and still timed, for every implementation alike.
+    gc.collect()
+    gc.freeze()
+    try:
+        while True:
+            ctx = setup(i) if setup is not None else None
+            gc.collect()
+            try:
+                dt, _ = timed(fn, ctx) if setup is not None else timed(fn)
+                samples.append(dt)
+            finally:
+                if teardown is not None:
+                    teardown(ctx)
+            i += 1
+            if i >= n_runs and (sum(samples) >= min_total or i >= MAX_RUNS):
+                break
+    finally:
+        gc.unfreeze()
     m, hw = mean_ci95(samples)
     return m, hw, len(samples)
 

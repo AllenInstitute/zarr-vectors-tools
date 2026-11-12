@@ -764,7 +764,14 @@ def _zv_bbox(geom, store, low, high):
     if geom == "points":
         return read_points(src(store), bbox=(low, high))
     if geom == "streamlines":
-        return read_polylines(src(store), bbox=(low, high))
+        # read_polylines(bbox=) keeps every polyline with a fragment in a
+        # chunk the box touches; TRK's reader keeps those with a vertex in
+        # the box.  Same answer on both sides, so filter the same way.
+        got = read_polylines(src(store), bbox=(low, high))
+        lo, hi = np.asarray(low), np.asarray(high)
+        return [frags for frags in got["polylines"]
+                if any(np.all((f >= lo) & (f <= hi), axis=1).any()
+                       for f in frags)]
     return read_mesh(src(store), bbox=(low, high))
 
 
