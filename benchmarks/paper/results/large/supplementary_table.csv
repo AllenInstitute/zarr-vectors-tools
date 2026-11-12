@@ -106,12 +106,12 @@ point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00219 ± 0.00003
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00224 ± 0.00003,,1.0,200,512 chunks over the domain; chunk side 125; reads 1x the object
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00235 ± 0.00002,,1.0,200,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00400 ± 0.00005,,1.0,125,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00299 ± 0.00003,,1.0,168,crosses 8 chunks; chunk side 500; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00223 ± 0.00003,,1.0,200,crosses 64 chunks; chunk side 250; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00177 ± 0.00003,,1.0,200,crosses 125 chunks; chunk side 200; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00295 ± 0.00002,,1.0,170,crosses 8 chunks; chunk side 500; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00224 ± 0.00002,,1.0,200,crosses 64 chunks; chunk side 250; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00212 ± 0.00001,,1.0,200,crosses 125 chunks; chunk side 200; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00207 ± 0.00002,,1.0,200,crosses 512 chunks; chunk side 125; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00218 ± 0.00002,,1.0,200,crosses 1000 chunks; chunk side 100; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00419 ± 0.00008,,1.0,120,crosses 8000 chunks; chunk side 50; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00398 ± 0.00008,,1.0,126,crosses 8000 chunks; chunk side 50; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00208 ± 0.00003,,1.0,200,bbox= around the point; reads 1x the object
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors (no codec),0.00190 ± 0.00002,,0.914,200,bbox= around the point
 point cloud,1000000,1000000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00924 ± 0.00004,,4.438,55,object_ids= through the object index
@@ -280,12 +280,12 @@ streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.68554 ± 0.00000
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,3.00854 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,4.06943 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,15.38810 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-streamlines,1000000,9,fetch one object (s),zarr-vectors,0.04333 ± 0.00139,,1.0,12,crosses 8 chunks; chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
-streamlines,1000000,27,fetch one object (s),zarr-vectors,0.02907 ± 0.00021,,1.0,18,crosses 64 chunks; chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
-streamlines,1000000,23,fetch one object (s),zarr-vectors,0.01975 ± 0.00012,,1.0,26,crosses 125 chunks; chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
-streamlines,1000000,47,fetch one object (s),zarr-vectors,0.01769 ± 0.00011,,1.0,29,crosses 512 chunks; chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
-streamlines,1000000,42,fetch one object (s),zarr-vectors,0.01423 ± 0.00015,,1.0,36,crosses 1000 chunks; chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
-streamlines,1000000,98,fetch one object (s),zarr-vectors,0.01656 ± 0.00039,,1.0,31,crosses 8000 chunks; chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
+streamlines,1000000,9,fetch one object (s),zarr-vectors,0.04284 ± 0.00132,,1.0,12,crosses 8 chunks; chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
+streamlines,1000000,27,fetch one object (s),zarr-vectors,0.02902 ± 0.00018,,1.0,18,crosses 64 chunks; chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
+streamlines,1000000,23,fetch one object (s),zarr-vectors,0.01942 ± 0.00010,,1.0,26,crosses 125 chunks; chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
+streamlines,1000000,47,fetch one object (s),zarr-vectors,0.01768 ± 0.00011,,1.0,29,crosses 512 chunks; chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
+streamlines,1000000,42,fetch one object (s),zarr-vectors,0.01415 ± 0.00010,,1.0,36,crosses 1000 chunks; chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
+streamlines,1000000,98,fetch one object (s),zarr-vectors,0.01659 ± 0.00025,,1.0,31,crosses 8000 chunks; chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
 streamlines,9585211,833333,bounding-box query (s),TRK,3.88353 ± 0.01711,,3.786,8,box sized to ~100 objects (fraction 0.00012)
 streamlines,9585211,833333,bounding-box query (s),TRK,3.84465 ± 0.02579,,3.854,8,"equal box, ~100 vertices (fraction 1.043e-05)"
 streamlines,9585211,833333,bounding-box query (s),zarr-vectors,1.02572 ± 0.12653,,1.0,8,box sized to ~100 objects (fraction 0.00012)
@@ -624,12 +624,12 @@ meshes,999936,6944,write whole dataset (s),zarr-vectors (no codec),1.62981 ± 0.
 meshes,999936,6944,write whole dataset (s),"zarr-vectors (no codec, sharded)",1.67104 ± 0.02739,,1.004,3,vs precomputed meshes
 meshes,999936,6944,write whole dataset (s),zarr-vectors (zstd),1.66419 ± 0.04523,,1.0,3,vs precomputed meshes
 meshes,999936,6944,write whole dataset (s),"zarr-vectors (zstd, sharded)",1.82506 ± 0.04290,,1.097,3,vs precomputed meshes
-meshes,1000000,5,fetch one object (s),zarr-vectors,0.05893 ± 0.02079,,1.0,38,"crosses 8 chunks; chunk side 500; 2304-vertex patch at 4 placements, spans 4-6 chunks; mean spans 5 chunks; 2304 vertices read"
-meshes,1000000,13,fetch one object (s),zarr-vectors,0.04286 ± 0.02063,,1.0,52,"crosses 64 chunks; chunk side 250; 2304-vertex patch at 4 placements, spans 9-15 chunks; mean spans 13 chunks; 2304 vertices read"
-meshes,1000000,28,fetch one object (s),zarr-vectors,0.08818 ± 0.04736,,1.0,27,"crosses 125 chunks; chunk side 200; 2304-vertex patch at 4 placements, spans 24-32 chunks; mean spans 28 chunks; 2304 vertices read"
-meshes,1000000,53,fetch one object (s),zarr-vectors,0.13037 ± 0.01469,,1.0,20,"crosses 512 chunks; chunk side 125; 2304-vertex patch at 4 placements, spans 48-60 chunks; mean spans 53 chunks; 2304 vertices read"
-meshes,1000000,84,fetch one object (s),zarr-vectors,0.16624 ± 0.00438,,1.0,20,"crosses 1000 chunks; chunk side 100; 2304-vertex patch at 4 placements, spans 77-91 chunks; mean spans 84 chunks; 2304 vertices read"
-meshes,1000000,289,fetch one object (s),zarr-vectors,0.38473 ± 0.04375,,1.0,20,"crosses 8000 chunks; chunk side 50; 2304-vertex patch at 4 placements, spans 260-325 chunks; mean spans 289 chunks; 2304 vertices read"
+meshes,1000000,6,fetch one object (s),zarr-vectors,0.06572 ± 0.01726,,1.0,70,"crosses 8 chunks; chunk side 500; 2304-vertex patch at 8 placements, spans 4-8 chunks; mean spans 6 chunks; 2304 vertices read"
+meshes,1000000,15,fetch one object (s),zarr-vectors,0.05028 ± 0.00869,,1.0,89,"crosses 64 chunks; chunk side 250; 2304-vertex patch at 8 placements, spans 12-20 chunks; mean spans 15 chunks; 2304 vertices read"
+meshes,1000000,24,fetch one object (s),zarr-vectors,0.07008 ± 0.02079,,1.0,66,"crosses 125 chunks; chunk side 200; 2304-vertex patch at 8 placements, spans 20-32 chunks; mean spans 24 chunks; 2304 vertices read"
+meshes,1000000,50,fetch one object (s),zarr-vectors,0.12488 ± 0.01595,,1.0,41,"crosses 512 chunks; chunk side 125; 2304-vertex patch at 8 placements, spans 35-66 chunks; mean spans 50 chunks; 2304 vertices read"
+meshes,1000000,83,fetch one object (s),zarr-vectors,0.16265 ± 0.00621,,1.0,40,"crosses 1000 chunks; chunk side 100; 2304-vertex patch at 8 placements, spans 77-91 chunks; mean spans 83 chunks; 2304 vertices read"
+meshes,1000000,294,fetch one object (s),zarr-vectors,0.38864 ± 0.01278,,1.0,40,"crosses 8000 chunks; chunk side 50; 2304-vertex patch at 8 placements, spans 273-312 chunks; mean spans 294 chunks; 2304 vertices read"
 meshes,9999936,69444,bounding-box query (s),STL,2.30018 ± 0.00523,,13.455,8,box sized to ~100 objects (fraction 0.00144)
 meshes,9999936,69444,bounding-box query (s),STL,2.30330 ± 0.00317,,42.865,8,"equal box, ~100 vertices (fraction 1e-05)"
 meshes,9999936,69444,bounding-box query (s),zarr-vectors,0.17095 ± 0.08325,,1.0,8,box sized to ~100 objects (fraction 0.00144)

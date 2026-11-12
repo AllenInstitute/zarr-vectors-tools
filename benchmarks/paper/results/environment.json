@@ -11,7 +11,7 @@
   "zarr_vectors": "0.9.3.dev81+g3edf1ee0f",
   "zarr_vectors_git": "41c3da9",
   "zarr_vectors_tree_sha": "2c8a5a0f54ec",
-  "zarr_vectors_tools_git": "b8ea780-dirty",
+  "zarr_vectors_tools_git": "910bc68-dirty",
   "domain": 1000.0,
   "chunk_shape": [
     200.0,
@@ -65,7 +65,7 @@
     50.0
   ],
   "previous_run": {
-    "zarr_vectors_tools_git": "0038206-dirty"
+    "zarr_vectors_tools_git": "b8ea780-dirty"
   },
   "mixed_run": [
     "fragments"
