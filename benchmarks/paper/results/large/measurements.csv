@@ -524,24 +524,6 @@ chunks,meshes,1000,999936,6944,fetch_one,zarr-vectors,s,0.021452,0.000226,24,chu
 chunks,meshes,1000,999936,6944,write_full,zarr-vectors,s,3.921062,0.0,1,chunk side 100; reads 1x the object
 chunks,meshes,8000,999936,6944,fetch_one,zarr-vectors,s,0.061325,0.002523,9,chunk side 50; reads 1x the object
 chunks,meshes,8000,999936,6944,write_full,zarr-vectors,s,16.134955,0.0,1,chunk side 50; reads 1x the object
-fragments,points,8,1000000,1,fetch_one,zarr-vectors,s,0.003035,2e-05,165,chunk side 500; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,8,1000000,9,fetch_one,zarr-vectors,s,0.042136,0.00052,12,chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
-fragments,meshes,8,1000000,6,fetch_one,zarr-vectors,s,0.073628,0.014108,30,"chunk side 500; 2304-vertex patch at 4 placements, spans 6-8 chunks; mean spans 6 chunks; 2304 vertices read"
-fragments,points,64,1000000,1,fetch_one,zarr-vectors,s,0.002248,2.1e-05,200,chunk side 250; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,64,1000000,27,fetch_one,zarr-vectors,s,0.02855,0.000208,18,chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
-fragments,meshes,64,1000000,15,fetch_one,zarr-vectors,s,0.054333,0.003007,39,"chunk side 250; 2304-vertex patch at 4 placements, spans 12-18 chunks; mean spans 15 chunks; 2304 vertices read"
-fragments,points,125,1000000,1,fetch_one,zarr-vectors,s,0.002089,4.2e-05,200,chunk side 200; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,125,1000000,23,fetch_one,zarr-vectors,s,0.019373,0.000135,26,chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
-fragments,meshes,125,1000000,16,fetch_one,zarr-vectors,s,0.033097,0.002929,62,"chunk side 200; 2304-vertex patch at 4 placements, spans 16-16 chunks; mean spans 16 chunks; 2304 vertices read"
-fragments,points,512,1000000,1,fetch_one,zarr-vectors,s,0.002083,2e-05,200,chunk side 125; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,512,1000000,47,fetch_one,zarr-vectors,s,0.017437,0.00012,29,chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
-fragments,meshes,512,1000000,44,fetch_one,zarr-vectors,s,0.113537,0.012645,20,"chunk side 125; 2304-vertex patch at 4 placements, spans 40-48 chunks; mean spans 44 chunks; 2304 vertices read"
-fragments,points,1000,1000000,1,fetch_one,zarr-vectors,s,0.002189,1.9e-05,200,chunk side 100; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,1000,1000000,42,fetch_one,zarr-vectors,s,0.013748,0.000139,37,chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
-fragments,meshes,1000,1000000,63,fetch_one,zarr-vectors,s,0.12839,0.022694,20,"chunk side 100; 2304-vertex patch at 4 placements, spans 63-63 chunks; mean spans 63 chunks; 2304 vertices read"
-fragments,points,8000,1000000,1,fetch_one,zarr-vectors,s,0.004015,6.6e-05,125,chunk side 50; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,8000,1000000,98,fetch_one,zarr-vectors,s,0.016435,0.000187,31,chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
-fragments,meshes,8000,1000000,250,fetch_one,zarr-vectors,s,0.34902,0.023009,20,"chunk side 50; 2304-vertex patch at 4 placements, spans 234-260 chunks; mean spans 250 chunks; 2304 vertices read"
 idchunk,streamlines,1000,972,83,write_full,zarr-vectors (chunked by id),s,0.045761,0.002245,11,
 idchunk,streamlines,1000,972,83,bytes,zarr-vectors (chunked by id),bytes,16893,0.0,1,
 idchunk,streamlines,1000,972,83,fetch_one,zarr-vectors (chunked by id),s,0.006247,0.00017,81,object_ids=; 350 objects per cell
@@ -782,3 +764,21 @@ mesh_precomputed,meshes,10000000,9999936,69444,read_full,"precomputed mesh (shar
 mesh_precomputed,meshes,10000000,9999936,69444,fetch_one,"precomputed mesh (sharded, gzip)",s,0.000146,3e-06,200,by id
 mesh_precomputed,meshes,10000000,9999936,69444,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
 mesh_precomputed,meshes,10000000,9999936,69444,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2413.8125,0.0,16,by id
+fragments,points,8,1000000,1,fetch_one,zarr-vectors,s,0.00299,2.6e-05,168,chunk side 500; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,8,1000000,9,fetch_one,zarr-vectors,s,0.043325,0.00139,12,chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
+fragments,meshes,8,1000000,5,fetch_one,zarr-vectors,s,0.058926,0.020786,38,"chunk side 500; 2304-vertex patch at 4 placements, spans 4-6 chunks; mean spans 5 chunks; 2304 vertices read"
+fragments,points,64,1000000,1,fetch_one,zarr-vectors,s,0.002231,2.7e-05,200,chunk side 250; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,64,1000000,27,fetch_one,zarr-vectors,s,0.029065,0.000214,18,chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
+fragments,meshes,64,1000000,13,fetch_one,zarr-vectors,s,0.042858,0.020634,52,"chunk side 250; 2304-vertex patch at 4 placements, spans 9-15 chunks; mean spans 13 chunks; 2304 vertices read"
+fragments,points,125,1000000,1,fetch_one,zarr-vectors,s,0.001769,3e-05,200,chunk side 200; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,125,1000000,23,fetch_one,zarr-vectors,s,0.019747,0.000119,26,chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
+fragments,meshes,125,1000000,28,fetch_one,zarr-vectors,s,0.088176,0.047356,27,"chunk side 200; 2304-vertex patch at 4 placements, spans 24-32 chunks; mean spans 28 chunks; 2304 vertices read"
+fragments,points,512,1000000,1,fetch_one,zarr-vectors,s,0.002067,1.7e-05,200,chunk side 125; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,512,1000000,47,fetch_one,zarr-vectors,s,0.017692,0.000109,29,chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
+fragments,meshes,512,1000000,53,fetch_one,zarr-vectors,s,0.130369,0.014685,20,"chunk side 125; 2304-vertex patch at 4 placements, spans 48-60 chunks; mean spans 53 chunks; 2304 vertices read"
+fragments,points,1000,1000000,1,fetch_one,zarr-vectors,s,0.002178,2e-05,200,chunk side 100; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,1000,1000000,42,fetch_one,zarr-vectors,s,0.014228,0.000152,36,chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
+fragments,meshes,1000,1000000,84,fetch_one,zarr-vectors,s,0.166241,0.004383,20,"chunk side 100; 2304-vertex patch at 4 placements, spans 77-91 chunks; mean spans 84 chunks; 2304 vertices read"
+fragments,points,8000,1000000,1,fetch_one,zarr-vectors,s,0.004187,8.1e-05,120,chunk side 50; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,8000,1000000,98,fetch_one,zarr-vectors,s,0.016558,0.000391,31,chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
+fragments,meshes,8000,1000000,289,fetch_one,zarr-vectors,s,0.384732,0.043754,20,"chunk side 50; 2304-vertex patch at 4 placements, spans 260-325 chunks; mean spans 289 chunks; 2304 vertices read"

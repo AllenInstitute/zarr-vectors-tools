@@ -1049,7 +1049,7 @@ def _long_streamline():
 # (8, 24, 16, 48 ... for one centred placement as the grid refines), and
 # its fetch time followed that count rather than the grid.  It is planted
 # at FRAG_PLACEMENTS seeded positions per grid and the mean reported.
-FRAG_PLACEMENTS = 4
+FRAG_PLACEMENTS = 8
 
 
 def _patch_offsets():
