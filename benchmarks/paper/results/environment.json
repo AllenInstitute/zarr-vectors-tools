@@ -1,16 +1,17 @@
 {
-  "python": "3.11.15",
-  "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.35",
+  "python": "3.12.13",
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
   "processor": "x86_64",
-  "cpu_count": 32,
-  "numpy": "2.4.3",
-  "zarr": "3.1.6",
-  "numcodecs": "0.15.1",
+  "cpu_count": 64,
+  "numpy": "2.4.6",
+  "zarr": "3.2.1",
+  "numcodecs": "0.16.5",
   "nibabel": "5.4.2",
-  "networkx": "3.6.1",
-  "zarr_vectors": "0.2.1.dev71+g9261255bb.d20260806",
-  "zarr_vectors_git": "fecb760-dirty",
-  "zarr_vectors_tools_git": "750dfed-dirty",
+  "networkx": "3.7",
+  "zarr_vectors": "0.9.3.dev81+g3edf1ee0f",
+  "zarr_vectors_git": "41c3da9",
+  "zarr_vectors_tree_sha": "2c8a5a0f54ec",
+  "zarr_vectors_tools_git": "0038206-dirty",
   "domain": 1000.0,
   "chunk_shape": [
     200.0,
@@ -29,14 +30,12 @@
     100000,
     1000000
   ],
-  "object_sizes": [
-    1000,
-    10000,
-    100000,
-    1000000
-  ],
-  "max_timing_vertices": 15000000,
-  "timing_runs": 5,
+  "timing_runs": {
+    "1000": 5,
+    "10000": 5,
+    "100000": 5,
+    "1000000": 5
+  },
   "verts_per_object": {
     "points": 1,
     "streamlines": 12,
@@ -45,6 +44,8 @@
     "meshes": 144
   },
   "codec": "zstd",
+  "workdir": "/tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work",
+  "workdir_fstype": "xfs",
   "fractions": [
     0.001,
     0.01,
@@ -54,16 +55,6 @@
   ],
   "fraction_n": 1000000,
   "fixed_selection": 100,
-  "zarr_vectors_tree_sha": "01754702d5d3",
-  "workdir": "/tmp/claude-1001/-home-andrew-scripts-zarr-vectors-tools/cdc370cc-d5d0-48fa-a2a8-73828c9fe408/scratchpad/work",
-  "workdir_fstype": "ext4",
-  "mixed_run": [
-    "chunked",
-    "timing"
-  ],
-  "previous_run": {
-    "zarr_vectors_tree_sha": "01a0935448eb"
-  },
   "chunk_sweep_n": 1000000,
   "chunk_sides": [
     500.0,

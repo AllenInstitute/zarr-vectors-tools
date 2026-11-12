@@ -1053,19 +1053,24 @@ FRAG_PLACEMENTS = 4
 
 
 def _patch_offsets():
+    """(x, y, z-centre) per placement.  z moves too: held at the domain
+    centre, the patch's 400-600 z range sat exactly in one layer of the
+    200-unit grid and straddled a boundary of the 250-unit one."""
     rng = np.random.default_rng(11)
-    return rng.uniform(0.0, H.DOMAIN - FRAG_MESH_SPAN - 1.0,
-                       size=(FRAG_PLACEMENTS, 2))
+    xy = rng.uniform(0.0, H.DOMAIN - FRAG_MESH_SPAN - 1.0,
+                     size=(FRAG_PLACEMENTS, 2))
+    z = rng.uniform(101.0, H.DOMAIN - 102.0, size=(FRAG_PLACEMENTS, 1))
+    return np.concatenate([xy, z], axis=1)
 
 
 def _large_patch(offset=None):
     """A 48x48 patch spanning ``FRAG_MESH_SPAN`` units, gently curved."""
     side, span = FRAG_MESH_SIDE, FRAG_MESH_SPAN
     if offset is None:
-        offset = ((H.DOMAIN - span) / 2.0,) * 2
+        offset = ((H.DOMAIN - span) / 2.0,) * 2 + (H.DOMAIN / 2.0,)
     u, v = np.meshgrid(np.linspace(0.0, span, side),
                        np.linspace(0.0, span, side), indexing="ij")
-    w = H.DOMAIN / 2.0 + 100.0 * np.sin(3.0 * np.pi * u / span)
+    w = offset[2] + 100.0 * np.sin(3.0 * np.pi * u / span)
     verts = np.stack([u + offset[0], v + offset[1], w], -1).reshape(-1, 3)
     i = np.arange(side - 1)
     ii, jj = np.meshgrid(i, i, indexing="ij")

@@ -1,138 +1,646 @@
 block,geometry,n_target,n_vertices,n_objects,op,impl,unit,value,ci_hw,n_runs,detail
-storage,points,1000,1000,1000,bytes,zarr-vectors (no codec),bytes,152416,,1,
-storage,points,1000,1000,1000,bytes,zarr-vectors (zstd),bytes,34062,,1,
-storage,points,1000,1000,1000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,34719,,1,
+storage,points,1000,1000,1000,bytes,zarr-vectors (no codec),bytes,153219,,1,
+storage,points,1000,1000,1000,bytes,zarr-vectors (zstd),bytes,34865,,1,
+storage,points,1000,1000,1000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,37223,,1,
 storage,points,1000,1000,1000,bytes,PLY,bytes,12118,,1,binary
 storage,points,1000,1000,1000,bytes,PLY (gzip),bytes,10900,,1,binary-gzip
 storage,points,1000,1000,1000,bytes,CSV,bytes,23692,,1,text
 storage,points,1000,1000,1000,bytes,CSV (gzip),bytes,11945,,1,text-gzip
 storage,points,1000,1000,1000,bytes,precomputed (spatial only),bytes,21391,,1,chunked
 storage,points,1000,1000,1000,bytes,precomputed (spatial only) (gzip),bytes,18617,,1,chunked-gzip
-storage,points,10000,10000,10000,bytes,zarr-vectors (no codec),bytes,260417,,1,
-storage,points,10000,10000,10000,bytes,zarr-vectors (zstd),bytes,143133,,1,
-storage,points,10000,10000,10000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,175130,,1,
+storage,points,10000,10000,10000,bytes,zarr-vectors (no codec),bytes,261220,,1,
+storage,points,10000,10000,10000,bytes,zarr-vectors (zstd),bytes,143936,,1,
+storage,points,10000,10000,10000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,186783,,1,
 storage,points,10000,10000,10000,bytes,PLY,bytes,120119,,1,binary
 storage,points,10000,10000,10000,bytes,PLY (gzip),bytes,107885,,1,binary-gzip
 storage,points,10000,10000,10000,bytes,CSV,bytes,236743,,1,text
 storage,points,10000,10000,10000,bytes,CSV (gzip),bytes,111611,,1,text-gzip
 storage,points,10000,10000,10000,bytes,precomputed (spatial only),bytes,201392,,1,chunked
 storage,points,10000,10000,10000,bytes,precomputed (spatial only) (gzip),bytes,142176,,1,chunked-gzip
-storage,points,100000,100000,100000,bytes,zarr-vectors (no codec),bytes,1340418,,1,
-storage,points,100000,100000,100000,bytes,zarr-vectors (zstd),bytes,1097816,,1,
-storage,points,100000,100000,100000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,1540407,,1,
+storage,points,100000,100000,100000,bytes,zarr-vectors (no codec),bytes,1341221,,1,
+storage,points,100000,100000,100000,bytes,zarr-vectors (zstd),bytes,1098619,,1,
+storage,points,100000,100000,100000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,1643633,,1,
 storage,points,100000,100000,100000,bytes,PLY,bytes,1200120,,1,binary
 storage,points,100000,100000,100000,bytes,PLY (gzip),bytes,1077657,,1,binary-gzip
 storage,points,100000,100000,100000,bytes,CSV,bytes,2366911,,1,text
 storage,points,100000,100000,100000,bytes,CSV (gzip),bytes,1103110,,1,text-gzip
 storage,points,100000,100000,100000,bytes,precomputed (spatial only),bytes,2001393,,1,chunked
 storage,points,100000,100000,100000,bytes,precomputed (spatial only) (gzip),bytes,1321672,,1,chunked-gzip
-storage,points,1000000,1000000,1000000,bytes,zarr-vectors (no codec),bytes,12140419,,1,
-storage,points,1000000,1000000,1000000,bytes,zarr-vectors (zstd),bytes,10597568,,1,
-storage,points,1000000,1000000,1000000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,15303897,,1,
+storage,points,1000000,1000000,1000000,bytes,zarr-vectors (no codec),bytes,12141222,,1,
+storage,points,1000000,1000000,1000000,bytes,zarr-vectors (zstd),bytes,10598371,,1,
+storage,points,1000000,1000000,1000000,bytes,"zarr-vectors (zstd, per-point object index)",bytes,16322837,,1,
 storage,points,1000000,1000000,1000000,bytes,PLY,bytes,12000121,,1,binary
 storage,points,1000000,1000000,1000000,bytes,PLY (gzip),bytes,10774243,,1,binary-gzip
 storage,points,1000000,1000000,1000000,bytes,CSV,bytes,23667344,,1,text
 storage,points,1000000,1000000,1000000,bytes,CSV (gzip),bytes,11016729,,1,text-gzip
 storage,points,1000000,1000000,1000000,bytes,precomputed (spatial only),bytes,20001394,,1,chunked
 storage,points,1000000,1000000,1000000,bytes,precomputed (spatial only) (gzip),bytes,12788723,,1,chunked-gzip
-storage,streamlines,1000,972,83,bytes,zarr-vectors (no codec),bytes,31355,,1,
-storage,streamlines,1000,972,83,bytes,zarr-vectors (zstd),bytes,29624,,1,
+storage,streamlines,1000,972,83,bytes,zarr-vectors (no codec),bytes,32941,,1,
+storage,streamlines,1000,972,83,bytes,zarr-vectors (zstd),bytes,31210,,1,
 storage,streamlines,1000,972,83,bytes,TRK,bytes,12996,,1,binary
 storage,streamlines,1000,972,83,bytes,TRK (gzip),bytes,10695,,1,binary-gzip
 storage,streamlines,1000,972,83,bytes,TRX,bytes,12513,,1,binary
-storage,streamlines,1000,972,83,bytes,TRX (gzip),bytes,10918,,1,binary-gzip
+storage,streamlines,1000,972,83,bytes,TRX (gzip),bytes,10923,,1,binary-gzip
 storage,streamlines,1000,972,83,bytes,TRX deflate,bytes,11035,,1,binary
-storage,streamlines,1000,972,83,bytes,TRX deflate (gzip),bytes,10947,,1,binary-gzip
-storage,streamlines,10000,9720,833,bytes,zarr-vectors (no codec),bytes,192157,,1,
-storage,streamlines,10000,9720,833,bytes,zarr-vectors (zstd),bytes,158883,,1,
+storage,streamlines,1000,972,83,bytes,TRX deflate (gzip),bytes,10946,,1,binary-gzip
+storage,streamlines,10000,9720,833,bytes,zarr-vectors (no codec),bytes,194506,,1,
+storage,streamlines,10000,9720,833,bytes,zarr-vectors (zstd),bytes,161232,,1,
 storage,streamlines,10000,9720,833,bytes,TRK,bytes,120972,,1,binary
 storage,streamlines,10000,9720,833,bytes,TRK (gzip),bytes,106113,,1,binary-gzip
 storage,streamlines,10000,9720,833,bytes,TRX,bytes,120491,,1,binary
-storage,streamlines,10000,9720,833,bytes,TRX (gzip),bytes,106204,,1,binary-gzip
+storage,streamlines,10000,9720,833,bytes,TRX (gzip),bytes,106059,,1,binary-gzip
 storage,streamlines,10000,9720,833,bytes,TRX deflate,bytes,105871,,1,binary
-storage,streamlines,10000,9720,833,bytes,TRX deflate (gzip),bytes,105903,,1,binary-gzip
-storage,streamlines,100000,95747,8333,bytes,zarr-vectors (no codec),bytes,1673445,,1,
-storage,streamlines,100000,95747,8333,bytes,zarr-vectors (zstd),bytes,1197262,,1,
+storage,streamlines,10000,9720,833,bytes,TRX deflate (gzip),bytes,105877,,1,binary-gzip
+storage,streamlines,100000,95747,8333,bytes,zarr-vectors (no codec),bytes,1683400,,1,
+storage,streamlines,100000,95747,8333,bytes,zarr-vectors (zstd),bytes,1207217,,1,
 storage,streamlines,100000,95747,8333,bytes,TRK,bytes,1183296,,1,binary
 storage,streamlines,100000,95747,8333,bytes,TRK (gzip),bytes,1045437,,1,binary-gzip
 storage,streamlines,100000,95747,8333,bytes,TRX,bytes,1182817,,1,binary
-storage,streamlines,100000,95747,8333,bytes,TRX (gzip),bytes,1038894,,1,binary-gzip
+storage,streamlines,100000,95747,8333,bytes,TRX (gzip),bytes,1039568,,1,binary-gzip
 storage,streamlines,100000,95747,8333,bytes,TRX deflate,bytes,1038888,,1,binary
-storage,streamlines,100000,95747,8333,bytes,TRX deflate (gzip),bytes,1038611,,1,binary-gzip
-storage,streamlines,1000000,958210,83333,bytes,zarr-vectors (no codec),bytes,16556874,,1,
-storage,streamlines,1000000,958210,83333,bytes,zarr-vectors (zstd),bytes,11539768,,1,
+storage,streamlines,100000,95747,8333,bytes,TRX deflate (gzip),bytes,1038590,,1,binary-gzip
+storage,streamlines,1000000,958210,83333,bytes,zarr-vectors (no codec),bytes,16643142,,1,
+storage,streamlines,1000000,958210,83333,bytes,zarr-vectors (zstd),bytes,11626036,,1,
 storage,streamlines,1000000,958210,83333,bytes,TRK,bytes,11832852,,1,binary
 storage,streamlines,1000000,958210,83333,bytes,TRK (gzip),bytes,10459797,,1,binary-gzip
 storage,streamlines,1000000,958210,83333,bytes,TRX,bytes,11832375,,1,binary
-storage,streamlines,1000000,958210,83333,bytes,TRX (gzip),bytes,10391649,,1,binary-gzip
+storage,streamlines,1000000,958210,83333,bytes,TRX (gzip),bytes,10391870,,1,binary-gzip
 storage,streamlines,1000000,958210,83333,bytes,TRX deflate,bytes,10391172,,1,binary
-storage,streamlines,1000000,958210,83333,bytes,TRX deflate (gzip),bytes,10380714,,1,binary-gzip
-storage,skeletons,1000,1003,5,bytes,zarr-vectors (no codec),bytes,24846,,1,
-storage,skeletons,1000,1003,5,bytes,zarr-vectors (zstd),bytes,22456,,1,
+storage,streamlines,1000000,958210,83333,bytes,TRX deflate (gzip),bytes,10380620,,1,binary-gzip
+storage,skeletons,1000,1003,5,bytes,zarr-vectors (no codec),bytes,26331,,1,
+storage,skeletons,1000,1003,5,bytes,zarr-vectors (zstd),bytes,23941,,1,
 storage,skeletons,1000,1003,5,bytes,SWC,bytes,48850,,1,text
 storage,skeletons,1000,1003,5,bytes,SWC (gzip),bytes,22609,,1,text-gzip
-storage,skeletons,10000,9813,50,bytes,zarr-vectors (no codec),bytes,188779,,1,
-storage,skeletons,10000,9813,50,bytes,zarr-vectors (zstd),bytes,166834,,1,
+storage,skeletons,10000,9813,50,bytes,zarr-vectors (no codec),bytes,190323,,1,
+storage,skeletons,10000,9813,50,bytes,zarr-vectors (zstd),bytes,168378,,1,
 storage,skeletons,10000,9813,50,bytes,SWC,bytes,504513,,1,text
 storage,skeletons,10000,9813,50,bytes,SWC (gzip),bytes,233310,,1,text-gzip
-storage,skeletons,100000,100678,500,bytes,zarr-vectors (no codec),bytes,1770121,,1,
-storage,skeletons,100000,100678,500,bytes,zarr-vectors (zstd),bytes,1482106,,1,
+storage,skeletons,100000,100678,500,bytes,zarr-vectors (no codec),bytes,1772012,,1,
+storage,skeletons,100000,100678,500,bytes,zarr-vectors (zstd),bytes,1483997,,1,
 storage,skeletons,100000,100678,500,bytes,SWC,bytes,5369063,,1,text
 storage,skeletons,100000,100678,500,bytes,SWC (gzip),bytes,2391725,,1,text-gzip
-storage,skeletons,1000000,998151,5000,bytes,zarr-vectors (no codec),bytes,17455320,,1,
-storage,skeletons,1000000,998151,5000,bytes,zarr-vectors (zstd),bytes,14340577,,1,
+storage,skeletons,1000000,998151,5000,bytes,zarr-vectors (no codec),bytes,17461889,,1,
+storage,skeletons,1000000,998151,5000,bytes,zarr-vectors (zstd),bytes,14347146,,1,
 storage,skeletons,1000000,998151,5000,bytes,SWC,bytes,55214965,,1,text
 storage,skeletons,1000000,998151,5000,bytes,SWC (gzip),bytes,24088489,,1,text-gzip
-storage,graphs,1000,1000,1000,bytes,zarr-vectors (no codec),bytes,343945,,1,
-storage,graphs,1000,1000,1000,bytes,zarr-vectors (zstd),bytes,359019,,1,
+storage,graphs,1000,1000,1000,bytes,zarr-vectors (no codec),bytes,345403,,1,
+storage,graphs,1000,1000,1000,bytes,zarr-vectors (zstd),bytes,360477,,1,
 storage,graphs,1000,1000,1000,bytes,CSV edge-list,bytes,39250,,1,text
 storage,graphs,1000,1000,1000,bytes,CSV edge-list (gzip),bytes,19571,,1,text-gzip
-storage,graphs,1000,1000,1000,bytes,GraphML,bytes,200424,,1,text
-storage,graphs,1000,1000,1000,bytes,GraphML (gzip),bytes,36857,,1,text-gzip
-storage,graphs,10000,10000,10000,bytes,zarr-vectors (no codec),bytes,1027344,,1,
-storage,graphs,10000,10000,10000,bytes,zarr-vectors (zstd),bytes,855863,,1,
+storage,graphs,1000,1000,1000,bytes,GraphML,bytes,227926,,1,text
+storage,graphs,1000,1000,1000,bytes,GraphML (gzip),bytes,37626,,1,text-gzip
+storage,graphs,10000,10000,10000,bytes,zarr-vectors (no codec),bytes,1028802,,1,
+storage,graphs,10000,10000,10000,bytes,zarr-vectors (zstd),bytes,857321,,1,
 storage,graphs,10000,10000,10000,bytes,CSV edge-list,bytes,432264,,1,text
 storage,graphs,10000,10000,10000,bytes,CSV edge-list (gzip),bytes,202534,,1,text-gzip
-storage,graphs,10000,10000,10000,bytes,GraphML,bytes,2041600,,1,text
-storage,graphs,10000,10000,10000,bytes,GraphML (gzip),bytes,367078,,1,text-gzip
-storage,graphs,100000,100000,100000,bytes,zarr-vectors (no codec),bytes,5390598,,1,
-storage,graphs,100000,100000,100000,bytes,zarr-vectors (zstd),bytes,2793601,,1,
+storage,graphs,10000,10000,10000,bytes,GraphML,bytes,2316607,,1,text
+storage,graphs,10000,10000,10000,bytes,GraphML (gzip),bytes,374540,,1,text-gzip
+storage,graphs,100000,100000,100000,bytes,zarr-vectors (no codec),bytes,5392056,,1,
+storage,graphs,100000,100000,100000,bytes,zarr-vectors (zstd),bytes,2795059,,1,
 storage,graphs,100000,100000,100000,bytes,CSV edge-list,bytes,4722676,,1,text
 storage,graphs,100000,100000,100000,bytes,CSV edge-list (gzip),bytes,2178797,,1,text-gzip
-storage,graphs,100000,100000,100000,bytes,GraphML,bytes,20813028,,1,text
-storage,graphs,100000,100000,100000,bytes,GraphML (gzip),bytes,3759390,,1,text-gzip
-storage,graphs,1000000,1000000,1000000,bytes,zarr-vectors (no codec),bytes,48502769,,1,
-storage,graphs,1000000,1000000,1000000,bytes,zarr-vectors (zstd),bytes,19243131,,1,
+storage,graphs,100000,100000,100000,bytes,GraphML,bytes,23563030,,1,text
+storage,graphs,100000,100000,100000,bytes,GraphML (gzip),bytes,3827640,,1,text-gzip
+storage,graphs,1000000,1000000,1000000,bytes,zarr-vectors (no codec),bytes,48504227,,1,
+storage,graphs,1000000,1000000,1000000,bytes,zarr-vectors (zstd),bytes,19244589,,1,
 storage,graphs,1000000,1000000,1000000,bytes,CSV edge-list,bytes,51223262,,1,text
 storage,graphs,1000000,1000000,1000000,bytes,CSV edge-list (gzip),bytes,23487823,,1,text-gzip
-storage,meshes,1000,864,6,bytes,zarr-vectors (no codec),bytes,57281,,1,
-storage,meshes,1000,864,6,bytes,zarr-vectors (zstd),bytes,21435,,1,
-storage,meshes,1000,864,6,bytes,"zarr-vectors (zstd, no object index)",bytes,21440,,1,
+storage,meshes,1000,864,6,bytes,zarr-vectors (no codec),bytes,58811,,1,
+storage,meshes,1000,864,6,bytes,zarr-vectors (zstd),bytes,22965,,1,
+storage,meshes,1000,864,6,bytes,"zarr-vectors (zstd, no object index)",bytes,22920,,1,
 storage,meshes,1000,864,6,bytes,STL,bytes,72684,,1,binary
 storage,meshes,1000,864,6,bytes,STL (gzip),bytes,30089,,1,binary-gzip
 storage,meshes,1000,864,6,bytes,OBJ,bytes,49313,,1,text
 storage,meshes,1000,864,6,bytes,OBJ (gzip),bytes,15316,,1,text-gzip
-storage,meshes,10000,9936,69,bytes,zarr-vectors (no codec),bytes,551354,,1,
-storage,meshes,10000,9936,69,bytes,zarr-vectors (zstd),bytes,128821,,1,
-storage,meshes,10000,9936,69,bytes,"zarr-vectors (zstd, no object index)",bytes,128612,,1,
+storage,meshes,10000,9936,69,bytes,zarr-vectors (no codec),bytes,554208,,1,
+storage,meshes,10000,9936,69,bytes,zarr-vectors (zstd),bytes,131186,,1,
+storage,meshes,10000,9936,69,bytes,"zarr-vectors (zstd, no object index)",bytes,130109,,1,
 storage,meshes,10000,9936,69,bytes,STL,bytes,834984,,1,binary
 storage,meshes,10000,9936,69,bytes,STL (gzip),bytes,344360,,1,binary-gzip
 storage,meshes,10000,9936,69,bytes,OBJ,bytes,622986,,1,text
 storage,meshes,10000,9936,69,bytes,OBJ (gzip),bytes,168234,,1,text-gzip
-storage,meshes,100000,99936,694,bytes,zarr-vectors (no codec),bytes,5342835,,1,
-storage,meshes,100000,99936,694,bytes,zarr-vectors (zstd),bytes,1068515,,1,
-storage,meshes,100000,99936,694,bytes,"zarr-vectors (zstd, no object index)",bytes,1066102,,1,
+storage,meshes,100000,99936,694,bytes,zarr-vectors (no codec),bytes,5372809,,1,
+storage,meshes,100000,99936,694,bytes,zarr-vectors (zstd),bytes,1083144,,1,
+storage,meshes,100000,99936,694,bytes,"zarr-vectors (zstd, no object index)",bytes,1067598,,1,
 storage,meshes,100000,99936,694,bytes,STL,bytes,8397484,,1,binary
 storage,meshes,100000,99936,694,bytes,STL (gzip),bytes,3462130,,1,binary-gzip
 storage,meshes,100000,99936,694,bytes,OBJ,bytes,6771112,,1,text
 storage,meshes,100000,99936,694,bytes,OBJ (gzip),bytes,1730900,,1,text-gzip
-storage,meshes,1000000,999936,6944,bytes,zarr-vectors (no codec),bytes,53034595,,1,
-storage,meshes,1000000,999936,6944,bytes,zarr-vectors (zstd),bytes,10124503,,1,
-storage,meshes,1000000,999936,6944,bytes,"zarr-vectors (zstd, no object index)",bytes,10099128,,1,
+storage,meshes,1000000,999936,6944,bytes,zarr-vectors (no codec),bytes,53366708,,1,
+storage,meshes,1000000,999936,6944,bytes,zarr-vectors (zstd),bytes,10211178,,1,
+storage,meshes,1000000,999936,6944,bytes,"zarr-vectors (zstd, no object index)",bytes,10100624,,1,
 storage,meshes,1000000,999936,6944,bytes,STL,bytes,84022484,,1,binary
 storage,meshes,1000000,999936,6944,bytes,STL (gzip),bytes,34632229,,1,binary-gzip
 storage,meshes,1000000,999936,6944,bytes,OBJ,bytes,72801996,,1,text
 storage,meshes,1000000,999936,6944,bytes,OBJ (gzip),bytes,17133471,,1,text-gzip
+bulk,points,1000,1000,1000,write_full,zarr-vectors,s,0.125501,0.007986,5,
+bulk,points,1000,1000,1000,write_full,PLY,s,8.1e-05,2e-06,200,
+bulk,points,1000,1000,1000,read_full,zarr-vectors,s,0.005153,4.1e-05,98,
+bulk,points,1000,1000,1000,read_full,PLY,s,3e-05,1e-06,200,
+object,points,1000,1000,1000,fetch_one,zarr-vectors,s,0.002089,0.000119,200,bbox= around the point; reads 1x the object
+object,points,1000,1000,1000,fetch_one,PLY,s,1.1e-05,1e-06,200,fixed-width record: seek + 12-byte read
+bulk,points,1000,1000,1000,read_full,zarr-vectors (no codec),s,0.004584,3.4e-05,110,
+object,points,1000,1000,1000,fetch_one,zarr-vectors (no codec),s,0.001845,1.8e-05,200,bbox= around the point
+object,points,1000,1000,1000,fetch_one,"zarr-vectors (no codec, by id)",s,0.008153,6.1e-05,62,object_ids= through the object index
+object,points,1000,1000,1000,replace_one,zarr-vectors,s,0.02287,0.000241,22,VertexRef.from_position
+object,points,1000,1000,1000,replace_one,PLY,s,3.6e-05,2e-06,200,in-place seek + 12-byte overwrite
+bulk,points,10000,10000,10000,write_full,zarr-vectors,s,0.141188,0.013345,5,
+bulk,points,10000,10000,10000,write_full,PLY,s,0.000104,3e-06,200,
+bulk,points,10000,10000,10000,read_full,zarr-vectors,s,0.005607,5.5e-05,90,
+bulk,points,10000,10000,10000,read_full,PLY,s,4.1e-05,1e-06,200,
+object,points,10000,10000,10000,fetch_one,zarr-vectors,s,0.001964,2.5e-05,200,bbox= around the point; reads 1x the object
+object,points,10000,10000,10000,fetch_one,PLY,s,1.1e-05,1e-06,200,fixed-width record: seek + 12-byte read
+bulk,points,10000,10000,10000,read_full,zarr-vectors (no codec),s,0.004314,3.1e-05,116,
+object,points,10000,10000,10000,fetch_one,zarr-vectors (no codec),s,0.00191,2.9e-05,200,bbox= around the point
+object,points,10000,10000,10000,fetch_one,"zarr-vectors (no codec, by id)",s,0.008906,3.9e-05,57,object_ids= through the object index
+object,points,10000,10000,10000,replace_one,zarr-vectors,s,0.02254,0.00055,23,VertexRef.from_position
+object,points,10000,10000,10000,replace_one,PLY,s,4.1e-05,2e-06,200,in-place seek + 12-byte overwrite
+bulk,points,100000,100000,100000,write_full,zarr-vectors,s,0.143109,0.003156,5,
+bulk,points,100000,100000,100000,write_full,PLY,s,0.000249,5e-06,200,
+bulk,points,100000,100000,100000,read_full,zarr-vectors,s,0.006656,6.6e-05,76,
+bulk,points,100000,100000,100000,read_full,PLY,s,0.000135,2e-06,200,
+object,points,100000,100000,100000,fetch_one,zarr-vectors,s,0.001956,2.1e-05,200,bbox= around the point; reads 1x the object
+object,points,100000,100000,100000,fetch_one,PLY,s,1.1e-05,1e-06,200,fixed-width record: seek + 12-byte read
+bulk,points,100000,100000,100000,read_full,zarr-vectors (no codec),s,0.004767,4.8e-05,105,
+object,points,100000,100000,100000,fetch_one,zarr-vectors (no codec),s,0.001796,2e-05,200,bbox= around the point
+object,points,100000,100000,100000,fetch_one,"zarr-vectors (no codec, by id)",s,0.009695,0.000146,52,object_ids= through the object index
+object,points,100000,100000,100000,replace_one,zarr-vectors,s,0.021369,0.000298,24,VertexRef.from_position
+object,points,100000,100000,100000,replace_one,PLY,s,3.5e-05,2e-06,200,in-place seek + 12-byte overwrite
+bulk,points,1000000,1000000,1000000,write_full,zarr-vectors,s,0.297868,0.002068,5,
+bulk,points,1000000,1000000,1000000,write_full,PLY,s,0.002923,4e-06,172,
+bulk,points,1000000,1000000,1000000,read_full,zarr-vectors,s,0.018416,0.000168,28,
+bulk,points,1000000,1000000,1000000,read_full,PLY,s,0.002034,5e-06,200,
+object,points,1000000,1000000,1000000,fetch_one,zarr-vectors,s,0.002091,2.7e-05,200,bbox= around the point; reads 1x the object
+object,points,1000000,1000000,1000000,fetch_one,PLY,s,1e-05,1e-06,200,fixed-width record: seek + 12-byte read
+bulk,points,1000000,1000000,1000000,read_full,zarr-vectors (no codec),s,0.00898,7.9e-05,56,
+object,points,1000000,1000000,1000000,fetch_one,zarr-vectors (no codec),s,0.001874,2.1e-05,200,bbox= around the point
+object,points,1000000,1000000,1000000,fetch_one,"zarr-vectors (no codec, by id)",s,0.009041,5.6e-05,56,object_ids= through the object index
+object,points,1000000,1000000,1000000,replace_one,zarr-vectors,s,0.022876,0.000316,22,VertexRef.from_position
+object,points,1000000,1000000,1000000,replace_one,PLY,s,3.1e-05,2e-06,200,in-place seek + 12-byte overwrite
+bulk,streamlines,1000,972,83,write_full,zarr-vectors,s,0.127551,0.015387,5,
+bulk,streamlines,1000,972,83,write_full,TRK,s,0.001954,1.1e-05,200,
+bulk,streamlines,1000,972,83,read_full,zarr-vectors,s,0.015772,0.000369,32,
+bulk,streamlines,1000,972,83,read_full,TRK,s,0.001096,6e-06,200,
+object,streamlines,1000,972,83,fetch_one,zarr-vectors,s,0.007942,5.6e-05,63,object_ids=; reads 1x the object
+object,streamlines,1000,972,83,fetch_one,TRK,s,0.001044,2.3e-05,200,variable-length records: full scan
+bulk,streamlines,1000,972,83,read_full,zarr-vectors (no codec),s,0.014511,0.000139,35,
+object,streamlines,1000,972,83,fetch_one,zarr-vectors (no codec),s,0.007755,2.9e-05,65,object_ids=
+object,streamlines,1000,972,83,replace_one,zarr-vectors,s,0.066195,0.003931,8,edit_fragment via object manifest
+object,streamlines,1000,972,83,replace_one,TRK,s,0.003117,0.000115,161,variable-length records: full read-modify-rewrite
+bulk,streamlines,10000,9720,833,write_full,zarr-vectors,s,0.226219,0.01195,5,
+bulk,streamlines,10000,9720,833,write_full,TRK,s,0.013144,5.1e-05,39,
+bulk,streamlines,10000,9720,833,read_full,zarr-vectors,s,0.015767,0.000157,32,
+bulk,streamlines,10000,9720,833,read_full,TRK,s,0.005171,2.1e-05,97,
+object,streamlines,10000,9720,833,fetch_one,zarr-vectors,s,0.007881,4.7e-05,64,object_ids=; reads 1x the object
+object,streamlines,10000,9720,833,fetch_one,TRK,s,0.00458,9.5e-05,110,variable-length records: full scan
+bulk,streamlines,10000,9720,833,read_full,zarr-vectors (no codec),s,0.019445,0.001322,26,
+object,streamlines,10000,9720,833,fetch_one,zarr-vectors (no codec),s,0.007819,5.7e-05,64,object_ids=
+object,streamlines,10000,9720,833,replace_one,zarr-vectors,s,0.071963,0.005525,7,edit_fragment via object manifest
+object,streamlines,10000,9720,833,replace_one,TRK,s,0.018462,0.000638,28,variable-length records: full read-modify-rewrite
+bulk,streamlines,100000,95747,8333,write_full,zarr-vectors,s,0.319817,0.013051,5,
+bulk,streamlines,100000,95747,8333,write_full,TRK,s,0.124759,0.001592,5,
+bulk,streamlines,100000,95747,8333,read_full,zarr-vectors,s,0.039816,0.000276,13,
+bulk,streamlines,100000,95747,8333,read_full,TRK,s,0.036467,0.000387,14,
+object,streamlines,100000,95747,8333,fetch_one,zarr-vectors,s,0.009535,0.000137,53,object_ids=; reads 1x the object
+object,streamlines,100000,95747,8333,fetch_one,TRK,s,0.02969,0.000431,17,variable-length records: full scan
+bulk,streamlines,100000,95747,8333,read_full,zarr-vectors (no codec),s,0.0378,0.000529,14,
+object,streamlines,100000,95747,8333,fetch_one,zarr-vectors (no codec),s,0.009672,9.3e-05,52,object_ids=
+object,streamlines,100000,95747,8333,replace_one,zarr-vectors,s,0.118089,0.016969,5,edit_fragment via object manifest
+object,streamlines,100000,95747,8333,replace_one,TRK,s,0.158362,0.001757,5,variable-length records: full read-modify-rewrite
+bulk,streamlines,1000000,958210,83333,write_full,zarr-vectors,s,1.634192,0.03309,5,
+bulk,streamlines,1000000,958210,83333,write_full,TRK,s,1.238192,0.00726,5,
+bulk,streamlines,1000000,958210,83333,read_full,zarr-vectors,s,0.376728,0.03275,5,
+bulk,streamlines,1000000,958210,83333,read_full,TRK,s,0.364844,0.00834,5,
+object,streamlines,1000000,958210,83333,fetch_one,zarr-vectors,s,0.010902,0.000403,46,object_ids=; reads 1x the object
+object,streamlines,1000000,958210,83333,fetch_one,TRK,s,0.297149,0.002551,5,variable-length records: full scan
+bulk,streamlines,1000000,958210,83333,read_full,zarr-vectors (no codec),s,0.368069,0.032135,5,
+object,streamlines,1000000,958210,83333,fetch_one,zarr-vectors (no codec),s,0.011487,0.000155,44,object_ids=
+object,streamlines,1000000,958210,83333,replace_one,zarr-vectors,s,0.428604,0.032641,5,edit_fragment via object manifest
+object,streamlines,1000000,958210,83333,replace_one,TRK,s,1.593737,0.027618,5,variable-length records: full read-modify-rewrite
+bulk,meshes,1000,864,6,write_full,zarr-vectors,s,0.120958,0.001972,5,
+bulk,meshes,1000,864,6,write_full,STL,s,0.000299,6e-06,200,
+bulk,meshes,1000,864,6,read_full,zarr-vectors,s,0.011155,9.1e-05,45,
+bulk,meshes,1000,864,6,read_full,STL,s,3.3e-05,1e-06,200,
+object,meshes,1000,864,6,fetch_one,zarr-vectors,s,0.013462,0.000556,38,object_ids=; reads 1x the object
+object,meshes,1000,864,6,fetch_one,STL,s,3.4e-05,2e-06,200,no object index: full read
+bulk,meshes,1000,864,6,read_full,zarr-vectors (no codec),s,0.01003,0.000216,50,
+object,meshes,1000,864,6,fetch_one,zarr-vectors (no codec),s,0.013001,0.000107,39,object_ids=
+bulk,meshes,10000,9936,69,write_full,zarr-vectors,s,0.226586,0.017533,5,
+bulk,meshes,10000,9936,69,write_full,STL,s,0.001786,6e-06,200,
+bulk,meshes,10000,9936,69,read_full,zarr-vectors,s,0.056393,0.000844,9,
+bulk,meshes,10000,9936,69,read_full,STL,s,0.000171,2e-06,200,
+object,meshes,10000,9936,69,fetch_one,zarr-vectors,s,0.011339,0.000162,45,object_ids=; reads 1x the object
+object,meshes,10000,9936,69,fetch_one,STL,s,0.000175,4e-06,200,no object index: full read
+bulk,meshes,10000,9936,69,read_full,zarr-vectors (no codec),s,0.052957,0.000639,10,
+object,meshes,10000,9936,69,fetch_one,zarr-vectors (no codec),s,0.011316,0.000109,45,object_ids=
+bulk,meshes,100000,99936,694,write_full,zarr-vectors,s,0.435765,0.011587,5,
+bulk,meshes,100000,99936,694,write_full,STL,s,0.017917,5e-05,28,
+bulk,meshes,100000,99936,694,read_full,zarr-vectors,s,0.158507,0.002,5,
+bulk,meshes,100000,99936,694,read_full,STL,s,0.001486,6e-06,200,
+object,meshes,100000,99936,694,fetch_one,zarr-vectors,s,0.015172,0.000327,34,object_ids=; reads 1x the object
+object,meshes,100000,99936,694,fetch_one,STL,s,0.001486,5e-06,200,no object index: full read
+bulk,meshes,100000,99936,694,read_full,zarr-vectors (no codec),s,0.15257,0.002883,5,
+object,meshes,100000,99936,694,fetch_one,zarr-vectors (no codec),s,0.015386,0.000242,33,object_ids=
+bulk,meshes,1000000,999936,6944,write_full,zarr-vectors,s,1.678819,0.034078,5,
+bulk,meshes,1000000,999936,6944,write_full,STL,s,0.233033,0.004614,5,
+bulk,meshes,1000000,999936,6944,read_full,zarr-vectors,s,0.560384,0.008499,5,
+bulk,meshes,1000000,999936,6944,read_full,STL,s,0.061704,0.002146,9,
+object,meshes,1000000,999936,6944,fetch_one,zarr-vectors,s,0.017553,0.000415,29,object_ids=; reads 1x the object
+object,meshes,1000000,999936,6944,fetch_one,STL,s,0.06168,0.002339,9,no object index: full read
+bulk,meshes,1000000,999936,6944,read_full,zarr-vectors (no codec),s,0.511438,0.020239,5,
+object,meshes,1000000,999936,6944,fetch_one,zarr-vectors (no codec),s,0.01635,0.000274,31,object_ids=
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.002669,4.4e-05,188,0.001
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.032261,4.7e-05,16,0.001
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.006558,0.00015,77,0.01
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.033261,0.000177,16,0.01
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.027414,0.001706,19,0.1
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.038173,0.00034,14,0.1
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.084766,0.013976,8,0.5
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.042353,2.3e-05,12,0.5
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.06382,0.000423,8,1.0
+spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.04198,6.6e-05,12,1.0
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.139288,0.034271,8,0.001
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.390378,0.002211,8,0.001
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.229059,0.053217,8,0.01
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.39585,0.013004,8,0.01
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.479162,0.062389,8,0.1
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.402025,0.003777,8,0.1
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,1.228073,0.073029,8,0.5
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.443698,0.004858,8,0.5
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,1.130571,0.021595,8,1.0
+spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.473452,0.007424,8,1.0
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.022963,0.006185,22,0.001
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.226835,0.001202,8,0.001
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.057971,0.00617,9,0.01
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.226811,0.000804,8,0.01
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.16243,0.017344,8,0.1
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.230232,0.001265,8,0.1
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.6085,0.043115,8,0.5
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.239519,0.00115,8,0.5
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.585916,0.008728,8,1.0
+spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.251575,0.00081,8,1.0
+spatial_fixed,points,1000,1000,1000,bbox_query,zarr-vectors,s,0.018752,0.001259,27,0.1
+spatial_fixed,points,1000,1000,1000,bbox_query,PLY,s,8.4e-05,2e-06,200,0.1
+spatial_fixed,points,10000,10000,10000,bbox_query,zarr-vectors,s,0.005144,0.000126,98,0.01
+spatial_fixed,points,10000,10000,10000,bbox_query,PLY,s,0.000366,2e-06,200,0.01
+spatial_fixed,points,100000,100000,100000,bbox_query,zarr-vectors,s,0.002396,2.5e-05,200,0.001
+spatial_fixed,points,100000,100000,100000,bbox_query,PLY,s,0.003046,5e-06,165,0.001
+spatial_fixed,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.00262,5.1e-05,191,0.0001
+spatial_fixed,points,1000000,1000000,1000000,bbox_query,PLY,s,0.031461,6.8e-05,16,0.0001
+spatial_fixed,streamlines,1000,972,83,bbox_query,zarr-vectors,s,0.016161,0.000131,31,1.0
+spatial_fixed,streamlines,1000,972,83,bbox_query,TRK,s,0.001256,5e-06,200,1.0
+spatial_fixed,streamlines,10000,9720,833,bbox_query,zarr-vectors,s,0.02687,0.002064,19,0.120048
+spatial_fixed,streamlines,10000,9720,833,bbox_query,TRK,s,0.005699,2.1e-05,88,0.120048
+spatial_fixed,streamlines,100000,95747,8333,bbox_query,zarr-vectors,s,0.035521,0.003321,15,0.012
+spatial_fixed,streamlines,100000,95747,8333,bbox_query,TRK,s,0.03945,0.000326,13,0.012
+spatial_fixed,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.154127,0.038779,8,0.0012
+spatial_fixed,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.405012,0.003739,8,0.0012
+spatial_fixed,meshes,1000,864,6,bbox_query,zarr-vectors,s,0.011049,0.000333,46,1.0
+spatial_fixed,meshes,1000,864,6,bbox_query,STL,s,0.000219,2e-06,200,1.0
+spatial_fixed,meshes,10000,9936,69,bbox_query,zarr-vectors,s,0.057872,0.000465,9,1.0
+spatial_fixed,meshes,10000,9936,69,bbox_query,STL,s,0.002022,3e-06,200,1.0
+spatial_fixed,meshes,100000,99936,694,bbox_query,zarr-vectors,s,0.063678,0.018954,8,0.144092
+spatial_fixed,meshes,100000,99936,694,bbox_query,STL,s,0.018717,4.1e-05,27,0.144092
+spatial_fixed,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.066251,0.012442,8,0.014401
+spatial_fixed,meshes,1000000,999936,6944,bbox_query,STL,s,0.191354,0.000968,8,0.014401
+spatial_volume,points,1000,1000,1000,bbox_query,zarr-vectors,s,0.019263,0.001353,26,0.1
+spatial_volume,points,1000,1000,1000,bbox_query,PLY,s,8.6e-05,2e-06,200,0.1
+spatial_volume,points,10000,10000,10000,bbox_query,zarr-vectors,s,0.005171,0.000121,97,0.01
+spatial_volume,points,10000,10000,10000,bbox_query,PLY,s,0.000365,2e-06,200,0.01
+spatial_volume,points,100000,100000,100000,bbox_query,zarr-vectors,s,0.002345,2.3e-05,200,0.001
+spatial_volume,points,100000,100000,100000,bbox_query,PLY,s,0.003055,6e-06,164,0.001
+spatial_volume,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.002626,5.2e-05,191,0.0001
+spatial_volume,points,1000000,1000000,1000000,bbox_query,PLY,s,0.031558,0.000127,16,0.0001
+spatial_volume,streamlines,1000,972,83,bbox_query,zarr-vectors,s,0.015388,0.000349,33,0.10288066
+spatial_volume,streamlines,1000,972,83,bbox_query,TRK,s,0.001173,5e-06,200,0.10288066
+spatial_volume,streamlines,10000,9720,833,bbox_query,zarr-vectors,s,0.019314,0.001029,27,0.01028807
+spatial_volume,streamlines,10000,9720,833,bbox_query,TRK,s,0.00556,2.3e-05,90,0.01028807
+spatial_volume,streamlines,100000,95747,8333,bbox_query,zarr-vectors,s,0.028667,0.001952,18,0.00104442
+spatial_volume,streamlines,100000,95747,8333,bbox_query,TRK,s,0.039342,0.000445,13,0.00104442
+spatial_volume,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.117693,0.0171,8,0.00010436
+spatial_volume,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.388963,0.001798,8,0.00010436
+spatial_volume,meshes,1000,864,6,bbox_query,zarr-vectors,s,0.006242,0.000518,81,0.11574074
+spatial_volume,meshes,1000,864,6,bbox_query,STL,s,0.000199,2e-06,200,0.11574074
+spatial_volume,meshes,10000,9936,69,bbox_query,zarr-vectors,s,0.010844,0.000274,47,0.01006441
+spatial_volume,meshes,10000,9936,69,bbox_query,STL,s,0.001785,4e-06,200,0.01006441
+spatial_volume,meshes,100000,99936,694,bbox_query,zarr-vectors,s,0.008834,0.001325,57,0.00100064
+spatial_volume,meshes,100000,99936,694,bbox_query,STL,s,0.018129,6.8e-05,28,0.00100064
+spatial_volume,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,0.010602,0.000568,48,0.00010001
+spatial_volume,meshes,1000000,999936,6944,bbox_query,STL,s,0.192355,0.001812,8,0.00010001
+chunks,points,8,1000000,1000000,fetch_one,zarr-vectors,s,0.003046,1.9e-05,165,chunk side 500; reads 1x the object
+chunks,points,8,1000000,1000000,write_full,zarr-vectors,s,0.215737,0.0,1,chunk side 500; reads 1x the object
+chunks,points,64,1000000,1000000,fetch_one,zarr-vectors,s,0.002256,3.1e-05,200,chunk side 250; reads 1x the object
+chunks,points,64,1000000,1000000,write_full,zarr-vectors,s,0.248056,0.0,1,chunk side 250; reads 1x the object
+chunks,points,125,1000000,1000000,fetch_one,zarr-vectors,s,0.002196,2.3e-05,200,chunk side 200; reads 1x the object
+chunks,points,125,1000000,1000000,write_full,zarr-vectors,s,0.311816,0.0,1,chunk side 200; reads 1x the object
+chunks,points,512,1000000,1000000,fetch_one,zarr-vectors,s,0.00211,1.9e-05,200,chunk side 125; reads 1x the object
+chunks,points,512,1000000,1000000,write_full,zarr-vectors,s,0.621039,0.0,1,chunk side 125; reads 1x the object
+chunks,points,1000,1000000,1000000,fetch_one,zarr-vectors,s,0.002146,2e-05,200,chunk side 100; reads 1x the object
+chunks,points,1000,1000000,1000000,write_full,zarr-vectors,s,1.017062,0.0,1,chunk side 100; reads 1x the object
+chunks,points,8000,1000000,1000000,fetch_one,zarr-vectors,s,0.004332,8.5e-05,116,chunk side 50; reads 1x the object
+chunks,points,8000,1000000,1000000,write_full,zarr-vectors,s,6.201959,0.0,1,chunk side 50; reads 1x the object
+chunks,streamlines,8,958210,83333,fetch_one,zarr-vectors,s,0.017799,0.000933,29,chunk side 500; reads 1x the object
+chunks,streamlines,8,958210,83333,write_full,zarr-vectors,s,0.913546,0.0,1,chunk side 500; reads 1x the object
+chunks,streamlines,64,958210,83333,fetch_one,zarr-vectors,s,0.012353,0.000239,41,chunk side 250; reads 1x the object
+chunks,streamlines,64,958210,83333,write_full,zarr-vectors,s,1.465436,0.0,1,chunk side 250; reads 1x the object
+chunks,streamlines,125,958210,83333,fetch_one,zarr-vectors,s,0.012089,0.000152,42,chunk side 200; reads 1x the object
+chunks,streamlines,125,958210,83333,write_full,zarr-vectors,s,1.653538,0.0,1,chunk side 200; reads 1x the object
+chunks,streamlines,512,958210,83333,fetch_one,zarr-vectors,s,0.012324,0.000177,41,chunk side 125; reads 1x the object
+chunks,streamlines,512,958210,83333,write_full,zarr-vectors,s,3.044527,0.0,1,chunk side 125; reads 1x the object
+chunks,streamlines,1000,958210,83333,fetch_one,zarr-vectors,s,0.012033,0.000147,42,chunk side 100; reads 1x the object
+chunks,streamlines,1000,958210,83333,write_full,zarr-vectors,s,4.110592,0.0,1,chunk side 100; reads 1x the object
+chunks,streamlines,8000,958210,83333,fetch_one,zarr-vectors,s,0.015765,0.000531,32,chunk side 50; reads 1x the object
+chunks,streamlines,8000,958210,83333,write_full,zarr-vectors,s,14.812359,0.0,1,chunk side 50; reads 1x the object
+chunks,meshes,8,999936,6944,fetch_one,zarr-vectors,s,0.027339,0.000748,19,chunk side 500; reads 1x the object
+chunks,meshes,8,999936,6944,write_full,zarr-vectors,s,1.348748,0.0,1,chunk side 500; reads 1x the object
+chunks,meshes,64,999936,6944,fetch_one,zarr-vectors,s,0.01784,0.000179,29,chunk side 250; reads 1x the object
+chunks,meshes,64,999936,6944,write_full,zarr-vectors,s,1.498583,0.0,1,chunk side 250; reads 1x the object
+chunks,meshes,125,999936,6944,fetch_one,zarr-vectors,s,0.017824,0.000165,29,chunk side 200; reads 1x the object
+chunks,meshes,125,999936,6944,write_full,zarr-vectors,s,1.687814,0.0,1,chunk side 200; reads 1x the object
+chunks,meshes,512,999936,6944,fetch_one,zarr-vectors,s,0.018304,0.000156,28,chunk side 125; reads 1x the object
+chunks,meshes,512,999936,6944,write_full,zarr-vectors,s,2.729923,0.0,1,chunk side 125; reads 1x the object
+chunks,meshes,1000,999936,6944,fetch_one,zarr-vectors,s,0.021467,0.000335,24,chunk side 100; reads 1x the object
+chunks,meshes,1000,999936,6944,write_full,zarr-vectors,s,3.664436,0.0,1,chunk side 100; reads 1x the object
+chunks,meshes,8000,999936,6944,fetch_one,zarr-vectors,s,0.063464,0.001077,8,chunk side 50; reads 1x the object
+chunks,meshes,8000,999936,6944,write_full,zarr-vectors,s,16.106924,0.0,1,chunk side 50; reads 1x the object
+fragments,points,8,1000000,1,fetch_one,zarr-vectors,s,0.002947,0.000169,170,chunk side 500; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,8,1000000,9,fetch_one,zarr-vectors,s,0.042559,0.00026,12,chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
+fragments,meshes,8,1000000,6,fetch_one,zarr-vectors,s,0.074355,0.014946,30,"chunk side 500; 2304-vertex patch at 4 placements, spans 6-8 chunks; mean spans 6 chunks; 2304 vertices read"
+fragments,points,64,1000000,1,fetch_one,zarr-vectors,s,0.002211,3.1e-05,200,chunk side 250; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,64,1000000,27,fetch_one,zarr-vectors,s,0.029069,0.000208,18,chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
+fragments,meshes,64,1000000,15,fetch_one,zarr-vectors,s,0.052974,0.005851,40,"chunk side 250; 2304-vertex patch at 4 placements, spans 12-18 chunks; mean spans 15 chunks; 2304 vertices read"
+fragments,points,125,1000000,1,fetch_one,zarr-vectors,s,0.002022,1.9e-05,200,chunk side 200; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,125,1000000,23,fetch_one,zarr-vectors,s,0.019564,0.00023,26,chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
+fragments,meshes,125,1000000,16,fetch_one,zarr-vectors,s,0.033768,0.002279,61,"chunk side 200; 2304-vertex patch at 4 placements, spans 16-16 chunks; mean spans 16 chunks; 2304 vertices read"
+fragments,points,512,1000000,1,fetch_one,zarr-vectors,s,0.002078,1.5e-05,200,chunk side 125; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,512,1000000,47,fetch_one,zarr-vectors,s,0.017666,0.000157,29,chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
+fragments,meshes,512,1000000,44,fetch_one,zarr-vectors,s,0.111211,0.011275,20,"chunk side 125; 2304-vertex patch at 4 placements, spans 40-48 chunks; mean spans 44 chunks; 2304 vertices read"
+fragments,points,1000,1000000,1,fetch_one,zarr-vectors,s,0.00214,2.2e-05,200,chunk side 100; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,1000,1000000,42,fetch_one,zarr-vectors,s,0.01406,0.000106,36,chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
+fragments,meshes,1000,1000000,63,fetch_one,zarr-vectors,s,0.129088,0.015662,20,"chunk side 100; 2304-vertex patch at 4 placements, spans 63-63 chunks; mean spans 63 chunks; 2304 vertices read"
+fragments,points,8000,1000000,1,fetch_one,zarr-vectors,s,0.003871,7.6e-05,130,chunk side 50; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,8000,1000000,98,fetch_one,zarr-vectors,s,0.016758,0.000219,30,chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
+fragments,meshes,8000,1000000,250,fetch_one,zarr-vectors,s,0.337247,0.023202,20,"chunk side 50; 2304-vertex patch at 4 placements, spans 234-260 chunks; mean spans 250 chunks; 2304 vertices read"
+chunked,points,1000,1000,1000,write_full,precomputed annotations,s,0.054049,0.000795,10,
+storage,points,1000,1000,1000,bytes,precomputed annotations,bytes,33391,,1,chunked
+chunked,points,1000,1000,1000,read_full,precomputed annotations,s,0.002186,6e-06,200,
+chunked,points,1000,1000,1000,bbox_query,precomputed annotations,s,0.000784,1.3e-05,200,box fraction 0.100000
+chunked,points,1000,1000,1000,fetch_one,precomputed annotations,s,2e-05,1e-06,200,"by_id: one file, one read"
+chunked,points,1000,1000,1000,write_full,Parquet,s,0.012153,0.000272,42,
+storage,points,1000,1000,1000,bytes,Parquet,bytes,81624,,1,chunked
+chunked,points,1000,1000,1000,read_full,Parquet,s,0.010643,0.000453,48,
+chunked,points,1000,1000,1000,bbox_query,Parquet,s,0.001544,1e-05,200,box fraction 0.100000
+chunked,points,1000,1000,1000,write_full,plain Zarr,s,0.090991,0.001821,7,
+storage,points,1000,1000,1000,bytes,plain Zarr,bytes,16429,,1,chunked
+chunked,points,1000,1000,1000,read_full,plain Zarr,s,0.054571,0.000711,10,
+chunked,points,1000,1000,1000,bbox_query,plain Zarr,s,0.03745,0.003273,14,box fraction 0.100000
+chunked,points,1000,1000,1000,write_full,HDF5,s,0.002545,0.000179,197,
+storage,points,1000,1000,1000,bytes,HDF5,bytes,34014,,1,chunked
+chunked,points,1000,1000,1000,read_full,HDF5,s,0.000631,6e-06,200,
+chunked,points,1000,1000,1000,bbox_query,HDF5,s,0.001071,7e-06,200,box fraction 0.100000
+chunked,points,10000,10000,10000,write_full,precomputed annotations,s,0.468231,0.00992,7,
+storage,points,10000,10000,10000,bytes,precomputed annotations,bytes,321392,,1,chunked
+chunked,points,10000,10000,10000,read_full,precomputed annotations,s,0.002223,1.6e-05,200,
+chunked,points,10000,10000,10000,bbox_query,precomputed annotations,s,0.000333,6e-06,200,box fraction 0.010000
+chunked,points,10000,10000,10000,fetch_one,precomputed annotations,s,2e-05,1e-06,200,"by_id: one file, one read"
+chunked,points,10000,10000,10000,write_full,Parquet,s,0.016672,0.000147,30,
+storage,points,10000,10000,10000,bytes,Parquet,bytes,218408,,1,chunked
+chunked,points,10000,10000,10000,read_full,Parquet,s,0.010981,0.000292,46,
+chunked,points,10000,10000,10000,bbox_query,Parquet,s,0.001253,1e-05,200,box fraction 0.010000
+chunked,points,10000,10000,10000,write_full,plain Zarr,s,0.093673,0.001741,7,
+storage,points,10000,10000,10000,bytes,plain Zarr,bytes,117088,,1,chunked
+chunked,points,10000,10000,10000,read_full,plain Zarr,s,0.056856,0.0015,9,
+chunked,points,10000,10000,10000,bbox_query,plain Zarr,s,0.013334,0.000709,38,box fraction 0.010000
+chunked,points,10000,10000,10000,write_full,HDF5,s,0.007756,6.2e-05,65,
+storage,points,10000,10000,10000,bytes,HDF5,bytes,133128,,1,chunked
+chunked,points,10000,10000,10000,read_full,HDF5,s,0.001542,7e-06,200,
+chunked,points,10000,10000,10000,bbox_query,HDF5,s,0.001023,8e-06,200,box fraction 0.010000
+chunked,points,100000,100000,100000,write_full,precomputed annotations,s,4.863346,0.09681,7,
+storage,points,100000,100000,100000,bytes,precomputed annotations,bytes,3201393,,1,chunked
+chunked,points,100000,100000,100000,read_full,precomputed annotations,s,0.002503,9e-06,200,
+chunked,points,100000,100000,100000,bbox_query,precomputed annotations,s,0.00026,1.6e-05,200,box fraction 0.001000
+chunked,points,100000,100000,100000,fetch_one,precomputed annotations,s,2e-05,1e-06,200,"by_id: one file, one read"
+chunked,points,100000,100000,100000,write_full,Parquet,s,0.040477,0.00015,13,
+storage,points,100000,100000,100000,bytes,Parquet,bytes,1490998,,1,chunked
+chunked,points,100000,100000,100000,read_full,Parquet,s,0.011648,0.000231,43,
+chunked,points,100000,100000,100000,bbox_query,Parquet,s,0.001195,3.1e-05,200,box fraction 0.001000
+chunked,points,100000,100000,100000,write_full,plain Zarr,s,0.109448,0.00117,7,
+storage,points,100000,100000,100000,bytes,plain Zarr,bytes,1066997,,1,chunked
+chunked,points,100000,100000,100000,read_full,plain Zarr,s,0.058211,0.001007,9,
+chunked,points,100000,100000,100000,bbox_query,plain Zarr,s,0.005976,0.000622,84,box fraction 0.001000
+chunked,points,100000,100000,100000,write_full,HDF5,s,0.036625,0.000191,14,
+storage,points,100000,100000,100000,bytes,HDF5,bytes,1083140,,1,chunked
+chunked,points,100000,100000,100000,read_full,HDF5,s,0.00531,1.7e-05,95,
+chunked,points,100000,100000,100000,bbox_query,HDF5,s,0.00112,2.7e-05,200,box fraction 0.001000
+chunked,points,1000000,1000000,1000000,write_full,precomputed annotations,s,51.731456,3.196308,3,
+storage,points,1000000,1000000,1000000,bytes,precomputed annotations,bytes,32001394,,1,chunked
+chunked,points,1000000,1000000,1000000,read_full,precomputed annotations,s,0.00649,2.4e-05,78,
+chunked,points,1000000,1000000,1000000,bbox_query,precomputed annotations,s,0.000643,3.7e-05,200,box fraction 0.000100
+chunked,points,1000000,1000000,1000000,fetch_one,precomputed annotations,s,2.1e-05,1e-06,200,"by_id: one file, one read"
+chunked,points,1000000,1000000,1000000,write_full,Parquet,s,0.282364,0.002508,3,
+storage,points,1000000,1000000,1000000,bytes,Parquet,bytes,15162231,,1,chunked
+chunked,points,1000000,1000000,1000000,read_full,Parquet,s,0.022717,0.000383,23,
+chunked,points,1000000,1000000,1000000,bbox_query,Parquet,s,0.001725,6e-05,200,box fraction 0.000100
+chunked,points,1000000,1000000,1000000,write_full,plain Zarr,s,0.266007,0.001416,3,
+storage,points,1000000,1000000,1000000,bytes,plain Zarr,bytes,10567501,,1,chunked
+chunked,points,1000000,1000000,1000000,read_full,plain Zarr,s,0.061971,0.000446,9,
+chunked,points,1000000,1000000,1000000,bbox_query,plain Zarr,s,0.005897,0.00045,85,box fraction 0.000100
+chunked,points,1000000,1000000,1000000,write_full,HDF5,s,0.531249,0.005178,3,
+storage,points,1000000,1000000,1000000,bytes,HDF5,bytes,10613271,,1,chunked
+chunked,points,1000000,1000000,1000000,read_full,HDF5,s,0.046235,0.000114,11,
+chunked,points,1000000,1000000,1000000,bbox_query,HDF5,s,0.002526,0.00012,198,box fraction 0.000100
+idchunk,streamlines,1000,972,83,write_full,zarr-vectors (chunked by id),s,0.06908,0.000853,8,
+idchunk,streamlines,1000,972,83,bytes,zarr-vectors (chunked by id),bytes,16893,0.0,1,
+idchunk,streamlines,1000,972,83,fetch_one,zarr-vectors (chunked by id),s,0.00801,4.4e-05,63,object_ids=; 350 objects per cell
+idchunk,streamlines,10000,9720,833,write_full,zarr-vectors (chunked by id),s,0.092907,0.000914,6,
+idchunk,streamlines,10000,9720,833,bytes,zarr-vectors (chunked by id),bytes,114444,0.0,1,
+idchunk,streamlines,10000,9720,833,fetch_one,zarr-vectors (chunked by id),s,0.008354,0.000109,60,object_ids=; 351 objects per cell
+idchunk,streamlines,100000,95747,8333,write_full,zarr-vectors (chunked by id),s,0.216072,0.003826,5,
+idchunk,streamlines,100000,95747,8333,bytes,zarr-vectors (chunked by id),bytes,1067309,0.0,1,
+idchunk,streamlines,100000,95747,8333,fetch_one,zarr-vectors (chunked by id),s,0.008615,8.5e-05,59,object_ids=; 356 objects per cell
+idchunk,streamlines,1000000,958210,83333,write_full,zarr-vectors (chunked by id),s,1.661778,0.010511,5,
+idchunk,streamlines,1000000,958210,83333,bytes,zarr-vectors (chunked by id),bytes,10619881,0.0,1,
+idchunk,streamlines,1000000,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.008957,8.1e-05,56,object_ids=; 356 objects per cell
+idchunk,meshes,1000,864,6,write_full,zarr-vectors (chunked by id),s,0.102734,0.003537,5,
+idchunk,meshes,1000,864,6,bytes,zarr-vectors (chunked by id),bytes,17485,0.0,1,
+idchunk,meshes,1000,864,6,fetch_one,zarr-vectors (chunked by id),s,0.010607,0.000207,48,object_ids=; 28 objects per cell
+idchunk,meshes,10000,9936,69,write_full,zarr-vectors (chunked by id),s,0.127494,0.001839,5,
+idchunk,meshes,10000,9936,69,bytes,zarr-vectors (chunked by id),bytes,105688,0.0,1,
+idchunk,meshes,10000,9936,69,fetch_one,zarr-vectors (chunked by id),s,0.010699,3.8e-05,47,object_ids=; 28 objects per cell
+idchunk,meshes,100000,99936,694,write_full,zarr-vectors (chunked by id),s,0.252042,0.005464,5,
+idchunk,meshes,100000,99936,694,bytes,zarr-vectors (chunked by id),bytes,980568,0.0,1,
+idchunk,meshes,100000,99936,694,fetch_one,zarr-vectors (chunked by id),s,0.010864,8.7e-05,47,object_ids=; 28 objects per cell
+idchunk,meshes,1000000,999936,6944,write_full,zarr-vectors (chunked by id),s,1.808767,0.021711,5,
+idchunk,meshes,1000000,999936,6944,bytes,zarr-vectors (chunked by id),bytes,9719296,0.0,1,
+idchunk,meshes,1000000,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.011232,0.000103,45,object_ids=; 28 objects per cell
+mesh_precomputed,meshes,1000,864,6,write_full,zarr-vectors (zstd),s,0.115153,0.005788,7,
+mesh_precomputed,meshes,1000,864,6,bytes,zarr-vectors (zstd),bytes,22965,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,zarr-vectors (zstd),s,0.011509,6.2e-05,44,
+mesh_precomputed,meshes,1000,864,6,fetch_one,zarr-vectors (zstd),s,0.013465,0.000271,38,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,zarr-vectors (zstd),requests,24.5,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,zarr-vectors (zstd),bytes,11712.333333333334,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,write_full,"zarr-vectors (zstd, sharded)",s,0.14383,0.004776,7,
+mesh_precomputed,meshes,1000,864,6,bytes,"zarr-vectors (zstd, sharded)",bytes,43093,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,"zarr-vectors (zstd, sharded)",s,0.013141,5.9e-05,39,
+mesh_precomputed,meshes,1000,864,6,fetch_one,"zarr-vectors (zstd, sharded)",s,0.014579,0.000325,35,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,33.166666666666664,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,32334.333333333332,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,write_full,zarr-vectors (no codec),s,0.118761,0.00182,7,
+mesh_precomputed,meshes,1000,864,6,bytes,zarr-vectors (no codec),bytes,58811,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,zarr-vectors (no codec),s,0.01135,5.7e-05,45,
+mesh_precomputed,meshes,1000,864,6,fetch_one,zarr-vectors (no codec),s,0.01369,0.00031,37,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,zarr-vectors (no codec),requests,24.5,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,zarr-vectors (no codec),bytes,17164.666666666668,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,write_full,"zarr-vectors (no codec, sharded)",s,0.130576,0.00402,7,
+mesh_precomputed,meshes,1000,864,6,bytes,"zarr-vectors (no codec, sharded)",bytes,78603,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,"zarr-vectors (no codec, sharded)",s,0.012322,5.3e-05,41,
+mesh_precomputed,meshes,1000,864,6,fetch_one,"zarr-vectors (no codec, sharded)",s,0.016717,0.000428,30,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,31.666666666666668,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,34542.666666666664,0.0,6,object_ids=
+mesh_precomputed,meshes,1000,864,6,write_full,precomputed mesh,s,0.000892,1.8e-05,200,
+mesh_precomputed,meshes,1000,864,6,bytes,precomputed mesh,bytes,27973,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,precomputed mesh,s,0.000197,2e-06,200,
+mesh_precomputed,meshes,1000,864,6,fetch_one,precomputed mesh,s,7.2e-05,2e-06,200,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,precomputed mesh,requests,3.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,precomputed mesh,bytes,4693.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,write_full,precomputed mesh (sharded),s,0.000335,7e-06,200,
+mesh_precomputed,meshes,1000,864,6,bytes,precomputed mesh (sharded),bytes,28207,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,precomputed mesh (sharded),s,0.000115,2e-06,200,
+mesh_precomputed,meshes,1000,864,6,fetch_one,precomputed mesh (sharded),s,0.000118,2e-06,200,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,precomputed mesh (sharded),bytes,5027.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,write_full,"precomputed mesh (sharded, gzip)",s,0.001489,1.3e-05,200,
+mesh_precomputed,meshes,1000,864,6,bytes,"precomputed mesh (sharded, gzip)",bytes,10931,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,"precomputed mesh (sharded, gzip)",s,0.000226,3e-06,200,
+mesh_precomputed,meshes,1000,864,6,fetch_one,"precomputed mesh (sharded, gzip)",s,0.000144,2e-06,200,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2148.5,0.0,6,by id
+mesh_precomputed,meshes,10000,9936,69,write_full,zarr-vectors (zstd),s,0.226131,0.009222,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,zarr-vectors (zstd),bytes,131186,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,zarr-vectors (zstd),s,0.057639,0.000404,9,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,zarr-vectors (zstd),s,0.01328,0.000679,38,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,zarr-vectors (zstd),requests,24.0,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,zarr-vectors (zstd),bytes,16656.0,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,write_full,"zarr-vectors (zstd, sharded)",s,0.251499,0.011378,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,"zarr-vectors (zstd, sharded)",bytes,156330,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,"zarr-vectors (zstd, sharded)",s,0.03036,0.002865,17,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,"zarr-vectors (zstd, sharded)",s,0.014935,0.000866,34,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,32.625,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,36713.5,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,write_full,zarr-vectors (no codec),s,0.218057,0.003728,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,zarr-vectors (no codec),bytes,554208,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,zarr-vectors (no codec),s,0.053944,0.000493,10,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,zarr-vectors (no codec),s,0.013249,0.000661,38,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,zarr-vectors (no codec),requests,23.875,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,zarr-vectors (no codec),bytes,21117.875,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,write_full,"zarr-vectors (no codec, sharded)",s,0.198662,0.014719,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,"zarr-vectors (no codec, sharded)",bytes,578932,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,"zarr-vectors (no codec, sharded)",s,0.033048,0.000169,16,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,"zarr-vectors (no codec, sharded)",s,0.016457,0.001118,31,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,31.125,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,38194.125,0.0,16,object_ids=
+mesh_precomputed,meshes,10000,9936,69,write_full,precomputed mesh,s,0.00922,0.00013,55,
+mesh_precomputed,meshes,10000,9936,69,bytes,precomputed mesh,bytes,321360,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,precomputed mesh,s,0.001747,5e-06,200,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,precomputed mesh,s,7.2e-05,2e-06,200,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,precomputed mesh,requests,3.0,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,precomputed mesh,bytes,4693.8125,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,write_full,precomputed mesh (sharded),s,0.00138,1.7e-05,200,
+mesh_precomputed,meshes,10000,9936,69,bytes,precomputed mesh (sharded),bytes,321835,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,precomputed mesh (sharded),s,0.000408,3e-06,200,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,precomputed mesh (sharded),s,0.000122,2e-06,200,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,precomputed mesh (sharded),bytes,5298.5,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,write_full,"precomputed mesh (sharded, gzip)",s,0.013931,3.6e-05,36,
+mesh_precomputed,meshes,10000,9936,69,bytes,"precomputed mesh (sharded, gzip)",bytes,122525,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,"precomputed mesh (sharded, gzip)",s,0.001603,1.3e-05,200,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,"precomputed mesh (sharded, gzip)",s,0.000147,3e-06,200,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2395.875,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,write_full,zarr-vectors (zstd),s,0.429522,0.005991,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,zarr-vectors (zstd),bytes,1083144,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,zarr-vectors (zstd),s,0.157118,0.00118,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,zarr-vectors (zstd),s,0.014826,0.000576,34,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,zarr-vectors (zstd),requests,22.25,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,zarr-vectors (zstd),bytes,35503.4375,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,write_full,"zarr-vectors (zstd, sharded)",s,0.514893,0.015803,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,"zarr-vectors (zstd, sharded)",bytes,1133368,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,"zarr-vectors (zstd, sharded)",s,0.083805,0.005525,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,"zarr-vectors (zstd, sharded)",s,0.016218,0.000726,31,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,29.5,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,52616.4375,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,write_full,zarr-vectors (no codec),s,0.404719,0.004224,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,zarr-vectors (no codec),bytes,5372809,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,zarr-vectors (no codec),s,0.147319,0.002785,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,zarr-vectors (no codec),s,0.015252,0.000656,33,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,zarr-vectors (no codec),requests,22.0625,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,zarr-vectors (no codec),bytes,29851.1875,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,write_full,"zarr-vectors (no codec, sharded)",s,0.414012,0.009665,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,"zarr-vectors (no codec, sharded)",bytes,5422193,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,"zarr-vectors (no codec, sharded)",s,0.075053,0.006302,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,"zarr-vectors (no codec, sharded)",s,0.01792,0.000827,28,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,28.3125,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,44750.1875,0.0,16,object_ids=
+mesh_precomputed,meshes,100000,99936,694,write_full,precomputed mesh,s,0.094047,0.000568,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,precomputed mesh,bytes,3232579,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,precomputed mesh,s,0.017174,0.000195,30,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,precomputed mesh,s,7.2e-05,3e-06,200,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,precomputed mesh,requests,3.0,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,precomputed mesh,bytes,4694.75,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,write_full,precomputed mesh (sharded),s,0.013475,7.9e-05,38,
+mesh_precomputed,meshes,100000,99936,694,bytes,precomputed mesh (sharded),bytes,3234783,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,precomputed mesh (sharded),s,0.003494,9e-06,144,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,precomputed mesh (sharded),s,0.000124,3e-06,200,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,precomputed mesh (sharded),bytes,5403.5,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,write_full,"precomputed mesh (sharded, gzip)",s,0.13812,0.000356,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,"precomputed mesh (sharded, gzip)",bytes,1231076,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,"precomputed mesh (sharded, gzip)",s,0.015202,5.9e-05,33,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,"precomputed mesh (sharded, gzip)",s,0.000147,4e-06,200,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2528.75,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,write_full,zarr-vectors (zstd),s,1.673305,0.032738,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,zarr-vectors (zstd),bytes,10211178,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,zarr-vectors (zstd),s,0.547087,0.003971,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,zarr-vectors (zstd),s,0.019062,0.00068,27,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,zarr-vectors (zstd),requests,21.0,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,zarr-vectors (zstd),bytes,184538.9375,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,"zarr-vectors (zstd, sharded)",s,1.757086,0.024036,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,"zarr-vectors (zstd, sharded)",bytes,10299022,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,"zarr-vectors (zstd, sharded)",s,0.445901,0.008099,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,"zarr-vectors (zstd, sharded)",s,0.020867,0.000907,25,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,27.25,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,199521.9375,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,zarr-vectors (no codec),s,1.573927,0.012399,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,zarr-vectors (no codec),bytes,53366708,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,zarr-vectors (no codec),s,0.501053,0.002886,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,zarr-vectors (no codec),s,0.018228,0.000496,28,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,zarr-vectors (no codec),requests,20.875,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,zarr-vectors (no codec),bytes,82944.375,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,"zarr-vectors (no codec, sharded)",s,1.613868,0.071145,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,"zarr-vectors (no codec, sharded)",bytes,53453082,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,"zarr-vectors (no codec, sharded)",s,0.404002,0.011909,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,"zarr-vectors (no codec, sharded)",s,0.020752,0.000895,25,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,26.375,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,96224.875,0.0,16,object_ids=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,precomputed mesh,s,0.934768,0.012256,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,precomputed mesh,bytes,32351023,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,precomputed mesh,s,0.176646,0.009375,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,precomputed mesh,s,7.3e-05,5e-06,200,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,precomputed mesh,requests,3.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,precomputed mesh,bytes,4695.6875,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,write_full,precomputed mesh (sharded),s,0.117864,0.000462,5,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,precomputed mesh (sharded),bytes,32363367,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,precomputed mesh (sharded),s,0.037247,0.000109,14,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,precomputed mesh (sharded),s,0.000126,5e-06,200,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,precomputed mesh (sharded),bytes,5537.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,write_full,"precomputed mesh (sharded, gzip)",s,1.373247,0.003168,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,"precomputed mesh (sharded, gzip)",bytes,12306235,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,"precomputed mesh (sharded, gzip)",s,0.152422,0.000618,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,"precomputed mesh (sharded, gzip)",s,0.00015,5e-06,200,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2650.25,0.0,16,by id
 fidelity,points,100000,100000,100000,roundtrip_max_abs_error,zarr-vectors (zstd),store units,0.0,,1,100000 in / 100000 out
 fidelity,points,100000,100000,100000,roundtrip_max_abs_error,PLY,store units,0.0,,1,100000 in / 100000 out
 fidelity,streamlines,100000,95747,8333,roundtrip_max_abs_error,zarr-vectors (zstd),store units,0.0,,1,95747 in / 95747 out
@@ -142,291 +650,3 @@ fidelity,skeletons,100000,100678,500,roundtrip_max_abs_error,zarr-vectors (zstd)
 fidelity,graphs,100000,100000,100000,roundtrip_max_abs_error,zarr-vectors (zstd),store units,0.0,,1,100000 in / 100000 out
 fidelity,meshes,100000,99936,694,roundtrip_max_abs_error,zarr-vectors (zstd),store units,0.0,,1,99936 in / 99936 out
 fidelity,meshes,100000,99936,694,roundtrip_max_abs_error,STL,store units,0.0,,1,99936 in / 99936 out
-chunked,points,1000,1000,1000,write_full,precomputed annotations,s,0.045635,0.00028,11,
-storage,points,1000,1000,1000,bytes,precomputed annotations,bytes,33391,,1,chunked
-chunked,points,1000,1000,1000,read_full,precomputed annotations,s,0.001862,1.5e-05,200,
-chunked,points,1000,1000,1000,bbox_query,precomputed annotations,s,0.000552,1.5e-05,200,box fraction 0.100000
-chunked,points,1000,1000,1000,fetch_one,precomputed annotations,s,1.6e-05,1e-06,200,"by_id: one file, one read"
-chunked,points,1000,1000,1000,write_full,Parquet,s,0.013657,0.009416,37,
-storage,points,1000,1000,1000,bytes,Parquet,bytes,81624,,1,chunked
-chunked,points,1000,1000,1000,read_full,Parquet,s,0.007801,0.000295,65,
-chunked,points,1000,1000,1000,bbox_query,Parquet,s,0.00137,6.1e-05,200,box fraction 0.100000
-chunked,points,1000,1000,1000,write_full,plain Zarr,s,0.045562,0.000837,12,
-storage,points,1000,1000,1000,bytes,plain Zarr,bytes,16429,,1,chunked
-chunked,points,1000,1000,1000,read_full,plain Zarr,s,0.024634,0.000375,21,
-chunked,points,1000,1000,1000,bbox_query,plain Zarr,s,0.015943,0.000254,32,box fraction 0.100000
-chunked,points,1000,1000,1000,write_full,HDF5,s,0.002145,0.000237,200,
-storage,points,1000,1000,1000,bytes,HDF5,bytes,34014,,1,chunked
-chunked,points,1000,1000,1000,read_full,HDF5,s,0.000493,2e-06,200,
-chunked,points,1000,1000,1000,bbox_query,HDF5,s,0.00092,2e-06,200,box fraction 0.100000
-chunked,points,10000,10000,10000,write_full,precomputed annotations,s,0.443834,0.002035,7,
-storage,points,10000,10000,10000,bytes,precomputed annotations,bytes,321392,,1,chunked
-chunked,points,10000,10000,10000,read_full,precomputed annotations,s,0.001888,6e-06,200,
-chunked,points,10000,10000,10000,bbox_query,precomputed annotations,s,0.00058,2e-06,200,box fraction 0.010000
-chunked,points,10000,10000,10000,fetch_one,precomputed annotations,s,1.5e-05,0.0,200,"by_id: one file, one read"
-chunked,points,10000,10000,10000,write_full,Parquet,s,0.012982,8.7e-05,39,
-storage,points,10000,10000,10000,bytes,Parquet,bytes,218408,,1,chunked
-chunked,points,10000,10000,10000,read_full,Parquet,s,0.011442,0.000182,44,
-chunked,points,10000,10000,10000,bbox_query,Parquet,s,0.001368,2.9e-05,200,box fraction 0.010000
-chunked,points,10000,10000,10000,write_full,plain Zarr,s,0.080749,0.009751,7,
-storage,points,10000,10000,10000,bytes,plain Zarr,bytes,117088,,1,chunked
-chunked,points,10000,10000,10000,read_full,plain Zarr,s,0.028936,0.002879,18,
-chunked,points,10000,10000,10000,bbox_query,plain Zarr,s,0.021666,0.000185,24,box fraction 0.010000
-chunked,points,10000,10000,10000,write_full,HDF5,s,0.006608,0.000244,76,
-storage,points,10000,10000,10000,bytes,HDF5,bytes,133128,,1,chunked
-chunked,points,10000,10000,10000,read_full,HDF5,s,0.001365,2e-06,200,
-chunked,points,10000,10000,10000,bbox_query,HDF5,s,0.00127,4e-06,200,box fraction 0.010000
-chunked,points,100000,100000,100000,write_full,precomputed annotations,s,4.423389,0.624388,7,
-storage,points,100000,100000,100000,bytes,precomputed annotations,bytes,3201393,,1,chunked
-chunked,points,100000,100000,100000,read_full,precomputed annotations,s,0.002077,1.9e-05,200,
-chunked,points,100000,100000,100000,bbox_query,precomputed annotations,s,0.000119,1e-06,200,box fraction 0.001000
-chunked,points,100000,100000,100000,fetch_one,precomputed annotations,s,1.5e-05,0.0,200,"by_id: one file, one read"
-chunked,points,100000,100000,100000,write_full,Parquet,s,0.034911,0.000933,15,
-storage,points,100000,100000,100000,bytes,Parquet,bytes,1490998,,1,chunked
-chunked,points,100000,100000,100000,read_full,Parquet,s,0.010763,0.000325,47,
-chunked,points,100000,100000,100000,bbox_query,Parquet,s,0.000928,4.9e-05,200,box fraction 0.001000
-chunked,points,100000,100000,100000,write_full,plain Zarr,s,0.073475,0.021889,7,
-storage,points,100000,100000,100000,bytes,plain Zarr,bytes,1066997,,1,chunked
-chunked,points,100000,100000,100000,read_full,plain Zarr,s,0.02655,0.000237,19,
-chunked,points,100000,100000,100000,bbox_query,plain Zarr,s,0.002209,1.2e-05,200,box fraction 0.001000
-chunked,points,100000,100000,100000,write_full,HDF5,s,0.031921,0.001116,16,
-storage,points,100000,100000,100000,bytes,HDF5,bytes,1083140,,1,chunked
-chunked,points,100000,100000,100000,read_full,HDF5,s,0.004462,4e-06,113,
-chunked,points,100000,100000,100000,bbox_query,HDF5,s,0.000822,1e-06,200,box fraction 0.001000
-chunked,points,1000000,1000000,1000000,write_full,precomputed annotations,s,47.063187,6.907131,3,
-storage,points,1000000,1000000,1000000,bytes,precomputed annotations,bytes,32001394,,1,chunked
-chunked,points,1000000,1000000,1000000,read_full,precomputed annotations,s,0.007598,0.000305,66,
-chunked,points,1000000,1000000,1000000,bbox_query,precomputed annotations,s,0.000334,2e-06,200,box fraction 0.000100
-chunked,points,1000000,1000000,1000000,fetch_one,precomputed annotations,s,1.6e-05,0.0,200,"by_id: one file, one read"
-chunked,points,1000000,1000000,1000000,write_full,Parquet,s,0.314107,0.007884,3,
-storage,points,1000000,1000000,1000000,bytes,Parquet,bytes,15162231,,1,chunked
-chunked,points,1000000,1000000,1000000,read_full,Parquet,s,0.018233,0.000985,28,
-chunked,points,1000000,1000000,1000000,bbox_query,Parquet,s,0.001188,3.4e-05,200,box fraction 0.000100
-chunked,points,1000000,1000000,1000000,write_full,plain Zarr,s,0.238294,0.006671,3,
-storage,points,1000000,1000000,1000000,bytes,plain Zarr,bytes,10567501,,1,chunked
-chunked,points,1000000,1000000,1000000,read_full,plain Zarr,s,0.033543,0.000551,15,
-chunked,points,1000000,1000000,1000000,bbox_query,plain Zarr,s,0.002176,3.9e-05,200,box fraction 0.000100
-chunked,points,1000000,1000000,1000000,write_full,HDF5,s,0.507941,0.005672,3,
-storage,points,1000000,1000000,1000000,bytes,HDF5,bytes,10613271,,1,chunked
-chunked,points,1000000,1000000,1000000,read_full,HDF5,s,0.047678,0.001698,11,
-chunked,points,1000000,1000000,1000000,bbox_query,HDF5,s,0.002089,4e-06,200,box fraction 0.000100
-bulk,points,1000,1000,1000,write_full,zarr-vectors,s,0.163356,0.034356,5,
-bulk,points,1000,1000,1000,write_full,PLY,s,9.5e-05,5e-06,200,
-bulk,points,1000,1000,1000,read_full,zarr-vectors,s,0.004697,0.000137,107,
-bulk,points,1000,1000,1000,read_full,PLY,s,2.3e-05,0.0,200,
-object,points,1000,1000,1000,fetch_one,zarr-vectors,s,0.002104,5e-05,200,bbox= around the point; reads 1x the object
-object,points,1000,1000,1000,fetch_one,PLY,s,3.3e-05,0.0,200,fixed-width record: seek + 12-byte read
-object,points,1000,1000,1000,replace_one,zarr-vectors,s,0.015541,0.000154,33,VertexRef.from_position
-object,points,1000,1000,1000,replace_one,PLY,s,4.1e-05,1e-06,200,in-place seek + 12-byte overwrite
-bulk,points,10000,10000,10000,write_full,zarr-vectors,s,0.197959,0.011156,5,
-bulk,points,10000,10000,10000,write_full,PLY,s,0.000144,5e-06,200,
-bulk,points,10000,10000,10000,read_full,zarr-vectors,s,0.004985,5e-05,101,
-bulk,points,10000,10000,10000,read_full,PLY,s,3.2e-05,1e-06,200,
-object,points,10000,10000,10000,fetch_one,zarr-vectors,s,0.002173,4.3e-05,200,bbox= around the point; reads 1x the object
-object,points,10000,10000,10000,fetch_one,PLY,s,3.4e-05,0.0,200,fixed-width record: seek + 12-byte read
-object,points,10000,10000,10000,replace_one,zarr-vectors,s,0.015817,0.000242,32,VertexRef.from_position
-object,points,10000,10000,10000,replace_one,PLY,s,4.1e-05,1e-06,200,in-place seek + 12-byte overwrite
-bulk,points,100000,100000,100000,write_full,zarr-vectors,s,0.208089,0.012154,5,
-bulk,points,100000,100000,100000,write_full,PLY,s,0.000761,7e-06,200,
-bulk,points,100000,100000,100000,read_full,zarr-vectors,s,0.006024,4.6e-05,83,
-bulk,points,100000,100000,100000,read_full,PLY,s,0.000145,7e-06,200,
-object,points,100000,100000,100000,fetch_one,zarr-vectors,s,0.002072,5e-05,200,bbox= around the point; reads 1x the object
-object,points,100000,100000,100000,fetch_one,PLY,s,3.4e-05,1e-06,200,fixed-width record: seek + 12-byte read
-object,points,100000,100000,100000,replace_one,zarr-vectors,s,0.016121,0.000165,32,VertexRef.from_position
-object,points,100000,100000,100000,replace_one,PLY,s,4.2e-05,1e-06,200,in-place seek + 12-byte overwrite
-bulk,points,1000000,1000000,1000000,write_full,zarr-vectors,s,0.432762,0.030642,5,
-bulk,points,1000000,1000000,1000000,write_full,PLY,s,0.008159,0.000227,62,
-bulk,points,1000000,1000000,1000000,read_full,zarr-vectors,s,0.015695,0.000193,32,
-bulk,points,1000000,1000000,1000000,read_full,PLY,s,0.001302,3.3e-05,200,
-object,points,1000000,1000000,1000000,fetch_one,zarr-vectors,s,0.001616,1.5e-05,200,bbox= around the point; reads 1x the object
-object,points,1000000,1000000,1000000,fetch_one,PLY,s,2.2e-05,0.0,200,fixed-width record: seek + 12-byte read
-object,points,1000000,1000000,1000000,replace_one,zarr-vectors,s,0.017176,0.000344,30,VertexRef.from_position
-object,points,1000000,1000000,1000000,replace_one,PLY,s,4.2e-05,1e-06,200,in-place seek + 12-byte overwrite
-bulk,streamlines,1000,972,83,write_full,zarr-vectors,s,0.132606,0.012278,5,
-bulk,streamlines,1000,972,83,write_full,TRK,s,0.001676,0.000243,200,
-bulk,streamlines,1000,972,83,read_full,zarr-vectors,s,0.007203,6.6e-05,70,
-bulk,streamlines,1000,972,83,read_full,TRK,s,0.000937,3e-06,200,
-object,streamlines,1000,972,83,fetch_one,zarr-vectors,s,0.003277,4.8e-05,153,object_ids=; reads 1x the object
-object,streamlines,1000,972,83,fetch_one,TRK,s,0.000952,3.6e-05,200,variable-length records: full scan
-object,streamlines,1000,972,83,replace_one,zarr-vectors,s,0.028841,0.002937,18,edit_fragment via object manifest
-object,streamlines,1000,972,83,replace_one,TRK,s,0.002592,6.6e-05,193,variable-length records: full read-modify-rewrite
-bulk,streamlines,10000,9720,833,write_full,zarr-vectors,s,0.294422,0.011186,5,
-bulk,streamlines,10000,9720,833,write_full,TRK,s,0.010114,2.3e-05,50,
-bulk,streamlines,10000,9720,833,read_full,zarr-vectors,s,0.015815,0.001086,32,
-bulk,streamlines,10000,9720,833,read_full,TRK,s,0.003814,7e-06,132,
-object,streamlines,10000,9720,833,fetch_one,zarr-vectors,s,0.003655,6.8e-05,137,object_ids=; reads 1x the object
-object,streamlines,10000,9720,833,fetch_one,TRK,s,0.00343,9.9e-05,146,variable-length records: full scan
-object,streamlines,10000,9720,833,replace_one,zarr-vectors,s,0.043445,0.00759,13,edit_fragment via object manifest
-object,streamlines,10000,9720,833,replace_one,TRK,s,0.014378,0.000886,35,variable-length records: full read-modify-rewrite
-bulk,streamlines,100000,95747,8333,write_full,zarr-vectors,s,0.791927,0.021847,5,
-bulk,streamlines,100000,95747,8333,write_full,TRK,s,0.095934,0.000834,6,
-bulk,streamlines,100000,95747,8333,read_full,zarr-vectors,s,0.072502,0.006635,7,
-bulk,streamlines,100000,95747,8333,read_full,TRK,s,0.02727,0.000217,19,
-object,streamlines,100000,95747,8333,fetch_one,zarr-vectors,s,0.00566,0.000105,89,object_ids=; reads 1x the object
-object,streamlines,100000,95747,8333,fetch_one,TRK,s,0.023017,0.000422,22,variable-length records: full scan
-object,streamlines,100000,95747,8333,replace_one,zarr-vectors,s,0.131862,0.009293,5,edit_fragment via object manifest
-object,streamlines,100000,95747,8333,replace_one,TRK,s,0.130554,0.003759,5,variable-length records: full read-modify-rewrite
-bulk,streamlines,1000000,958210,83333,write_full,zarr-vectors,s,4.737902,0.195332,5,
-bulk,streamlines,1000000,958210,83333,write_full,TRK,s,0.947871,0.00489,5,
-bulk,streamlines,1000000,958210,83333,read_full,zarr-vectors,s,0.733449,0.046967,5,
-bulk,streamlines,1000000,958210,83333,read_full,TRK,s,0.294124,0.004489,5,
-object,streamlines,1000000,958210,83333,fetch_one,zarr-vectors,s,0.010235,0.000748,49,object_ids=; reads 1x the object
-object,streamlines,1000000,958210,83333,fetch_one,TRK,s,0.247278,0.005535,5,variable-length records: full scan
-object,streamlines,1000000,958210,83333,replace_one,zarr-vectors,s,0.985159,0.018047,5,edit_fragment via object manifest
-object,streamlines,1000000,958210,83333,replace_one,TRK,s,1.20075,0.008039,5,variable-length records: full read-modify-rewrite
-bulk,meshes,1000,864,6,write_full,zarr-vectors,s,0.128008,0.021804,5,
-bulk,meshes,1000,864,6,write_full,STL,s,0.000292,2e-06,200,
-bulk,meshes,1000,864,6,read_full,zarr-vectors,s,0.019932,0.00091,26,
-bulk,meshes,1000,864,6,read_full,STL,s,5e-05,2e-06,200,
-object,meshes,1000,864,6,fetch_one,zarr-vectors,s,0.0201,0.002161,25,chunks= then filter (no object_ids= on read_mesh); reads 1x the object
-object,meshes,1000,864,6,fetch_one,STL,s,6.5e-05,1e-06,200,no object index: full read
-bulk,meshes,10000,9936,69,write_full,zarr-vectors,s,0.409715,0.014691,5,
-bulk,meshes,10000,9936,69,write_full,STL,s,0.002044,1e-05,200,
-bulk,meshes,10000,9936,69,read_full,zarr-vectors,s,0.05523,0.005227,10,
-bulk,meshes,10000,9936,69,read_full,STL,s,0.000136,2e-06,200,
-object,meshes,10000,9936,69,fetch_one,zarr-vectors,s,0.035106,0.004142,15,chunks= then filter (no object_ids= on read_mesh); reads 1x the object
-object,meshes,10000,9936,69,fetch_one,STL,s,0.000142,2e-06,200,no object index: full read
-bulk,meshes,100000,99936,694,write_full,zarr-vectors,s,2.326975,0.222746,5,
-bulk,meshes,100000,99936,694,write_full,STL,s,0.019916,9.7e-05,26,
-bulk,meshes,100000,99936,694,read_full,zarr-vectors,s,0.378969,0.02048,5,
-bulk,meshes,100000,99936,694,read_full,STL,s,0.001223,1.1e-05,200,
-object,meshes,100000,99936,694,fetch_one,zarr-vectors,s,0.243617,0.002238,5,chunks= then filter (no object_ids= on read_mesh); reads 10x the object
-object,meshes,100000,99936,694,fetch_one,STL,s,0.001256,1.5e-05,200,no object index: full read
-bulk,meshes,1000000,999936,6944,write_full,zarr-vectors,s,16.492811,0.479072,5,
-bulk,meshes,1000000,999936,6944,write_full,STL,s,0.288589,0.003119,5,
-bulk,meshes,1000000,999936,6944,read_full,zarr-vectors,s,5.056439,0.142885,5,
-bulk,meshes,1000000,999936,6944,read_full,STL,s,0.052716,0.001589,10,
-object,meshes,1000000,999936,6944,fetch_one,zarr-vectors,s,4.538968,0.478106,5,chunks= then filter (no object_ids= on read_mesh); reads 70x the object
-object,meshes,1000000,999936,6944,fetch_one,STL,s,0.06057,0.001885,9,no object index: full read
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.003317,9.2e-05,151,0.001
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.028186,0.00069,18,0.001
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.009761,0.000141,52,0.01
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.029048,0.000147,18,0.01
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.024722,0.000256,21,0.1
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.03297,0.000107,16,0.1
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.097966,0.003702,7,0.5
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.037742,0.000402,14,0.5
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.171541,0.001401,7,1.0
-spatial_fraction,points,1000000,1000000,1000000,bbox_query,PLY,s,0.038094,0.001271,14,1.0
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.673285,0.008838,7,0.001
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.313317,0.003067,7,0.001
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.722658,0.016895,7,0.01
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.318537,0.002545,7,0.01
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.734855,0.024858,7,0.1
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.327004,0.004233,7,0.1
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.792192,0.027155,7,0.5
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.360512,0.002141,7,0.5
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.765011,0.040339,7,1.0
-spatial_fraction,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.379896,0.003634,7,1.0
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,3.65856,0.081387,7,0.001
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.208907,0.001463,7,0.001
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,4.163061,0.103361,7,0.01
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.210814,0.001694,7,0.01
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,4.012743,0.155792,7,0.1
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.208191,0.000502,7,0.1
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,5.733077,0.560374,7,0.5
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.228257,0.002699,7,0.5
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,6.231783,0.315409,7,1.0
-spatial_fraction,meshes,1000000,999936,6944,bbox_query,STL,s,0.234893,0.001006,7,1.0
-spatial_fixed,points,1000,1000,1000,bbox_query,zarr-vectors,s,0.018693,0.00061,27,0.1
-spatial_fixed,points,1000,1000,1000,bbox_query,PLY,s,6.9e-05,1e-06,200,0.1
-spatial_fixed,points,10000,10000,10000,bbox_query,zarr-vectors,s,0.007996,0.000324,63,0.01
-spatial_fixed,points,10000,10000,10000,bbox_query,PLY,s,0.000311,2e-06,200,0.01
-spatial_fixed,points,100000,100000,100000,bbox_query,zarr-vectors,s,0.003413,7.3e-05,147,0.001
-spatial_fixed,points,100000,100000,100000,bbox_query,PLY,s,0.002719,3.1e-05,184,0.001
-spatial_fixed,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.002919,4.9e-05,172,0.0001
-spatial_fixed,points,1000000,1000000,1000000,bbox_query,PLY,s,0.030403,0.000347,17,0.0001
-spatial_fixed,streamlines,1000,972,83,bbox_query,zarr-vectors,s,0.009434,0.000411,53,1.0
-spatial_fixed,streamlines,1000,972,83,bbox_query,TRK,s,0.00107,6e-06,200,1.0
-spatial_fixed,streamlines,10000,9720,833,bbox_query,zarr-vectors,s,0.017512,0.000525,29,0.120048
-spatial_fixed,streamlines,10000,9720,833,bbox_query,TRK,s,0.004588,2.2e-05,109,0.120048
-spatial_fixed,streamlines,100000,95747,8333,bbox_query,zarr-vectors,s,0.075122,0.003341,7,0.012
-spatial_fixed,streamlines,100000,95747,8333,bbox_query,TRK,s,0.030472,0.000227,17,0.012
-spatial_fixed,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.736797,0.028473,5,0.0012
-spatial_fixed,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.31585,0.003004,5,0.0012
-spatial_fixed,meshes,1000,864,6,bbox_query,zarr-vectors,s,0.023601,0.002079,22,1.0
-spatial_fixed,meshes,1000,864,6,bbox_query,STL,s,0.000212,5e-06,200,1.0
-spatial_fixed,meshes,10000,9936,69,bbox_query,zarr-vectors,s,0.068375,0.007392,8,1.0
-spatial_fixed,meshes,10000,9936,69,bbox_query,STL,s,0.001799,6e-06,200,1.0
-spatial_fixed,meshes,100000,99936,694,bbox_query,zarr-vectors,s,0.346373,0.052226,7,0.144092
-spatial_fixed,meshes,100000,99936,694,bbox_query,STL,s,0.016872,6.5e-05,30,0.144092
-spatial_fixed,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,5.305772,0.738729,5,0.014401
-spatial_fixed,meshes,1000000,999936,6944,bbox_query,STL,s,0.207004,0.001819,5,0.014401
-spatial_volume,points,1000,1000,1000,bbox_query,zarr-vectors,s,0.016554,0.000434,31,0.1
-spatial_volume,points,1000,1000,1000,bbox_query,PLY,s,6.9e-05,1e-06,200,0.1
-spatial_volume,points,10000,10000,10000,bbox_query,zarr-vectors,s,0.006034,5.2e-05,83,0.01
-spatial_volume,points,10000,10000,10000,bbox_query,PLY,s,0.000316,1e-06,200,0.01
-spatial_volume,points,100000,100000,100000,bbox_query,zarr-vectors,s,0.003136,2.2e-05,160,0.001
-spatial_volume,points,100000,100000,100000,bbox_query,PLY,s,0.003022,3.2e-05,166,0.001
-spatial_volume,points,1000000,1000000,1000000,bbox_query,zarr-vectors,s,0.002032,5.8e-05,200,0.0001
-spatial_volume,points,1000000,1000000,1000000,bbox_query,PLY,s,0.030359,0.000343,17,0.0001
-spatial_volume,streamlines,1000,972,83,bbox_query,zarr-vectors,s,0.007765,0.000121,65,0.10288066
-spatial_volume,streamlines,1000,972,83,bbox_query,TRK,s,0.001047,6e-06,200,0.10288066
-spatial_volume,streamlines,10000,9720,833,bbox_query,zarr-vectors,s,0.016093,0.00123,32,0.01028807
-spatial_volume,streamlines,10000,9720,833,bbox_query,TRK,s,0.004561,2.1e-05,110,0.01028807
-spatial_volume,streamlines,100000,95747,8333,bbox_query,zarr-vectors,s,0.077958,0.009881,7,0.00104442
-spatial_volume,streamlines,100000,95747,8333,bbox_query,TRK,s,0.030395,0.000297,17,0.00104442
-spatial_volume,streamlines,1000000,958210,83333,bbox_query,zarr-vectors,s,0.845165,0.039709,5,0.00010436
-spatial_volume,streamlines,1000000,958210,83333,bbox_query,TRK,s,0.331979,0.007034,5,0.00010436
-spatial_volume,meshes,1000,864,6,bbox_query,zarr-vectors,s,0.016968,0.00032,30,0.11574074
-spatial_volume,meshes,1000,864,6,bbox_query,STL,s,0.000195,4e-06,200,0.11574074
-spatial_volume,meshes,10000,9936,69,bbox_query,zarr-vectors,s,0.061235,0.013237,9,0.01006441
-spatial_volume,meshes,10000,9936,69,bbox_query,STL,s,0.001605,5e-06,200,0.01006441
-spatial_volume,meshes,100000,99936,694,bbox_query,zarr-vectors,s,0.404984,0.061106,7,0.00100064
-spatial_volume,meshes,100000,99936,694,bbox_query,STL,s,0.017592,0.000218,29,0.00100064
-spatial_volume,meshes,1000000,999936,6944,bbox_query,zarr-vectors,s,4.693898,0.643327,5,0.00010001
-spatial_volume,meshes,1000000,999936,6944,bbox_query,STL,s,0.211702,0.001895,5,0.00010001
-chunks,points,8,1000000,1000000,fetch_one,zarr-vectors,s,0.003108,7.1e-05,161,chunk side 500; reads 1x the object
-chunks,points,8,1000000,1000000,write_full,zarr-vectors,s,0.282435,0.0,1,chunk side 500; reads 1x the object
-chunks,points,64,1000000,1000000,fetch_one,zarr-vectors,s,0.002717,3.2e-05,185,chunk side 250; reads 1x the object
-chunks,points,64,1000000,1000000,write_full,zarr-vectors,s,0.342467,0.0,1,chunk side 250; reads 1x the object
-chunks,points,125,1000000,1000000,fetch_one,zarr-vectors,s,0.002977,7.1e-05,168,chunk side 200; reads 1x the object
-chunks,points,125,1000000,1000000,write_full,zarr-vectors,s,0.442019,0.0,1,chunk side 200; reads 1x the object
-chunks,points,512,1000000,1000000,fetch_one,zarr-vectors,s,0.002745,4.8e-05,183,chunk side 125; reads 1x the object
-chunks,points,512,1000000,1000000,write_full,zarr-vectors,s,1.050663,0.0,1,chunk side 125; reads 1x the object
-chunks,points,1000,1000000,1000000,fetch_one,zarr-vectors,s,0.004009,7.1e-05,125,chunk side 100; reads 1x the object
-chunks,points,1000,1000000,1000000,write_full,zarr-vectors,s,1.794295,0.0,1,chunk side 100; reads 1x the object
-chunks,points,8000,1000000,1000000,fetch_one,zarr-vectors,s,0.003254,0.000112,154,chunk side 50; reads 1x the object
-chunks,points,8000,1000000,1000000,write_full,zarr-vectors,s,11.232242,0.0,1,chunk side 50; reads 1x the object
-chunks,streamlines,8,958210,83333,fetch_one,zarr-vectors,s,0.023706,0.00024,22,chunk side 500; reads 1x the object
-chunks,streamlines,8,958210,83333,write_full,zarr-vectors,s,2.906566,0.0,1,chunk side 500; reads 1x the object
-chunks,streamlines,64,958210,83333,fetch_one,zarr-vectors,s,0.011006,0.000416,46,chunk side 250; reads 1x the object
-chunks,streamlines,64,958210,83333,write_full,zarr-vectors,s,4.082382,0.0,1,chunk side 250; reads 1x the object
-chunks,streamlines,125,958210,83333,fetch_one,zarr-vectors,s,0.011041,0.000584,46,chunk side 200; reads 1x the object
-chunks,streamlines,125,958210,83333,write_full,zarr-vectors,s,4.863337,0.0,1,chunk side 200; reads 1x the object
-chunks,streamlines,512,958210,83333,fetch_one,zarr-vectors,s,0.010181,0.000343,50,chunk side 125; reads 1x the object
-chunks,streamlines,512,958210,83333,write_full,zarr-vectors,s,8.194195,0.0,1,chunk side 125; reads 1x the object
-chunks,streamlines,1000,958210,83333,fetch_one,zarr-vectors,s,0.009407,0.000344,54,chunk side 100; reads 1x the object
-chunks,streamlines,1000,958210,83333,write_full,zarr-vectors,s,11.091787,0.0,1,chunk side 100; reads 1x the object
-chunks,streamlines,8000,958210,83333,fetch_one,zarr-vectors,s,0.013781,0.000438,37,chunk side 50; reads 1x the object
-chunks,streamlines,8000,958210,83333,write_full,zarr-vectors,s,40.435886,0.0,1,chunk side 50; reads 1x the object
-chunks,meshes,8,999936,6944,fetch_one,zarr-vectors,s,2.392154,0.199126,5,chunk side 500; reads 959x the object
-chunks,meshes,8,999936,6944,write_full,zarr-vectors,s,15.643367,0.0,1,chunk side 500; reads 959x the object
-chunks,meshes,64,999936,6944,fetch_one,zarr-vectors,s,3.236006,0.195554,5,chunk side 250; reads 138x the object
-chunks,meshes,64,999936,6944,write_full,zarr-vectors,s,15.648347,0.0,1,chunk side 250; reads 138x the object
-chunks,meshes,125,999936,6944,fetch_one,zarr-vectors,s,3.211435,0.027982,5,chunk side 200; reads 70x the object
-chunks,meshes,125,999936,6944,write_full,zarr-vectors,s,16.0167,0.0,1,chunk side 200; reads 70x the object
-chunks,meshes,512,999936,6944,fetch_one,zarr-vectors,s,3.792218,0.568074,5,chunk side 125; reads 16x the object
-chunks,meshes,512,999936,6944,write_full,zarr-vectors,s,19.035809,0.0,1,chunk side 125; reads 16x the object
-chunks,meshes,1000,999936,6944,fetch_one,zarr-vectors,s,3.65787,0.053611,5,chunk side 100; reads 23x the object
-chunks,meshes,1000,999936,6944,write_full,zarr-vectors,s,22.757395,0.0,1,chunk side 100; reads 23x the object
-chunks,meshes,8000,999936,6944,fetch_one,zarr-vectors,s,3.506803,0.411252,5,chunk side 50; reads 10x the object
-chunks,meshes,8000,999936,6944,write_full,zarr-vectors,s,55.331362,0.0,1,chunk side 50; reads 10x the object
-fragments,points,8,1000000,1,fetch_one,zarr-vectors,s,0.004512,0.00011,111,chunk side 500; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,8,1000000,9,fetch_one,zarr-vectors,s,0.108383,0.002653,7,chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
-fragments,meshes,8,1000000,8,fetch_one,zarr-vectors,s,4.716868,0.040793,5,chunk side 500; 2304-vertex patch spans 8 chunks; 1002240 vertices read
-fragments,points,64,1000000,1,fetch_one,zarr-vectors,s,0.003748,0.000108,134,chunk side 250; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,64,1000000,27,fetch_one,zarr-vectors,s,0.068242,0.000498,8,chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
-fragments,meshes,64,1000000,24,fetch_one,zarr-vectors,s,4.443992,0.087403,5,chunk side 250; 2304-vertex patch spans 24 chunks; 417920 vertices read
-fragments,points,125,1000000,1,fetch_one,zarr-vectors,s,0.003832,7.1e-05,131,chunk side 200; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,125,1000000,23,fetch_one,zarr-vectors,s,0.041408,0.0006,13,chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
-fragments,meshes,125,1000000,16,fetch_one,zarr-vectors,s,3.870239,0.08628,5,chunk side 200; 2304-vertex patch spans 16 chunks; 143510 vertices read
-fragments,points,512,1000000,1,fetch_one,zarr-vectors,s,0.003778,6.8e-05,133,chunk side 125; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,512,1000000,47,fetch_one,zarr-vectors,s,0.031329,0.000481,16,chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
-fragments,meshes,512,1000000,48,fetch_one,zarr-vectors,s,4.092056,0.163526,5,chunk side 125; 2304-vertex patch spans 48 chunks; 118896 vertices read
-fragments,points,1000,1000000,1,fetch_one,zarr-vectors,s,0.001588,1e-05,200,chunk side 100; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,1000,1000000,42,fetch_one,zarr-vectors,s,0.022716,0.000114,23,chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
-fragments,meshes,1000,1000000,49,fetch_one,zarr-vectors,s,4.069565,0.083796,5,chunk side 100; 2304-vertex patch spans 49 chunks; 64943 vertices read
-fragments,points,8000,1000000,1,fetch_one,zarr-vectors,s,0.003761,9.5e-05,134,chunk side 50; one point spans 1 chunks; 1 vertices read
-fragments,streamlines,8000,1000000,98,fetch_one,zarr-vectors,s,0.018697,0.000556,27,chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
-fragments,meshes,8000,1000000,247,fetch_one,zarr-vectors,s,3.857315,0.045976,5,chunk side 50; 2304-vertex patch spans 247 chunks; 39737 vertices read
