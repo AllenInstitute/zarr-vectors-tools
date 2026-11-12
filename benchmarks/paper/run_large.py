@@ -104,6 +104,10 @@ BLOCKS = [
      "chunk-count sweep (fixed at 10^6)"),
     ("fragments", ("fragments",),
      "fragmentation sweep (fixed at 10^6)"),
+    ("idchunk",   ("idchunk",),
+     "streamlines and meshes chunked by object id"),
+    ("mesh_precomputed", ("mesh_precomputed",),
+     "meshes versus Neuroglancer precomputed, with request counts"),
 ]
 
 # Scratch headroom to ask for before starting.  At 10^7 one STL is

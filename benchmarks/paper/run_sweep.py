@@ -169,6 +169,31 @@ def n_runs(op: str, n: int) -> int:
 # zarr-vectors adapters
 # --------------------------------------------------------------------
 
+# Every read goes through a handle opened once per store, as a viewer or
+# an analysis session holds one: opening a store reads and checks its
+# root metadata, which is a per-session cost, not a per-query one.  The
+# handle caches metadata only -- a whole-store read takes the same time
+# through it as through a path -- so no measured read is served from a
+# previous one.  ``Workspace.clear`` drops the handle with the store, so
+# a store rewritten under the same name is opened afresh.
+_HANDLES: dict = {}
+
+
+def src(store):
+    """An open read handle on ``store``, opened on first use."""
+    key = str(store)
+    h = _HANDLES.get(key)
+    if h is None:
+        h = _HANDLES[key] = open_store(key)
+    return h
+
+
+def forget(prefix) -> None:
+    """Drop every handle on a store under ``prefix``."""
+    prefix = str(prefix)
+    for key in [k for k in _HANDLES if k.startswith(prefix)]:
+        del _HANDLES[key]
+
 def _cs(chunk):
     """Chunk shape: the deployed one unless a sweep asks for another."""
     return H.CHUNK if chunk is None else (float(chunk),) * 3
@@ -510,6 +535,34 @@ def block_timing(rows, sizes, ws):
                                 r)
             add("fetch_one", comp, m, hw, k, detail=_fetch_note(geom))
 
+            # ---- the same reads from an uncompressed store -----------
+            # zstd is the deployed configuration and what the size panels
+            # claim; no codec is the read-speed end of that trade.  An
+            # uncompressed cell is range-readable, so a fragment or one
+            # object's rows arrive as a byte range rather than a decoded
+            # chunk.  Points get an object index here, so a point can be
+            # fetched by id -- the way PLY is -- as well as by position.
+            raw_tag = f"r_{geom}_{n_obj}"
+            raw = ws.store(raw_tag)
+            if geom == "points":
+                zv_write_points(raw, data, codec=None, object_ids=True)
+            else:
+                ZV_WRITERS[geom](raw, data, codec=None)
+            m, hw, k = H.repeat(lambda: _zv_read_full(geom, raw), r)
+            add("read_full", "zarr-vectors (no codec)", m, hw, k)
+            m, hw, k = H.repeat(lambda: _zv_fetch_one(geom, raw, oid, data), r)
+            add("fetch_one", "zarr-vectors (no codec)", m, hw, k, detail=api)
+            if geom == "points":
+                got = read_points(src(raw), object_ids=[int(oid)])["positions"]
+                if not np.array_equal(np.asarray(got).reshape(-1, 3),
+                                      data["positions"][int(oid)][None, :]):
+                    raise AssertionError(f"point {oid} by id came back wrong")
+                m, hw, k = H.repeat(
+                    lambda: read_points(src(raw), object_ids=[int(oid)]), r)
+                add("fetch_one", "zarr-vectors (no codec, by id)", m, hw, k,
+                    detail="object_ids= through the object index")
+            ws.clear(raw_tag)
+
             # ---- read-modify-write one object -----------------------
             if geom in ("points", "streamlines"):
                 if geom == "points":
@@ -544,10 +597,10 @@ def _comp_write(geom, path, data):
 
 def _zv_read_full(geom, store):
     if geom == "points":
-        return read_points(str(store))
+        return read_points(src(store))
     if geom == "streamlines":
-        return read_polylines(str(store))
-    return read_mesh(str(store))
+        return read_polylines(src(store))
+    return read_mesh(src(store))
 
 
 def _comp_read_full(geom, path):
@@ -585,7 +638,7 @@ def mesh_fetch_route(store, oid) -> str:
     global _MESH_BY_OBJECT
     if _MESH_BY_OBJECT is None:
         try:
-            read_mesh(str(store), object_ids=[int(oid)])
+            read_mesh(src(store), object_ids=[int(oid)])
             _MESH_BY_OBJECT = True
         except NotImplementedError:
             _MESH_BY_OBJECT = False
@@ -603,13 +656,13 @@ def _zv_fetch_one(geom, store, oid, data, chunk=None):
     it is.
     """
     if geom == "points":
-        return read_points(str(store),
+        return read_points(src(store),
                            bbox=_point_bbox(data["positions"][int(oid)]))
     if geom == "streamlines":
-        return read_polylines(str(store), object_ids=[int(oid)])
+        return read_polylines(src(store), object_ids=[int(oid)])
     if mesh_fetch_route(store, oid) == "object_ids=":
-        return read_mesh(str(store), object_ids=[int(oid)])
-    got = read_mesh(str(store), chunks=_mesh_object_chunks(data, oid, chunk))
+        return read_mesh(src(store), object_ids=[int(oid)])
+    got = read_mesh(src(store), chunks=_mesh_object_chunks(data, oid, chunk))
     want = data["vertices"][data["object_ids"] == oid]
     keep = np.isin(got["vertices"].view([("", got["vertices"].dtype)] * 3),
                    want.view([("", want.dtype)] * 3))
@@ -643,11 +696,18 @@ def _fetch_note(geom):
     return "no object index: full read"
 
 
+_PLY_OFFSETS: dict = {}
+
+
 def _comp_fetch_one(geom, path, oid, data):
     if geom == "points":
         # Best case available to PLY: the row index is known, so seek
-        # straight to the record instead of reading the file.
-        off = F._ply_data_offset(path)
+        # straight to the record instead of reading the file.  The
+        # header is parsed once per file, as zarr-vectors' store is
+        # opened once per store (see ``src``).
+        off = _PLY_OFFSETS.get(str(path))
+        if off is None:
+            off = _PLY_OFFSETS[str(path)] = F._ply_data_offset(path)
         with open(path, "rb") as fh:
             fh.seek(off + int(oid) * F.PLY_ITEMSIZE)
             return np.frombuffer(fh.read(F.PLY_ITEMSIZE), dtype="<f4")
@@ -677,10 +737,10 @@ def _comp_replace_one(geom, path, oid, data):
 
 def _zv_bbox(geom, store, low, high):
     if geom == "points":
-        return read_points(str(store), bbox=(low, high))
+        return read_points(src(store), bbox=(low, high))
     if geom == "streamlines":
-        return read_polylines(str(store), bbox=(low, high))
-    return read_mesh(str(store), bbox=(low, high))
+        return read_polylines(src(store), bbox=(low, high))
+    return read_mesh(src(store), bbox=(low, high))
 
 
 def _comp_bbox(geom, path, low, high):
@@ -828,6 +888,88 @@ def block_chunks(rows, ws):
 
 
 # --------------------------------------------------------------------
+# Block 6b -- chunked by object id
+# --------------------------------------------------------------------
+#
+# A store can be chunked along an object axis instead of space: the
+# whole domain is one spatial cell, and objects are grouped by id into
+# cells of about IDCHUNK_VERTS vertices (``chunk_by_attribute`` on an
+# ``id_bin`` column).  Fetching one object then reads one cell whatever
+# the store's size; a bounding-box query would have to read them all,
+# which is the trade this layout makes.
+
+IDCHUNK_VERTS = 4096
+IDCHUNK_GEOMS = ("streamlines", "meshes")
+
+
+def zv_write_idchunked(path, geom, data, codec=CODEC):
+    per = max(1, round(IDCHUNK_VERTS * data["n_objects"] / data["n_vertices"]))
+    dom = tuple(float(h - l) for l, h in zip(*H.BOUNDS))
+    if geom == "streamlines":
+        bins = [np.full(len(p), i // per, np.int32)
+                for i, p in enumerate(data["polylines"])]
+        write_polylines(str(path), data["polylines"], chunk_shape=dom,
+                        bin_shape=dom, bounds=H.BOUNDS, compressor=codec,
+                        vertex_attributes={"id_bin": bins},
+                        chunk_by_attribute="id_bin")
+    else:
+        write_mesh(str(path), data["vertices"], data["faces"],
+                   chunk_shape=dom, bin_shape=dom, bounds=H.BOUNDS,
+                   compressor=codec, object_ids=data["object_ids"],
+                   vertex_attributes={
+                       "id_bin": (data["object_ids"] // per).astype(np.int32)},
+                   chunk_by_attribute="id_bin")
+    return per
+
+
+def block_idchunk(rows, sizes, ws):
+    for geom in IDCHUNK_GEOMS:
+        if geom not in TIMED_GEOMS:
+            continue
+        for n_obj in sizes:
+            data = H.GENERATORS[geom](n_obj)
+            nv, no = data["n_vertices"], data["n_objects"]
+            oid = no // 2
+            r = timing_runs(n_obj)
+            log(f"  idchunk {geom:12s} N={n_obj:>9,}  ({nv:,} verts)")
+
+            def add(op, mean, hw, runs, unit="s", detail=""):
+                rows.add(block="idchunk", geometry=geom, n_target=n_obj,
+                         n_vertices=nv, n_objects=no, op=op,
+                         impl="zarr-vectors (chunked by id)", unit=unit,
+                         value=round(mean, 6), ci_hw=round(hw, 6),
+                         n_runs=runs, detail=detail)
+
+            m, hw, k = H.repeat(
+                lambda tag: zv_write_idchunked(ws.store(tag), geom, data),
+                r, setup=lambda i: f"iw_{geom}_{n_obj}_{i}",
+                teardown=lambda tag: ws.clear(tag))
+            add("write_full", m, hw, k)
+            tag = f"i_{geom}_{n_obj}"
+            store = ws.store(tag)
+            per = zv_write_idchunked(store, geom, data)
+            add("bytes", H.path_bytes(store), 0.0, 1, unit="bytes")
+            if geom == "streamlines":
+                def fetch():
+                    return read_polylines(src(store), object_ids=[oid])
+                got = fetch()["polylines"]
+                n_got = sum(len(f) for f in got[0]) if got else 0
+                want = len(data["polylines"][oid])
+            else:
+                def fetch():
+                    return read_mesh(src(store), object_ids=[oid])
+                n_got = len(fetch()["vertices"])
+                want = int((data["object_ids"] == oid).sum())
+            if n_got != want:
+                raise AssertionError(
+                    f"{geom} {oid} by id: {n_got} vertices, expected {want}")
+            m, hw, k = H.repeat(fetch, r)
+            add("fetch_one", m, hw, k,
+                detail=f"object_ids=; {per} objects per cell")
+            ws.clear(tag)
+
+
+# --------------------------------------------------------------------
 # Block 7 -- fragmentation
 # --------------------------------------------------------------------
 #
@@ -923,8 +1065,8 @@ def block_fragments(rows, ws):
         zv_write_points(store, point_data, chunk=side)
         pos = point_data["positions"][len(point_data["positions"]) // 2]
         box = _point_bbox(pos)
-        n_read = len(read_points(str(store), bbox=box)["positions"])
-        m, hw, runs = H.repeat(lambda: read_points(str(store), bbox=box), 7)
+        n_read = len(read_points(src(store), bbox=box)["positions"])
+        m, hw, runs = H.repeat(lambda: read_points(src(store), bbox=box), 7)
         add("points", side, m, hw, runs, 1, n_read, "one point")
         ws.clear("fr_points")
 
@@ -933,11 +1075,11 @@ def block_fragments(rows, ws):
         write_polylines(str(store), lines, chunk_shape=(side,) * 3,
                         bin_shape=(side / 4,) * 3, bounds=H.BOUNDS,
                         compressor=CODEC)
-        got = read_polylines(str(store), object_ids=[line_oid])
+        got = read_polylines(src(store), object_ids=[line_oid])
         n_read = sum(sum(len(f) for f in o) for o in got["polylines"])
         n_frag = sum(len(o) for o in got["polylines"])
         m, hw, runs = H.repeat(
-            lambda: read_polylines(str(store), object_ids=[line_oid]), 7)
+            lambda: read_polylines(src(store), object_ids=[line_oid]), 7)
         add("streamlines", side, m, hw, runs, n_frag, n_read,
             f"{FRAG_LINE_VERTS}-vertex streamline")
         ws.clear("fr_lines")
@@ -950,7 +1092,7 @@ def block_fragments(rows, ws):
             n_read = len(_zv_fetch_one("meshes", store, mesh_oid, mesh_data,
                                        side)["vertices"])
         else:
-            n_read = len(read_mesh(str(store), chunks=chunks)["vertices"])
+            n_read = len(read_mesh(src(store), chunks=chunks)["vertices"])
         m, hw, runs = H.repeat(
             lambda: _zv_fetch_one("meshes", store, mesh_oid, mesh_data, side),
             5)
@@ -1304,12 +1446,12 @@ def block_fidelity(rows, sizes, ws):
 
 def _zv_read_back(geom, store):
     if geom == "points":
-        return read_points(str(store))["positions"]
+        return read_points(src(store))["positions"]
     if geom == "graphs":
         return read_graph(str(store))["positions"]
     if geom == "meshes":
-        return read_mesh(str(store))["vertices"]
-    out = read_polylines(str(store))["polylines"]
+        return read_mesh(src(store))["vertices"]
+    out = read_polylines(src(store))["polylines"]
     return np.concatenate([np.concatenate(frags) for frags in out])
 
 
@@ -1378,7 +1520,7 @@ def main():
     ap.add_argument("--out", default=str(RESULTS / "measurements.csv"))
     ap.add_argument("--blocks",
                     default="storage,timing,spatial,chunks,fragments,"
-                            "chunked,mesh_precomputed,fidelity")
+                            "chunked,mesh_precomputed,idchunk,fidelity")
     ap.add_argument("--geometries", default=None,
                     help="comma-separated subset to measure, e.g. 'points'; "
                          "used with --append to re-measure one geometry")
@@ -1417,6 +1559,12 @@ def main():
         log(f"geometries restricted to {sorted(keep)}")
     rows = Rows()
     ws = H.Workspace(args.workdir)
+    _clear = ws.clear
+
+    def _clear_and_forget(name, _clear=_clear):
+        forget(ws.root / name)
+        _clear(name)
+    ws.clear = _clear_and_forget
     log(f"scratch: {ws.root}")
     try:
         if "storage" in wanted:
@@ -1437,6 +1585,9 @@ def main():
         if "chunked" in wanted:
             log("== versus other chunked formats ==")
             block_chunked(rows, sizes, ws)
+        if "idchunk" in wanted:
+            log("== chunked by object id ==")
+            block_idchunk(rows, sizes, ws)
         if "mesh_precomputed" in wanted:
             log("== meshes versus precomputed ==")
             block_mesh_precomputed(rows, sizes, ws)
