@@ -3,7 +3,7 @@
 This page shows how a store written by zarr-vectors-tools is laid out and
 defines the terms the tools add. The format itself (levels, chunks, bins,
 objects, fragments, manifests, links and attributes) belongs to the core
-package, zarr-vectors-py: see its {zvpy}`core concepts <getting_started/concepts.html>`
+package, zarr-vectors-py: see its {zvpy}`core concepts <explanation/concepts.html>`
 and the {zvpy}`specification <spec/index.html>`.
 
 ## A store on disk
@@ -54,7 +54,7 @@ ingest writes.
 
 Terms of the format (store, level, chunk, bin, object, fragment, manifest,
 link, group, vertex and object attribute) are defined in the core package's
-{zvpy}`core concepts <getting_started/concepts.html>`. These docs name stores
+{zvpy}`core concepts <explanation/concepts.html>`. These docs name stores
 `*.zv`.
 
 Segment ID

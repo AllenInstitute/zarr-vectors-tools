@@ -2,7 +2,7 @@
 
 Zarr Vectors stores open in ngplatform, a Neuroglancer build with a
 `zarr-vectors` data source. The parent package's
-{zvpy}`Neuroglancer guide <tutorials/neuroglancer/overview.html>` covers the
+{zvpy}`Neuroglancer guide <how_to/view_in_neuroglancer.html>` covers the
 viewer: the live site, a local build, opening stores, serving and levels of
 detail. This page covers what zvtools adds.
 
@@ -41,7 +41,7 @@ Convert a large file, with a pyramid, instead.
 
 `zvtools virtual serve` answers with CORS headers, byte ranges and HTML folder
 listings. A converted store needs a server that does the same; see the
-{zvpy}`Neuroglancer guide <tutorials/neuroglancer/overview.html>`. Without
+{zvpy}`Neuroglancer guide <how_to/view_in_neuroglancer.html>`. Without
 folder listings, the viewer cannot find a store's object attributes, and a
 mesh's faces that cross a chunk face are missing.
 

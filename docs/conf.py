@@ -115,7 +115,7 @@ intersphinx_mapping = {
 # extlinks - canonical outbound targets, so the three sibling sites are
 # spelled once here rather than pasted into forty pages.
 #
-#   :zvpy:`getting_started/concepts.html`  -> main library docs
+#   :zvpy:`explanation/concepts.html`  -> main library docs
 #   :zvspec:`05-zarr-store-structure.html` -> the specification site
 #   :zvrepo:`blob/main/schema/README.md`   -> the library source repo
 extlinks = {
