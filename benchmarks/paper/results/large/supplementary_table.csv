@@ -1,382 +1,382 @@
 geometry,vertices,objects,measurement,implementation,value,per_vertex,ratio_to_zarr_vectors,runs,note
-point cloud,1000,1000,bounding-box query (s),PLY,0.00008 ± 0.00000,,0.004,200,box sized to ~100 objects (fraction 0.1)
-point cloud,1000,1000,bounding-box query (s),PLY,0.00008 ± 0.00000,,0.004,200,"equal box, ~100 vertices (fraction 0.1)"
-point cloud,1000,1000,bounding-box query (s),zarr-vectors,0.01872 ± 0.00130,,1.0,27,box sized to ~100 objects (fraction 0.1)
-point cloud,1000,1000,bounding-box query (s),zarr-vectors,0.01893 ± 0.00130,,1.0,27,"equal box, ~100 vertices (fraction 0.1)"
-point cloud,1000,1000,fetch one object (s),PLY,0.00002 ± 0.00000,,0.011,200,fixed-width record: seek + 12-byte read
-point cloud,1000,1000,fetch one object (s),zarr-vectors,0.00188 ± 0.00004,,1.0,200,bbox= around the point; reads 1x the object
-point cloud,1000,1000,fetch one object (s),zarr-vectors (no codec),0.00160 ± 0.00013,,0.85,200,bbox= around the point
-point cloud,1000,1000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00475 ± 0.00005,,2.528,106,object_ids= through the object index
+point cloud,1000,1000,bounding-box query (s),PLY,0.00008 ± 0.00000,,0.021,200,box sized to ~100 objects (fraction 0.1)
+point cloud,1000,1000,bounding-box query (s),PLY,0.00008 ± 0.00000,,0.021,200,"equal box, ~100 vertices (fraction 0.1)"
+point cloud,1000,1000,bounding-box query (s),zarr-vectors,0.00397 ± 0.00009,,1.0,126,box sized to ~100 objects (fraction 0.1)
+point cloud,1000,1000,bounding-box query (s),zarr-vectors,0.00400 ± 0.00013,,1.0,125,"equal box, ~100 vertices (fraction 0.1)"
+point cloud,1000,1000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.024,200,fixed-width record: seek + 12-byte read
+point cloud,1000,1000,fetch one object (s),zarr-vectors,0.00042 ± 0.00004,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,1000,1000,fetch one object (s),zarr-vectors (no codec),0.00036 ± 0.00000,,0.84,200,bbox= around the point
+point cloud,1000,1000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00147 ± 0.00001,,3.476,200,object_ids= through the object index
 point cloud,1000,1000,on-disk size (bytes),CSV,"23,692",23.69,0.68,1,text
 point cloud,1000,1000,on-disk size (bytes),CSV (gzip),"11,945",11.95,0.343,1,text-gzip
 point cloud,1000,1000,on-disk size (bytes),HDF5,"34,014",34.01,0.976,1,chunked
 point cloud,1000,1000,on-disk size (bytes),PLY,"12,118",12.12,0.348,1,binary
 point cloud,1000,1000,on-disk size (bytes),PLY (gzip),"10,900",10.9,0.313,1,binary-gzip
-point cloud,1000,1000,on-disk size (bytes),Parquet,"81,624",81.62,2.341,1,chunked
-point cloud,1000,1000,on-disk size (bytes),plain Zarr,"16,429",16.43,0.471,1,chunked
+point cloud,1000,1000,on-disk size (bytes),Parquet,"76,104",76.1,2.184,1,chunked
+point cloud,1000,1000,on-disk size (bytes),plain Zarr,"17,380",17.38,0.499,1,chunked
 point cloud,1000,1000,on-disk size (bytes),precomputed (spatial only),"21,391",21.39,0.614,1,chunked
 point cloud,1000,1000,on-disk size (bytes),precomputed (spatial only) (gzip),"18,617",18.62,0.534,1,chunked-gzip
 point cloud,1000,1000,on-disk size (bytes),precomputed annotations,"33,391",33.39,0.958,1,chunked
-point cloud,1000,1000,on-disk size (bytes),zarr-vectors (no codec),"153,219",153.22,4.395,1,
-point cloud,1000,1000,on-disk size (bytes),zarr-vectors (zstd),"34,865",34.87,1.0,1,
-point cloud,1000,1000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","37,223",37.22,1.068,1,
-point cloud,1000,1000,read whole dataset (s),PLY,0.00003 ± 0.00000,,0.006,200,
-point cloud,1000,1000,read whole dataset (s),zarr-vectors,0.00508 ± 0.00006,,1.0,99,
-point cloud,1000,1000,read whole dataset (s),zarr-vectors (no codec),0.00550 ± 0.00025,,1.083,91,
-point cloud,1000,1000,replace one object (s),PLY,0.00005 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
-point cloud,1000,1000,replace one object (s),zarr-vectors,0.02155 ± 0.00012,,1.0,24,VertexRef.from_position
+point cloud,1000,1000,on-disk size (bytes),zarr-vectors (no codec),"153,198",153.2,4.397,1,
+point cloud,1000,1000,on-disk size (bytes),zarr-vectors (zstd),"34,844",34.84,1.0,1,
+point cloud,1000,1000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","37,202",37.2,1.068,1,
+point cloud,1000,1000,read whole dataset (s),PLY,0.00003 ± 0.00000,,0.008,200,
+point cloud,1000,1000,read whole dataset (s),zarr-vectors,0.00379 ± 0.00003,,1.0,132,
+point cloud,1000,1000,read whole dataset (s),zarr-vectors (no codec),0.00293 ± 0.00009,,0.771,171,
+point cloud,1000,1000,replace one object (s),PLY,0.00004 ± 0.00000,,0.004,200,in-place seek + 12-byte overwrite
+point cloud,1000,1000,replace one object (s),zarr-vectors,0.01099 ± 0.00049,,1.0,46,"VertexRef.from_position, in place"
 point cloud,1000,1000,write whole dataset (s),PLY,0.00009 ± 0.00001,,0.001,200,
-point cloud,1000,1000,write whole dataset (s),zarr-vectors,0.10831 ± 0.02413,,1.0,5,
-point cloud,10000,10000,bounding-box query (s),PLY,0.00036 ± 0.00000,,0.07,200,box sized to ~100 objects (fraction 0.01)
-point cloud,10000,10000,bounding-box query (s),PLY,0.00036 ± 0.00000,,0.069,200,"equal box, ~100 vertices (fraction 0.01)"
-point cloud,10000,10000,bounding-box query (s),zarr-vectors,0.00516 ± 0.00017,,1.0,97,box sized to ~100 objects (fraction 0.01)
-point cloud,10000,10000,bounding-box query (s),zarr-vectors,0.00520 ± 0.00012,,1.0,97,"equal box, ~100 vertices (fraction 0.01)"
-point cloud,10000,10000,fetch one object (s),PLY,0.00002 ± 0.00000,,0.011,200,fixed-width record: seek + 12-byte read
-point cloud,10000,10000,fetch one object (s),zarr-vectors,0.00184 ± 0.00003,,1.0,200,bbox= around the point; reads 1x the object
-point cloud,10000,10000,fetch one object (s),zarr-vectors (no codec),0.00177 ± 0.00003,,0.96,200,bbox= around the point
-point cloud,10000,10000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00878 ± 0.00006,,4.77,57,object_ids= through the object index
+point cloud,1000,1000,write whole dataset (s),zarr-vectors,0.08768 ± 0.01578,,1.0,6,
+point cloud,10000,10000,bounding-box query (s),PLY,0.00036 ± 0.00000,,0.284,200,box sized to ~100 objects (fraction 0.01)
+point cloud,10000,10000,bounding-box query (s),PLY,0.00036 ± 0.00000,,0.281,200,"equal box, ~100 vertices (fraction 0.01)"
+point cloud,10000,10000,bounding-box query (s),zarr-vectors,0.00127 ± 0.00002,,1.0,200,box sized to ~100 objects (fraction 0.01)
+point cloud,10000,10000,bounding-box query (s),zarr-vectors,0.00128 ± 0.00005,,1.0,200,"equal box, ~100 vertices (fraction 0.01)"
+point cloud,10000,10000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.025,200,fixed-width record: seek + 12-byte read
+point cloud,10000,10000,fetch one object (s),zarr-vectors,0.00040 ± 0.00000,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,10000,10000,fetch one object (s),zarr-vectors (no codec),0.00036 ± 0.00000,,0.888,200,bbox= around the point
+point cloud,10000,10000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00185 ± 0.00001,,4.603,200,object_ids= through the object index
 point cloud,10000,10000,on-disk size (bytes),CSV,"236,743",23.67,1.645,1,text
-point cloud,10000,10000,on-disk size (bytes),CSV (gzip),"111,611",11.16,0.775,1,text-gzip
+point cloud,10000,10000,on-disk size (bytes),CSV (gzip),"111,611",11.16,0.776,1,text-gzip
 point cloud,10000,10000,on-disk size (bytes),HDF5,"133,128",13.31,0.925,1,chunked
 point cloud,10000,10000,on-disk size (bytes),PLY,"120,119",12.01,0.835,1,binary
 point cloud,10000,10000,on-disk size (bytes),PLY (gzip),"107,885",10.79,0.75,1,binary-gzip
-point cloud,10000,10000,on-disk size (bytes),Parquet,"218,408",21.84,1.517,1,chunked
-point cloud,10000,10000,on-disk size (bytes),plain Zarr,"117,088",11.71,0.813,1,chunked
+point cloud,10000,10000,on-disk size (bytes),Parquet,"213,288",21.33,1.482,1,chunked
+point cloud,10000,10000,on-disk size (bytes),plain Zarr,"112,147",11.21,0.779,1,chunked
 point cloud,10000,10000,on-disk size (bytes),precomputed (spatial only),"201,392",20.14,1.399,1,chunked
 point cloud,10000,10000,on-disk size (bytes),precomputed (spatial only) (gzip),"142,176",14.22,0.988,1,chunked-gzip
 point cloud,10000,10000,on-disk size (bytes),precomputed annotations,"321,392",32.14,2.233,1,chunked
-point cloud,10000,10000,on-disk size (bytes),zarr-vectors (no codec),"261,220",26.12,1.815,1,
-point cloud,10000,10000,on-disk size (bytes),zarr-vectors (zstd),"143,936",14.39,1.0,1,
-point cloud,10000,10000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","186,783",18.68,1.298,1,
-point cloud,10000,10000,read whole dataset (s),PLY,0.00004 ± 0.00000,,0.007,200,
-point cloud,10000,10000,read whole dataset (s),zarr-vectors,0.00550 ± 0.00005,,1.0,91,
-point cloud,10000,10000,read whole dataset (s),zarr-vectors (no codec),0.00489 ± 0.00018,,0.889,103,
-point cloud,10000,10000,replace one object (s),PLY,0.00005 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
-point cloud,10000,10000,replace one object (s),zarr-vectors,0.02240 ± 0.00013,,1.0,23,VertexRef.from_position
+point cloud,10000,10000,on-disk size (bytes),zarr-vectors (no codec),"261,199",26.12,1.815,1,
+point cloud,10000,10000,on-disk size (bytes),zarr-vectors (zstd),"143,915",14.39,1.0,1,
+point cloud,10000,10000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","186,762",18.68,1.298,1,
+point cloud,10000,10000,read whole dataset (s),PLY,0.00004 ± 0.00000,,0.011,200,
+point cloud,10000,10000,read whole dataset (s),zarr-vectors,0.00370 ± 0.00003,,1.0,136,
+point cloud,10000,10000,read whole dataset (s),zarr-vectors (no codec),0.00271 ± 0.00004,,0.732,185,
+point cloud,10000,10000,replace one object (s),PLY,0.00003 ± 0.00000,,0.003,200,in-place seek + 12-byte overwrite
+point cloud,10000,10000,replace one object (s),zarr-vectors,0.00874 ± 0.00009,,1.0,58,"VertexRef.from_position, in place"
 point cloud,10000,10000,write whole dataset (s),PLY,0.00011 ± 0.00001,,0.001,200,
-point cloud,10000,10000,write whole dataset (s),zarr-vectors,0.14141 ± 0.03750,,1.0,5,
-point cloud,100000,100000,bounding-box query (s),PLY,0.00303 ± 0.00000,,0.897,165,box sized to ~100 objects (fraction 0.001)
-point cloud,100000,100000,bounding-box query (s),PLY,0.00303 ± 0.00001,,0.876,165,"equal box, ~100 vertices (fraction 0.001)"
-point cloud,100000,100000,bounding-box query (s),zarr-vectors,0.00338 ± 0.00005,,1.0,149,box sized to ~100 objects (fraction 0.001)
-point cloud,100000,100000,bounding-box query (s),zarr-vectors,0.00346 ± 0.00005,,1.0,145,"equal box, ~100 vertices (fraction 0.001)"
-point cloud,100000,100000,fetch one object (s),PLY,0.00002 ± 0.00000,,0.011,200,fixed-width record: seek + 12-byte read
-point cloud,100000,100000,fetch one object (s),zarr-vectors,0.00183 ± 0.00002,,1.0,200,bbox= around the point; reads 1x the object
-point cloud,100000,100000,fetch one object (s),zarr-vectors (no codec),0.00195 ± 0.00004,,1.065,200,bbox= around the point
-point cloud,100000,100000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00933 ± 0.00008,,5.109,54,object_ids= through the object index
+point cloud,10000,10000,write whole dataset (s),zarr-vectors,0.10490 ± 0.00558,,1.0,5,
+point cloud,100000,100000,bounding-box query (s),PLY,0.00303 ± 0.00001,,4.568,165,box sized to ~100 objects (fraction 0.001)
+point cloud,100000,100000,bounding-box query (s),PLY,0.00304 ± 0.00001,,4.525,165,"equal box, ~100 vertices (fraction 0.001)"
+point cloud,100000,100000,bounding-box query (s),zarr-vectors,0.00066 ± 0.00003,,1.0,200,box sized to ~100 objects (fraction 0.001)
+point cloud,100000,100000,bounding-box query (s),zarr-vectors,0.00067 ± 0.00004,,1.0,200,"equal box, ~100 vertices (fraction 0.001)"
+point cloud,100000,100000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.025,200,fixed-width record: seek + 12-byte read
+point cloud,100000,100000,fetch one object (s),zarr-vectors,0.00041 ± 0.00000,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,100000,100000,fetch one object (s),zarr-vectors (no codec),0.00040 ± 0.00002,,0.983,200,bbox= around the point
+point cloud,100000,100000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00220 ± 0.00001,,5.429,200,object_ids= through the object index
 point cloud,100000,100000,on-disk size (bytes),CSV,"2,366,911",23.67,2.154,1,text
 point cloud,100000,100000,on-disk size (bytes),CSV (gzip),"1,103,110",11.03,1.004,1,text-gzip
 point cloud,100000,100000,on-disk size (bytes),HDF5,"1,083,140",10.83,0.986,1,chunked
 point cloud,100000,100000,on-disk size (bytes),PLY,"1,200,120",12.0,1.092,1,binary
 point cloud,100000,100000,on-disk size (bytes),PLY (gzip),"1,077,657",10.78,0.981,1,binary-gzip
-point cloud,100000,100000,on-disk size (bytes),Parquet,"1,490,998",14.91,1.357,1,chunked
-point cloud,100000,100000,on-disk size (bytes),plain Zarr,"1,066,997",10.67,0.971,1,chunked
+point cloud,100000,100000,on-disk size (bytes),Parquet,"1,649,260",16.49,1.501,1,chunked
+point cloud,100000,100000,on-disk size (bytes),plain Zarr,"1,019,243",10.19,0.928,1,chunked
 point cloud,100000,100000,on-disk size (bytes),precomputed (spatial only),"2,001,393",20.01,1.822,1,chunked
 point cloud,100000,100000,on-disk size (bytes),precomputed (spatial only) (gzip),"1,321,672",13.22,1.203,1,chunked-gzip
 point cloud,100000,100000,on-disk size (bytes),precomputed annotations,"3,201,393",32.01,2.914,1,chunked
-point cloud,100000,100000,on-disk size (bytes),zarr-vectors (no codec),"1,341,221",13.41,1.221,1,
-point cloud,100000,100000,on-disk size (bytes),zarr-vectors (zstd),"1,098,619",10.99,1.0,1,
-point cloud,100000,100000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","1,643,633",16.44,1.496,1,
-point cloud,100000,100000,read whole dataset (s),PLY,0.00014 ± 0.00000,,0.021,200,
-point cloud,100000,100000,read whole dataset (s),zarr-vectors,0.00661 ± 0.00020,,1.0,76,
-point cloud,100000,100000,read whole dataset (s),zarr-vectors (no codec),0.00504 ± 0.00017,,0.762,100,
-point cloud,100000,100000,replace one object (s),PLY,0.00005 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
-point cloud,100000,100000,replace one object (s),zarr-vectors,0.02262 ± 0.00032,,1.0,23,VertexRef.from_position
+point cloud,100000,100000,on-disk size (bytes),zarr-vectors (no codec),"1,341,200",13.41,1.221,1,
+point cloud,100000,100000,on-disk size (bytes),zarr-vectors (zstd),"1,098,598",10.99,1.0,1,
+point cloud,100000,100000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","1,643,612",16.44,1.496,1,
+point cloud,100000,100000,read whole dataset (s),PLY,0.00013 ± 0.00000,,0.031,200,
+point cloud,100000,100000,read whole dataset (s),zarr-vectors,0.00435 ± 0.00015,,1.0,116,
+point cloud,100000,100000,read whole dataset (s),zarr-vectors (no codec),0.00326 ± 0.00009,,0.75,154,
+point cloud,100000,100000,replace one object (s),PLY,0.00002 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
+point cloud,100000,100000,replace one object (s),zarr-vectors,0.00962 ± 0.00027,,1.0,52,"VertexRef.from_position, in place"
 point cloud,100000,100000,round-trip max |Δ| (store units),PLY,exact,,,1,100000 in / 100000 out
 point cloud,100000,100000,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,100000 in / 100000 out
-point cloud,100000,100000,write whole dataset (s),PLY,0.00030 ± 0.00001,,0.002,200,
-point cloud,100000,100000,write whole dataset (s),zarr-vectors,0.15526 ± 0.00705,,1.0,5,
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.03154 ± 0.00032,,11.759,16,box sized to ~100 objects (fraction 0.0001)
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.03200 ± 0.00031,,11.563,16,volume fraction 0.001
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.03303 ± 0.00011,,4.875,16,volume fraction 0.01
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.03793 ± 0.00015,,1.384,14,volume fraction 0.1
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.04254 ± 0.00025,,0.502,12,volume fraction 0.5
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.04288 ± 0.00132,,0.669,12,volume fraction 1.0
-point cloud,1000000,1000000,bounding-box query (s),PLY,0.03156 ± 0.00038,,11.472,16,"equal box, ~100 vertices (fraction 0.0001)"
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00268 ± 0.00005,,1.0,187,box sized to ~100 objects (fraction 0.0001)
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00277 ± 0.00004,,1.0,181,volume fraction 0.001
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00677 ± 0.00015,,1.0,74,volume fraction 0.01
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.02740 ± 0.00174,,1.0,19,volume fraction 0.1
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.08471 ± 0.01384,,1.0,8,volume fraction 0.5
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.06413 ± 0.00082,,1.0,8,volume fraction 1.0
-point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00275 ± 0.00005,,1.0,183,"equal box, ~100 vertices (fraction 0.0001)"
-point cloud,1000000,1000000,fetch one object (s),PLY,0.00002 ± 0.00000,,0.01,200,fixed-width record: seek + 12-byte read
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00298 ± 0.00003,,1.0,168,8 chunks over the domain; chunk side 500; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00231 ± 0.00005,,1.0,200,64 chunks over the domain; chunk side 250; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00219 ± 0.00003,,1.0,200,125 chunks over the domain; chunk side 200; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00224 ± 0.00003,,1.0,200,512 chunks over the domain; chunk side 125; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00235 ± 0.00002,,1.0,200,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00400 ± 0.00005,,1.0,125,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00295 ± 0.00002,,1.0,170,crosses 8 chunks; chunk side 500; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00224 ± 0.00002,,1.0,200,crosses 64 chunks; chunk side 250; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00212 ± 0.00001,,1.0,200,crosses 125 chunks; chunk side 200; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00207 ± 0.00002,,1.0,200,crosses 512 chunks; chunk side 125; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00218 ± 0.00002,,1.0,200,crosses 1000 chunks; chunk side 100; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00398 ± 0.00008,,1.0,126,crosses 8000 chunks; chunk side 50; one point spans 1 chunks; 1 vertices read
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00208 ± 0.00003,,1.0,200,bbox= around the point; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors (no codec),0.00190 ± 0.00002,,0.914,200,bbox= around the point
-point cloud,1000000,1000000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00924 ± 0.00004,,4.438,55,object_ids= through the object index
+point cloud,100000,100000,write whole dataset (s),PLY,0.00026 ± 0.00002,,0.002,200,
+point cloud,100000,100000,write whole dataset (s),zarr-vectors,0.11827 ± 0.01145,,1.0,5,
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.03143 ± 0.00005,,53.72,16,box sized to ~100 objects (fraction 0.0001)
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.03196 ± 0.00051,,37.556,16,volume fraction 0.001
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.03289 ± 0.00003,,15.455,16,volume fraction 0.01
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.03783 ± 0.00010,,3.775,14,volume fraction 0.1
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.04259 ± 0.00025,,1.043,12,volume fraction 0.5
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.04216 ± 0.00012,,0.769,12,volume fraction 1.0
+point cloud,1000000,1000000,bounding-box query (s),PLY,0.03156 ± 0.00014,,52.691,16,"equal box, ~100 vertices (fraction 0.0001)"
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00059 ± 0.00002,,1.0,200,box sized to ~100 objects (fraction 0.0001)
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00085 ± 0.00003,,1.0,200,volume fraction 0.001
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00213 ± 0.00002,,1.0,200,volume fraction 0.01
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.01002 ± 0.00015,,1.0,50,volume fraction 0.1
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.04084 ± 0.00194,,1.0,13,volume fraction 0.5
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.05483 ± 0.00021,,1.0,10,volume fraction 1.0
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00060 ± 0.00002,,1.0,200,"equal box, ~100 vertices (fraction 0.0001)"
+point cloud,1000000,1000000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.023,200,fixed-width record: seek + 12-byte read
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00083 ± 0.00002,,1.0,200,8 chunks over the domain; chunk side 500; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00052 ± 0.00002,,1.0,200,64 chunks over the domain; chunk side 250; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00050 ± 0.00002,,1.0,200,125 chunks over the domain; chunk side 200; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00049 ± 0.00003,,1.0,200,512 chunks over the domain; chunk side 125; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00051 ± 0.00002,,1.0,200,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00112 ± 0.00003,,1.0,200,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00080 ± 0.00002,,1.0,200,crosses 8 chunks; chunk side 500; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00050 ± 0.00001,,1.0,200,crosses 64 chunks; chunk side 250; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00047 ± 0.00001,,1.0,200,crosses 125 chunks; chunk side 200; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00048 ± 0.00002,,1.0,200,crosses 512 chunks; chunk side 125; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00051 ± 0.00001,,1.0,200,crosses 1000 chunks; chunk side 100; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00115 ± 0.00001,,1.0,200,crosses 8000 chunks; chunk side 50; one point spans 1 chunks; 1 vertices read
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00043 ± 0.00000,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors (no codec),0.00064 ± 0.00001,,1.484,200,bbox= around the point
+point cloud,1000000,1000000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00223 ± 0.00000,,5.208,200,object_ids= through the object index
 point cloud,1000000,1000000,on-disk size (bytes),CSV,"23,667,344",23.67,2.233,1,text
 point cloud,1000000,1000000,on-disk size (bytes),CSV (gzip),"11,016,729",11.02,1.039,1,text-gzip
 point cloud,1000000,1000000,on-disk size (bytes),HDF5,"10,613,271",10.61,1.001,1,chunked
 point cloud,1000000,1000000,on-disk size (bytes),PLY,"12,000,121",12.0,1.132,1,binary
 point cloud,1000000,1000000,on-disk size (bytes),PLY (gzip),"10,774,243",10.77,1.017,1,binary-gzip
-point cloud,1000000,1000000,on-disk size (bytes),Parquet,"15,162,231",15.16,1.431,1,chunked
-point cloud,1000000,1000000,on-disk size (bytes),plain Zarr,"10,567,501",10.57,0.997,1,chunked
+point cloud,1000000,1000000,on-disk size (bytes),Parquet,"17,014,941",17.01,1.605,1,chunked
+point cloud,1000000,1000000,on-disk size (bytes),plain Zarr,"10,071,300",10.07,0.95,1,chunked
 point cloud,1000000,1000000,on-disk size (bytes),precomputed (spatial only),"20,001,394",20.0,1.887,1,chunked
 point cloud,1000000,1000000,on-disk size (bytes),precomputed (spatial only) (gzip),"12,788,723",12.79,1.207,1,chunked-gzip
 point cloud,1000000,1000000,on-disk size (bytes),precomputed annotations,"32,001,394",32.0,3.019,1,chunked
-point cloud,1000000,1000000,on-disk size (bytes),zarr-vectors (no codec),"12,141,222",12.14,1.146,1,
-point cloud,1000000,1000000,on-disk size (bytes),zarr-vectors (zstd),"10,598,371",10.6,1.0,1,
-point cloud,1000000,1000000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","16,322,837",16.32,1.54,1,
-point cloud,1000000,1000000,read whole dataset (s),PLY,0.00209 ± 0.00001,,0.113,200,
-point cloud,1000000,1000000,read whole dataset (s),zarr-vectors,0.01849 ± 0.00039,,1.0,28,
-point cloud,1000000,1000000,read whole dataset (s),zarr-vectors (no codec),0.00884 ± 0.00007,,0.478,57,
-point cloud,1000000,1000000,replace one object (s),PLY,0.00005 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
-point cloud,1000000,1000000,replace one object (s),zarr-vectors,0.02383 ± 0.00028,,1.0,21,VertexRef.from_position
-point cloud,1000000,1000000,write whole dataset (s),PLY,0.00303 ± 0.00006,,0.01,165,
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.30917 ± 0.00226,,1.0,5,
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.22051 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.25252 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.31766 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.61475 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.98179 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,6.05405 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-point cloud,10000000,10000000,bounding-box query (s),PLY,0.37629 ± 0.00065,,122.369,8,box sized to ~100 objects (fraction 1e-05)
-point cloud,10000000,10000000,bounding-box query (s),PLY,0.31735 ± 0.00035,,100.237,8,"equal box, ~100 vertices (fraction 1e-05)"
-point cloud,10000000,10000000,bounding-box query (s),zarr-vectors,0.00308 ± 0.00015,,1.0,163,box sized to ~100 objects (fraction 1e-05)
-point cloud,10000000,10000000,bounding-box query (s),zarr-vectors,0.00317 ± 0.00016,,1.0,158,"equal box, ~100 vertices (fraction 1e-05)"
-point cloud,10000000,10000000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.004,200,fixed-width record: seek + 12-byte read
-point cloud,10000000,10000000,fetch one object (s),zarr-vectors,0.00247 ± 0.00002,,1.0,200,bbox= around the point; reads 1x the object
-point cloud,10000000,10000000,fetch one object (s),zarr-vectors (no codec),0.00237 ± 0.00004,,0.958,200,bbox= around the point
-point cloud,10000000,10000000,fetch one object (s),"zarr-vectors (no codec, by id)",0.01013 ± 0.00011,,4.095,50,object_ids= through the object index
+point cloud,1000000,1000000,on-disk size (bytes),zarr-vectors (no codec),"12,141,201",12.14,1.146,1,
+point cloud,1000000,1000000,on-disk size (bytes),zarr-vectors (zstd),"10,598,350",10.6,1.0,1,
+point cloud,1000000,1000000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","16,322,816",16.32,1.54,1,
+point cloud,1000000,1000000,read whole dataset (s),PLY,0.00215 ± 0.00006,,0.225,200,
+point cloud,1000000,1000000,read whole dataset (s),zarr-vectors,0.00954 ± 0.00014,,1.0,53,
+point cloud,1000000,1000000,read whole dataset (s),zarr-vectors (no codec),0.00735 ± 0.00006,,0.77,69,
+point cloud,1000000,1000000,replace one object (s),PLY,0.00002 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
+point cloud,1000000,1000000,replace one object (s),zarr-vectors,0.01008 ± 0.00013,,1.0,50,"VertexRef.from_position, in place"
+point cloud,1000000,1000000,write whole dataset (s),PLY,0.00297 ± 0.00001,,0.017,169,
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.17166 ± 0.01055,,1.0,5,
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.10357 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.12054 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.15575 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.36950 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.59154 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,3.83215 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+point cloud,10000000,10000000,bounding-box query (s),PLY,0.37684 ± 0.00135,,416.857,8,box sized to ~100 objects (fraction 1e-05)
+point cloud,10000000,10000000,bounding-box query (s),PLY,0.32148 ± 0.00655,,352.112,8,"equal box, ~100 vertices (fraction 1e-05)"
+point cloud,10000000,10000000,bounding-box query (s),zarr-vectors,0.00090 ± 0.00005,,1.0,200,box sized to ~100 objects (fraction 1e-05)
+point cloud,10000000,10000000,bounding-box query (s),zarr-vectors,0.00091 ± 0.00005,,1.0,200,"equal box, ~100 vertices (fraction 1e-05)"
+point cloud,10000000,10000000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.015,200,fixed-width record: seek + 12-byte read
+point cloud,10000000,10000000,fetch one object (s),zarr-vectors,0.00066 ± 0.00001,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,10000000,10000000,fetch one object (s),zarr-vectors (no codec),0.00304 ± 0.00003,,4.6,165,bbox= around the point
+point cloud,10000000,10000000,fetch one object (s),"zarr-vectors (no codec, by id)",0.00270 ± 0.00001,,4.077,186,object_ids= through the object index
 point cloud,10000000,10000000,on-disk size (bytes),CSV,"236,678,016",23.67,2.262,1,text
 point cloud,10000000,10000000,on-disk size (bytes),CSV (gzip),"110,146,919",11.01,1.053,1,text-gzip
 point cloud,10000000,10000000,on-disk size (bytes),HDF5,"105,918,049",10.59,1.012,1,chunked
 point cloud,10000000,10000000,on-disk size (bytes),PLY,"120,000,122",12.0,1.147,1,binary
 point cloud,10000000,10000000,on-disk size (bytes),PLY (gzip),"107,744,877",10.77,1.03,1,binary-gzip
-point cloud,10000000,10000000,on-disk size (bytes),Parquet,"160,188,785",16.02,1.531,1,chunked
-point cloud,10000000,10000000,on-disk size (bytes),plain Zarr,"105,528,479",10.55,1.008,1,chunked
+point cloud,10000000,10000000,on-disk size (bytes),Parquet,"179,960,256",18.0,1.72,1,chunked
+point cloud,10000000,10000000,on-disk size (bytes),plain Zarr,"99,853,664",9.99,0.954,1,chunked
 point cloud,10000000,10000000,on-disk size (bytes),precomputed (spatial only),"200,001,395",20.0,1.911,1,chunked
 point cloud,10000000,10000000,on-disk size (bytes),precomputed (spatial only) (gzip),"127,033,736",12.7,1.214,1,chunked-gzip
-point cloud,10000000,10000000,on-disk size (bytes),zarr-vectors (no codec),"120,142,321",12.01,1.148,1,
-point cloud,10000000,10000000,on-disk size (bytes),zarr-vectors (zstd),"104,639,470",10.46,1.0,1,
-point cloud,10000000,10000000,read whole dataset (s),PLY,0.08597 ± 0.00052,,0.387,6,
-point cloud,10000000,10000000,read whole dataset (s),zarr-vectors,0.22188 ± 0.02089,,1.0,3,
-point cloud,10000000,10000000,read whole dataset (s),zarr-vectors (no codec),0.04635 ± 0.00151,,0.209,11,
-point cloud,10000000,10000000,replace one object (s),PLY,0.00005 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
-point cloud,10000000,10000000,replace one object (s),zarr-vectors,0.03090 ± 0.00111,,1.0,17,VertexRef.from_position
-point cloud,10000000,10000000,write whole dataset (s),PLY,0.09047 ± 0.00140,,0.036,6,
-point cloud,10000000,10000000,write whole dataset (s),zarr-vectors,2.49931 ± 0.03664,,1.0,3,
-streamlines,972,83,bounding-box query (s),TRK,0.00123 ± 0.00002,,0.057,200,box sized to ~100 objects (fraction 1.0)
-streamlines,972,83,bounding-box query (s),TRK,0.00119 ± 0.00003,,0.079,200,"equal box, ~100 vertices (fraction 0.10288066)"
-streamlines,972,83,bounding-box query (s),zarr-vectors,0.02175 ± 0.00017,,1.0,23,box sized to ~100 objects (fraction 1.0)
-streamlines,972,83,bounding-box query (s),zarr-vectors,0.01503 ± 0.00054,,1.0,34,"equal box, ~100 vertices (fraction 0.10288066)"
-streamlines,972,83,fetch one object (s),TRK,0.00101 ± 0.00001,,0.131,200,variable-length records: full scan
-streamlines,972,83,fetch one object (s),zarr-vectors,0.00771 ± 0.00015,,1.0,65,object_ids=; reads 1x the object
-streamlines,972,83,fetch one object (s),zarr-vectors (no codec),0.00737 ± 0.00003,,0.957,68,object_ids=
-streamlines,972,83,on-disk size (bytes),TRK,"12,996",13.37,0.416,1,binary
-streamlines,972,83,on-disk size (bytes),TRK (gzip),"10,695",11.0,0.343,1,binary-gzip
-streamlines,972,83,on-disk size (bytes),TRX,"12,513",12.87,0.401,1,binary
-streamlines,972,83,on-disk size (bytes),TRX (gzip),"10,924",11.24,0.35,1,binary-gzip
-streamlines,972,83,on-disk size (bytes),TRX deflate,"11,035",11.35,0.354,1,binary
-streamlines,972,83,on-disk size (bytes),TRX deflate (gzip),"10,946",11.26,0.351,1,binary-gzip
-streamlines,972,83,on-disk size (bytes),zarr-vectors (no codec),"32,941",33.89,1.055,1,
-streamlines,972,83,on-disk size (bytes),zarr-vectors (zstd),"31,210",32.11,1.0,1,
-streamlines,972,83,read whole dataset (s),TRK,0.00109 ± 0.00000,,0.085,200,
-streamlines,972,83,read whole dataset (s),zarr-vectors,0.01279 ± 0.00126,,1.0,40,
-streamlines,972,83,read whole dataset (s),zarr-vectors (no codec),0.01408 ± 0.00012,,1.101,36,
-streamlines,972,83,replace one object (s),TRK,0.00308 ± 0.00012,,0.048,163,variable-length records: full read-modify-rewrite
-streamlines,972,83,replace one object (s),zarr-vectors,0.06445 ± 0.00535,,1.0,8,edit_fragment via object manifest
-streamlines,972,83,write whole dataset (s),TRK,0.00213 ± 0.00029,,0.017,200,
-streamlines,972,83,write whole dataset (s),zarr-vectors,0.12775 ± 0.03014,,1.0,5,
-streamlines,9720,833,bounding-box query (s),TRK,0.00557 ± 0.00002,,0.206,90,box sized to ~100 objects (fraction 0.120048)
-streamlines,9720,833,bounding-box query (s),TRK,0.00550 ± 0.00006,,0.299,91,"equal box, ~100 vertices (fraction 0.01028807)"
-streamlines,9720,833,bounding-box query (s),zarr-vectors,0.02710 ± 0.00209,,1.0,19,box sized to ~100 objects (fraction 0.120048)
-streamlines,9720,833,bounding-box query (s),zarr-vectors,0.01843 ± 0.00112,,1.0,28,"equal box, ~100 vertices (fraction 0.01028807)"
-streamlines,9720,833,fetch one object (s),TRK,0.00443 ± 0.00013,,0.54,113,variable-length records: full scan
-streamlines,9720,833,fetch one object (s),zarr-vectors,0.00820 ± 0.00011,,1.0,61,object_ids=; reads 1x the object
-streamlines,9720,833,fetch one object (s),zarr-vectors (no codec),0.00781 ± 0.00005,,0.952,65,object_ids=
-streamlines,9720,833,on-disk size (bytes),TRK,"120,972",12.45,0.75,1,binary
-streamlines,9720,833,on-disk size (bytes),TRK (gzip),"106,113",10.92,0.658,1,binary-gzip
-streamlines,9720,833,on-disk size (bytes),TRX,"120,491",12.4,0.747,1,binary
-streamlines,9720,833,on-disk size (bytes),TRX (gzip),"106,058",10.91,0.658,1,binary-gzip
-streamlines,9720,833,on-disk size (bytes),TRX deflate,"105,871",10.89,0.657,1,binary
-streamlines,9720,833,on-disk size (bytes),TRX deflate (gzip),"105,877",10.89,0.657,1,binary-gzip
-streamlines,9720,833,on-disk size (bytes),zarr-vectors (no codec),"194,506",20.01,1.206,1,
-streamlines,9720,833,on-disk size (bytes),zarr-vectors (zstd),"161,232",16.59,1.0,1,
-streamlines,9720,833,read whole dataset (s),TRK,0.00522 ± 0.00009,,0.291,96,
-streamlines,9720,833,read whole dataset (s),zarr-vectors,0.01795 ± 0.00260,,1.0,28,
-streamlines,9720,833,read whole dataset (s),zarr-vectors (no codec),0.01795 ± 0.00149,,1.0,28,
-streamlines,9720,833,replace one object (s),TRK,0.01873 ± 0.00168,,0.273,27,variable-length records: full read-modify-rewrite
-streamlines,9720,833,replace one object (s),zarr-vectors,0.06852 ± 0.00429,,1.0,8,edit_fragment via object manifest
-streamlines,9720,833,write whole dataset (s),TRK,0.01311 ± 0.00004,,0.061,39,
-streamlines,9720,833,write whole dataset (s),zarr-vectors,0.21538 ± 0.01032,,1.0,5,
-streamlines,95747,8333,bounding-box query (s),TRK,0.03884 ± 0.00028,,1.122,13,box sized to ~100 objects (fraction 0.012)
-streamlines,95747,8333,bounding-box query (s),TRK,0.03911 ± 0.00070,,1.394,13,"equal box, ~100 vertices (fraction 0.00104442)"
-streamlines,95747,8333,bounding-box query (s),zarr-vectors,0.03460 ± 0.00329,,1.0,15,box sized to ~100 objects (fraction 0.012)
-streamlines,95747,8333,bounding-box query (s),zarr-vectors,0.02807 ± 0.00174,,1.0,18,"equal box, ~100 vertices (fraction 0.00104442)"
-streamlines,95747,8333,fetch one object (s),TRK,0.03025 ± 0.00216,,3.867,17,variable-length records: full scan
-streamlines,95747,8333,fetch one object (s),zarr-vectors,0.00782 ± 0.00028,,1.0,64,object_ids=; reads 1x the object
-streamlines,95747,8333,fetch one object (s),zarr-vectors (no codec),0.00972 ± 0.00010,,1.242,52,object_ids=
-streamlines,95747,8333,on-disk size (bytes),TRK,"1,183,296",12.36,0.98,1,binary
-streamlines,95747,8333,on-disk size (bytes),TRK (gzip),"1,045,437",10.92,0.866,1,binary-gzip
-streamlines,95747,8333,on-disk size (bytes),TRX,"1,182,817",12.35,0.98,1,binary
-streamlines,95747,8333,on-disk size (bytes),TRX (gzip),"1,039,569",10.86,0.861,1,binary-gzip
-streamlines,95747,8333,on-disk size (bytes),TRX deflate,"1,038,888",10.85,0.861,1,binary
-streamlines,95747,8333,on-disk size (bytes),TRX deflate (gzip),"1,038,590",10.85,0.86,1,binary-gzip
-streamlines,95747,8333,on-disk size (bytes),zarr-vectors (no codec),"1,683,400",17.58,1.394,1,
-streamlines,95747,8333,on-disk size (bytes),zarr-vectors (zstd),"1,207,217",12.61,1.0,1,
-streamlines,95747,8333,read whole dataset (s),TRK,0.03591 ± 0.00023,,0.918,14,
-streamlines,95747,8333,read whole dataset (s),zarr-vectors,0.03911 ± 0.00038,,1.0,13,
-streamlines,95747,8333,read whole dataset (s),zarr-vectors (no codec),0.03890 ± 0.00301,,0.995,13,
-streamlines,95747,8333,replace one object (s),TRK,0.15941 ± 0.00874,,1.285,5,variable-length records: full read-modify-rewrite
-streamlines,95747,8333,replace one object (s),zarr-vectors,0.12408 ± 0.01364,,1.0,5,edit_fragment via object manifest
+point cloud,10000000,10000000,on-disk size (bytes),zarr-vectors (no codec),"120,142,300",12.01,1.148,1,
+point cloud,10000000,10000000,on-disk size (bytes),zarr-vectors (zstd),"104,639,449",10.46,1.0,1,
+point cloud,10000000,10000000,read whole dataset (s),PLY,0.08597 ± 0.00029,,1.008,6,
+point cloud,10000000,10000000,read whole dataset (s),zarr-vectors,0.08529 ± 0.00590,,1.0,6,
+point cloud,10000000,10000000,read whole dataset (s),zarr-vectors (no codec),0.15199 ± 0.00309,,1.782,4,
+point cloud,10000000,10000000,replace one object (s),PLY,0.00002 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
+point cloud,10000000,10000000,replace one object (s),zarr-vectors,0.01137 ± 0.00015,,1.0,44,"VertexRef.from_position, in place"
+point cloud,10000000,10000000,write whole dataset (s),PLY,0.08995 ± 0.00137,,0.082,6,
+point cloud,10000000,10000000,write whole dataset (s),zarr-vectors,1.10099 ± 0.01534,,1.0,3,
+streamlines,972,83,bounding-box query (s),TRK,0.00121 ± 0.00000,,0.182,200,box sized to ~100 objects (fraction 1.0)
+streamlines,972,83,bounding-box query (s),TRK,0.00115 ± 0.00001,,0.264,200,"equal box, ~100 vertices (fraction 0.10288066)"
+streamlines,972,83,bounding-box query (s),zarr-vectors,0.00667 ± 0.00033,,1.0,75,box sized to ~100 objects (fraction 1.0)
+streamlines,972,83,bounding-box query (s),zarr-vectors,0.00436 ± 0.00019,,1.0,115,"equal box, ~100 vertices (fraction 0.10288066)"
+streamlines,972,83,fetch one object (s),TRK,0.00100 ± 0.00002,,0.329,200,variable-length records: full scan
+streamlines,972,83,fetch one object (s),zarr-vectors,0.00305 ± 0.00006,,1.0,165,object_ids=; reads 1x the object
+streamlines,972,83,fetch one object (s),zarr-vectors (no codec),0.00184 ± 0.00001,,0.605,200,object_ids=
+streamlines,972,83,on-disk size (bytes),TRK,"12,996",13.37,0.405,1,binary
+streamlines,972,83,on-disk size (bytes),TRK (gzip),"10,695",11.0,0.334,1,binary-gzip
+streamlines,972,83,on-disk size (bytes),TRX,"12,513",12.87,0.39,1,binary
+streamlines,972,83,on-disk size (bytes),TRX (gzip),"10,923",11.24,0.341,1,binary-gzip
+streamlines,972,83,on-disk size (bytes),TRX deflate,"11,035",11.35,0.344,1,binary
+streamlines,972,83,on-disk size (bytes),TRX deflate (gzip),"10,946",11.26,0.341,1,binary-gzip
+streamlines,972,83,on-disk size (bytes),zarr-vectors (no codec),"33,787",34.76,1.054,1,
+streamlines,972,83,on-disk size (bytes),zarr-vectors (zstd),"32,056",32.98,1.0,1,
+streamlines,972,83,read whole dataset (s),TRK,0.00106 ± 0.00001,,0.147,200,
+streamlines,972,83,read whole dataset (s),zarr-vectors,0.00717 ± 0.00012,,1.0,70,
+streamlines,972,83,read whole dataset (s),zarr-vectors (no codec),0.00636 ± 0.00037,,0.887,79,
+streamlines,972,83,replace one object (s),TRK,0.00305 ± 0.00010,,0.181,164,variable-length records: full read-modify-rewrite
+streamlines,972,83,replace one object (s),zarr-vectors,0.01684 ± 0.00166,,1.0,30,"edit_fragment via object manifest, in place"
+streamlines,972,83,write whole dataset (s),TRK,0.00205 ± 0.00026,,0.015,200,
+streamlines,972,83,write whole dataset (s),zarr-vectors,0.13487 ± 0.00382,,1.0,5,
+streamlines,9720,833,bounding-box query (s),TRK,0.00551 ± 0.00002,,0.82,91,box sized to ~100 objects (fraction 0.120048)
+streamlines,9720,833,bounding-box query (s),TRK,0.00550 ± 0.00002,,1.218,91,"equal box, ~100 vertices (fraction 0.01028807)"
+streamlines,9720,833,bounding-box query (s),zarr-vectors,0.00671 ± 0.00031,,1.0,75,box sized to ~100 objects (fraction 0.120048)
+streamlines,9720,833,bounding-box query (s),zarr-vectors,0.00452 ± 0.00020,,1.0,111,"equal box, ~100 vertices (fraction 0.01028807)"
+streamlines,9720,833,fetch one object (s),TRK,0.00427 ± 0.00007,,1.378,118,variable-length records: full scan
+streamlines,9720,833,fetch one object (s),zarr-vectors,0.00310 ± 0.00007,,1.0,162,object_ids=; reads 1x the object
+streamlines,9720,833,fetch one object (s),zarr-vectors (no codec),0.00293 ± 0.00004,,0.944,171,object_ids=
+streamlines,9720,833,on-disk size (bytes),TRK,"120,972",12.45,0.744,1,binary
+streamlines,9720,833,on-disk size (bytes),TRK (gzip),"106,113",10.92,0.653,1,binary-gzip
+streamlines,9720,833,on-disk size (bytes),TRX,"120,491",12.4,0.741,1,binary
+streamlines,9720,833,on-disk size (bytes),TRX (gzip),"106,059",10.91,0.652,1,binary-gzip
+streamlines,9720,833,on-disk size (bytes),TRX deflate,"105,871",10.89,0.651,1,binary
+streamlines,9720,833,on-disk size (bytes),TRX deflate (gzip),"105,876",10.89,0.651,1,binary-gzip
+streamlines,9720,833,on-disk size (bytes),zarr-vectors (no codec),"195,875",20.15,1.205,1,
+streamlines,9720,833,on-disk size (bytes),zarr-vectors (zstd),"162,601",16.73,1.0,1,
+streamlines,9720,833,read whole dataset (s),TRK,0.00489 ± 0.00001,,0.475,103,
+streamlines,9720,833,read whole dataset (s),zarr-vectors,0.01029 ± 0.00042,,1.0,49,
+streamlines,9720,833,read whole dataset (s),zarr-vectors (no codec),0.00966 ± 0.00056,,0.939,52,
+streamlines,9720,833,replace one object (s),TRK,0.01784 ± 0.00070,,0.946,29,variable-length records: full read-modify-rewrite
+streamlines,9720,833,replace one object (s),zarr-vectors,0.01885 ± 0.00194,,1.0,27,"edit_fragment via object manifest, in place"
+streamlines,9720,833,write whole dataset (s),TRK,0.01296 ± 0.00014,,0.065,39,
+streamlines,9720,833,write whole dataset (s),zarr-vectors,0.20048 ± 0.00652,,1.0,5,
+streamlines,95747,8333,bounding-box query (s),TRK,0.03822 ± 0.00018,,3.925,14,box sized to ~100 objects (fraction 0.012)
+streamlines,95747,8333,bounding-box query (s),TRK,0.03855 ± 0.00016,,5.186,13,"equal box, ~100 vertices (fraction 0.00104442)"
+streamlines,95747,8333,bounding-box query (s),zarr-vectors,0.00974 ± 0.00052,,1.0,52,box sized to ~100 objects (fraction 0.012)
+streamlines,95747,8333,bounding-box query (s),zarr-vectors,0.00743 ± 0.00029,,1.0,68,"equal box, ~100 vertices (fraction 0.00104442)"
+streamlines,95747,8333,fetch one object (s),TRK,0.02918 ± 0.00084,,7.181,18,variable-length records: full scan
+streamlines,95747,8333,fetch one object (s),zarr-vectors,0.00406 ± 0.00005,,1.0,124,object_ids=; reads 1x the object
+streamlines,95747,8333,fetch one object (s),zarr-vectors (no codec),0.00381 ± 0.00006,,0.938,132,object_ids=
+streamlines,95747,8333,on-disk size (bytes),TRK,"1,183,296",12.36,0.973,1,binary
+streamlines,95747,8333,on-disk size (bytes),TRK (gzip),"1,045,437",10.92,0.86,1,binary-gzip
+streamlines,95747,8333,on-disk size (bytes),TRX,"1,182,817",12.35,0.973,1,binary
+streamlines,95747,8333,on-disk size (bytes),TRX (gzip),"1,039,569",10.86,0.855,1,binary-gzip
+streamlines,95747,8333,on-disk size (bytes),TRX deflate,"1,038,888",10.85,0.855,1,binary
+streamlines,95747,8333,on-disk size (bytes),TRX deflate (gzip),"1,038,590",10.85,0.854,1,binary-gzip
+streamlines,95747,8333,on-disk size (bytes),zarr-vectors (no codec),"1,691,905",17.67,1.392,1,
+streamlines,95747,8333,on-disk size (bytes),zarr-vectors (zstd),"1,215,722",12.7,1.0,1,
+streamlines,95747,8333,read whole dataset (s),TRK,0.03481 ± 0.00019,,1.87,15,
+streamlines,95747,8333,read whole dataset (s),zarr-vectors,0.01861 ± 0.00025,,1.0,27,
+streamlines,95747,8333,read whole dataset (s),zarr-vectors (no codec),0.01699 ± 0.00120,,0.912,30,
+streamlines,95747,8333,replace one object (s),TRK,0.15575 ± 0.00645,,7.699,5,variable-length records: full read-modify-rewrite
+streamlines,95747,8333,replace one object (s),zarr-vectors,0.02023 ± 0.00177,,1.0,25,"edit_fragment via object manifest, in place"
 streamlines,95747,8333,round-trip max |Δ| (store units),TRK,3.05e-05,,,1,95747 in / 95747 out
 streamlines,95747,8333,round-trip max |Δ| (store units),TRX,exact,,,1,95747 in / 95747 out
 streamlines,95747,8333,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,95747 in / 95747 out
-streamlines,95747,8333,write whole dataset (s),TRK,0.12427 ± 0.00163,,0.386,5,
-streamlines,95747,8333,write whole dataset (s),zarr-vectors,0.32220 ± 0.02906,,1.0,5,
-streamlines,958210,83333,bounding-box query (s),TRK,0.38800 ± 0.00251,,2.622,8,box sized to ~100 objects (fraction 0.0012)
-streamlines,958210,83333,bounding-box query (s),TRK,0.38805 ± 0.00467,,2.68,8,volume fraction 0.001
-streamlines,958210,83333,bounding-box query (s),TRK,0.38663 ± 0.00212,,1.732,8,volume fraction 0.01
-streamlines,958210,83333,bounding-box query (s),TRK,0.39880 ± 0.00161,,0.855,8,volume fraction 0.1
-streamlines,958210,83333,bounding-box query (s),TRK,0.43618 ± 0.00609,,0.365,8,volume fraction 0.5
-streamlines,958210,83333,bounding-box query (s),TRK,0.46543 ± 0.00138,,0.432,8,volume fraction 1.0
-streamlines,958210,83333,bounding-box query (s),TRK,0.38162 ± 0.00215,,3.317,8,"equal box, ~100 vertices (fraction 0.00010436)"
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.14798 ± 0.03605,,1.0,8,box sized to ~100 objects (fraction 0.0012)
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.14479 ± 0.03497,,1.0,8,volume fraction 0.001
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.22317 ± 0.05373,,1.0,8,volume fraction 0.01
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.46624 ± 0.06773,,1.0,8,volume fraction 0.1
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,1.19463 ± 0.07467,,1.0,8,volume fraction 0.5
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,1.07710 ± 0.01193,,1.0,8,volume fraction 1.0
-streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.11504 ± 0.01844,,1.0,8,"equal box, ~100 vertices (fraction 0.00010436)"
-streamlines,958210,83333,fetch one object (s),TRK,0.29389 ± 0.00460,,27.139,5,variable-length records: full scan
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01857 ± 0.00098,,1.0,28,8 chunks over the domain; chunk side 500; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01292 ± 0.00026,,1.0,39,64 chunks over the domain; chunk side 250; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01212 ± 0.00027,,1.0,42,125 chunks over the domain; chunk side 200; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01226 ± 0.00017,,1.0,41,512 chunks over the domain; chunk side 125; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01197 ± 0.00013,,1.0,42,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01531 ± 0.00040,,1.0,33,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01083 ± 0.00038,,1.0,47,object_ids=; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors (no codec),0.01129 ± 0.00018,,1.043,45,object_ids=
-streamlines,958210,83333,on-disk size (bytes),TRK,"11,832,852",12.35,1.018,1,binary
-streamlines,958210,83333,on-disk size (bytes),TRK (gzip),"10,459,797",10.92,0.9,1,binary-gzip
-streamlines,958210,83333,on-disk size (bytes),TRX,"11,832,375",12.35,1.018,1,binary
-streamlines,958210,83333,on-disk size (bytes),TRX (gzip),"10,391,871",10.85,0.894,1,binary-gzip
-streamlines,958210,83333,on-disk size (bytes),TRX deflate,"10,391,172",10.84,0.894,1,binary
-streamlines,958210,83333,on-disk size (bytes),TRX deflate (gzip),"10,380,620",10.83,0.893,1,binary-gzip
-streamlines,958210,83333,on-disk size (bytes),zarr-vectors (no codec),"16,643,142",17.37,1.432,1,
-streamlines,958210,83333,on-disk size (bytes),zarr-vectors (zstd),"11,626,036",12.13,1.0,1,
-streamlines,958210,83333,read whole dataset (s),TRK,0.37180 ± 0.00244,,1.003,5,
-streamlines,958210,83333,read whole dataset (s),zarr-vectors,0.37063 ± 0.02400,,1.0,5,
-streamlines,958210,83333,read whole dataset (s),zarr-vectors (no codec),0.35081 ± 0.02382,,0.947,5,
-streamlines,958210,83333,replace one object (s),TRK,1.56694 ± 0.04208,,3.809,5,variable-length records: full read-modify-rewrite
-streamlines,958210,83333,replace one object (s),zarr-vectors,0.41137 ± 0.01458,,1.0,5,edit_fragment via object manifest
-streamlines,958210,83333,write whole dataset (s),TRK,1.24005 ± 0.01254,,0.77,5,
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.61110 ± 0.03629,,1.0,5,
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.84671 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.41400 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.68554 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,3.00854 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,4.06943 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,15.38810 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-streamlines,1000000,9,fetch one object (s),zarr-vectors,0.04284 ± 0.00132,,1.0,12,crosses 8 chunks; chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
-streamlines,1000000,27,fetch one object (s),zarr-vectors,0.02902 ± 0.00018,,1.0,18,crosses 64 chunks; chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
-streamlines,1000000,23,fetch one object (s),zarr-vectors,0.01942 ± 0.00010,,1.0,26,crosses 125 chunks; chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
-streamlines,1000000,47,fetch one object (s),zarr-vectors,0.01768 ± 0.00011,,1.0,29,crosses 512 chunks; chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
-streamlines,1000000,42,fetch one object (s),zarr-vectors,0.01415 ± 0.00010,,1.0,36,crosses 1000 chunks; chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
-streamlines,1000000,98,fetch one object (s),zarr-vectors,0.01659 ± 0.00025,,1.0,31,crosses 8000 chunks; chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
-streamlines,9585211,833333,bounding-box query (s),TRK,3.88353 ± 0.01711,,3.786,8,box sized to ~100 objects (fraction 0.00012)
-streamlines,9585211,833333,bounding-box query (s),TRK,3.84465 ± 0.02579,,3.854,8,"equal box, ~100 vertices (fraction 1.043e-05)"
-streamlines,9585211,833333,bounding-box query (s),zarr-vectors,1.02572 ± 0.12653,,1.0,8,box sized to ~100 objects (fraction 0.00012)
-streamlines,9585211,833333,bounding-box query (s),zarr-vectors,0.99745 ± 0.16673,,1.0,8,"equal box, ~100 vertices (fraction 1.043e-05)"
-streamlines,9585211,833333,fetch one object (s),TRK,2.92138 ± 0.11986,,158.084,3,variable-length records: full scan
-streamlines,9585211,833333,fetch one object (s),zarr-vectors,0.01848 ± 0.00119,,1.0,28,object_ids=; reads 1x the object
-streamlines,9585211,833333,fetch one object (s),zarr-vectors (no codec),0.01763 ± 0.00055,,0.954,29,object_ids=
-streamlines,9585211,833333,on-disk size (bytes),TRK,"118,356,864",12.35,1.018,1,binary
-streamlines,9585211,833333,on-disk size (bytes),TRK (gzip),"104,601,681",10.91,0.9,1,binary-gzip
-streamlines,9585211,833333,on-disk size (bytes),TRX,"118,356,389",12.35,1.018,1,binary
-streamlines,9585211,833333,on-disk size (bytes),TRX (gzip),"103,910,008",10.84,0.894,1,binary-gzip
-streamlines,9585211,833333,on-disk size (bytes),TRX deflate,"103,909,036",10.84,0.894,1,binary
-streamlines,9585211,833333,on-disk size (bytes),TRX deflate (gzip),"103,792,215",10.83,0.893,1,binary-gzip
-streamlines,9585211,833333,on-disk size (bytes),zarr-vectors (no codec),"166,784,190",17.4,1.435,1,
-streamlines,9585211,833333,on-disk size (bytes),zarr-vectors (zstd),"116,224,103",12.13,1.0,1,
-streamlines,9585211,833333,read whole dataset (s),TRK,3.54729 ± 0.07471,,0.852,3,
-streamlines,9585211,833333,read whole dataset (s),zarr-vectors,4.16410 ± 0.56597,,1.0,3,
-streamlines,9585211,833333,read whole dataset (s),zarr-vectors (no codec),4.08746 ± 0.66489,,0.982,3,
-streamlines,9585211,833333,replace one object (s),TRK,15.55865 ± 0.10431,,3.646,3,variable-length records: full read-modify-rewrite
-streamlines,9585211,833333,replace one object (s),zarr-vectors,4.26767 ± 0.09236,,1.0,3,edit_fragment via object manifest
-streamlines,9585211,833333,write whole dataset (s),TRK,12.28530 ± 0.07444,,0.84,3,
-streamlines,9585211,833333,write whole dataset (s),zarr-vectors,14.63065 ± 0.15934,,1.0,3,
-skeletons,1003,5,on-disk size (bytes),SWC,"48,850",48.7,2.04,1,text
-skeletons,1003,5,on-disk size (bytes),SWC (gzip),"22,609",22.54,0.944,1,text-gzip
-skeletons,1003,5,on-disk size (bytes),zarr-vectors (no codec),"26,331",26.25,1.1,1,
-skeletons,1003,5,on-disk size (bytes),zarr-vectors (zstd),"23,941",23.87,1.0,1,
-skeletons,9813,50,on-disk size (bytes),SWC,"504,513",51.41,2.996,1,text
-skeletons,9813,50,on-disk size (bytes),SWC (gzip),"233,310",23.78,1.386,1,text-gzip
-skeletons,9813,50,on-disk size (bytes),zarr-vectors (no codec),"190,323",19.39,1.13,1,
-skeletons,9813,50,on-disk size (bytes),zarr-vectors (zstd),"168,378",17.16,1.0,1,
+streamlines,95747,8333,write whole dataset (s),TRK,0.12540 ± 0.00679,,0.441,5,
+streamlines,95747,8333,write whole dataset (s),zarr-vectors,0.28409 ± 0.00993,,1.0,5,
+streamlines,958210,83333,bounding-box query (s),TRK,0.38381 ± 0.00267,,10.784,8,box sized to ~100 objects (fraction 0.0012)
+streamlines,958210,83333,bounding-box query (s),TRK,0.38387 ± 0.00285,,10.944,8,volume fraction 0.001
+streamlines,958210,83333,bounding-box query (s),TRK,0.38905 ± 0.00456,,6.55,8,volume fraction 0.01
+streamlines,958210,83333,bounding-box query (s),TRK,0.39683 ± 0.00409,,2.674,8,volume fraction 0.1
+streamlines,958210,83333,bounding-box query (s),TRK,0.43558 ± 0.00373,,0.852,8,volume fraction 0.5
+streamlines,958210,83333,bounding-box query (s),TRK,0.45992 ± 0.00307,,0.956,8,volume fraction 1.0
+streamlines,958210,83333,bounding-box query (s),TRK,0.38389 ± 0.00222,,14.474,8,"equal box, ~100 vertices (fraction 0.00010436)"
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.03559 ± 0.00657,,1.0,15,box sized to ~100 objects (fraction 0.0012)
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.03508 ± 0.00608,,1.0,15,volume fraction 0.001
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.05939 ± 0.01420,,1.0,9,volume fraction 0.01
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.14840 ± 0.01961,,1.0,8,volume fraction 0.1
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.51140 ± 0.02976,,1.0,8,volume fraction 0.5
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.48129 ± 0.01139,,1.0,8,volume fraction 1.0
+streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.02652 ± 0.00271,,1.0,19,"equal box, ~100 vertices (fraction 0.00010436)"
+streamlines,958210,83333,fetch one object (s),TRK,0.28802 ± 0.00254,,45.501,5,variable-length records: full scan
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01036 ± 0.00053,,1.0,49,8 chunks over the domain; chunk side 500; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00714 ± 0.00015,,1.0,71,64 chunks over the domain; chunk side 250; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00703 ± 0.00011,,1.0,72,125 chunks over the domain; chunk side 200; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00732 ± 0.00019,,1.0,69,512 chunks over the domain; chunk side 125; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00699 ± 0.00011,,1.0,72,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00791 ± 0.00013,,1.0,64,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00633 ± 0.00018,,1.0,79,object_ids=; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors (no codec),0.00639 ± 0.00010,,1.01,79,object_ids=
+streamlines,958210,83333,on-disk size (bytes),TRK,"11,832,852",12.35,1.017,1,binary
+streamlines,958210,83333,on-disk size (bytes),TRK (gzip),"10,459,797",10.92,0.899,1,binary-gzip
+streamlines,958210,83333,on-disk size (bytes),TRX,"11,832,375",12.35,1.017,1,binary
+streamlines,958210,83333,on-disk size (bytes),TRX (gzip),"10,391,872",10.85,0.893,1,binary-gzip
+streamlines,958210,83333,on-disk size (bytes),TRX deflate,"10,391,172",10.84,0.893,1,binary
+streamlines,958210,83333,on-disk size (bytes),TRX deflate (gzip),"10,380,620",10.83,0.892,1,binary-gzip
+streamlines,958210,83333,on-disk size (bytes),zarr-vectors (no codec),"16,655,188",17.38,1.431,1,
+streamlines,958210,83333,on-disk size (bytes),zarr-vectors (zstd),"11,638,082",12.15,1.0,1,
+streamlines,958210,83333,read whole dataset (s),TRK,0.36645 ± 0.00534,,3.34,5,
+streamlines,958210,83333,read whole dataset (s),zarr-vectors,0.10972 ± 0.00436,,1.0,5,
+streamlines,958210,83333,read whole dataset (s),zarr-vectors (no codec),0.09728 ± 0.00860,,0.887,6,
+streamlines,958210,83333,replace one object (s),TRK,1.54240 ± 0.00979,,48.687,5,variable-length records: full read-modify-rewrite
+streamlines,958210,83333,replace one object (s),zarr-vectors,0.03168 ± 0.00616,,1.0,16,"edit_fragment via object manifest, in place"
+streamlines,958210,83333,write whole dataset (s),TRK,1.26012 ± 0.03708,,2.371,5,
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.53141 ± 0.00799,,1.0,5,
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.29561 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.40432 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.54418 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.23723 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.93288 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,9.78605 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+streamlines,1000000,9,fetch one object (s),zarr-vectors,0.01775 ± 0.00017,,1.0,29,crosses 8 chunks; chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
+streamlines,1000000,27,fetch one object (s),zarr-vectors,0.01089 ± 0.00006,,1.0,46,crosses 64 chunks; chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
+streamlines,1000000,23,fetch one object (s),zarr-vectors,0.00663 ± 0.00010,,1.0,76,crosses 125 chunks; chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
+streamlines,1000000,47,fetch one object (s),zarr-vectors,0.00636 ± 0.00003,,1.0,79,crosses 512 chunks; chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
+streamlines,1000000,42,fetch one object (s),zarr-vectors,0.00503 ± 0.00002,,1.0,100,crosses 1000 chunks; chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
+streamlines,1000000,98,fetch one object (s),zarr-vectors,0.00752 ± 0.00003,,1.0,67,crosses 8000 chunks; chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
+streamlines,9585211,833333,bounding-box query (s),TRK,3.83545 ± 0.02592,,15.722,8,box sized to ~100 objects (fraction 0.00012)
+streamlines,9585211,833333,bounding-box query (s),TRK,3.81216 ± 0.02770,,15.873,8,"equal box, ~100 vertices (fraction 1.043e-05)"
+streamlines,9585211,833333,bounding-box query (s),zarr-vectors,0.24395 ± 0.03946,,1.0,8,box sized to ~100 objects (fraction 0.00012)
+streamlines,9585211,833333,bounding-box query (s),zarr-vectors,0.24017 ± 0.04526,,1.0,8,"equal box, ~100 vertices (fraction 1.043e-05)"
+streamlines,9585211,833333,fetch one object (s),TRK,2.87400 ± 0.02691,,316.032,3,variable-length records: full scan
+streamlines,9585211,833333,fetch one object (s),zarr-vectors,0.00909 ± 0.00029,,1.0,56,object_ids=; reads 1x the object
+streamlines,9585211,833333,fetch one object (s),zarr-vectors (no codec),0.00729 ± 0.00010,,0.802,69,object_ids=
+streamlines,9585211,833333,on-disk size (bytes),TRK,"118,356,864",12.35,1.021,1,binary
+streamlines,9585211,833333,on-disk size (bytes),TRK (gzip),"104,601,681",10.91,0.902,1,binary-gzip
+streamlines,9585211,833333,on-disk size (bytes),TRX,"118,356,389",12.35,1.021,1,binary
+streamlines,9585211,833333,on-disk size (bytes),TRX (gzip),"103,910,006",10.84,0.896,1,binary-gzip
+streamlines,9585211,833333,on-disk size (bytes),TRX deflate,"103,909,036",10.84,0.896,1,binary
+streamlines,9585211,833333,on-disk size (bytes),TRX deflate (gzip),"103,792,215",10.83,0.895,1,binary-gzip
+streamlines,9585211,833333,on-disk size (bytes),zarr-vectors (no codec),"166,529,461",17.37,1.436,1,
+streamlines,9585211,833333,on-disk size (bytes),zarr-vectors (zstd),"115,969,374",12.1,1.0,1,
+streamlines,9585211,833333,read whole dataset (s),TRK,3.50313 ± 0.02437,,2.545,3,
+streamlines,9585211,833333,read whole dataset (s),zarr-vectors,1.37626 ± 0.10353,,1.0,3,
+streamlines,9585211,833333,read whole dataset (s),zarr-vectors (no codec),1.34726 ± 0.03550,,0.979,3,
+streamlines,9585211,833333,replace one object (s),TRK,15.62434 ± 0.82421,,242.242,3,variable-length records: full read-modify-rewrite
+streamlines,9585211,833333,replace one object (s),zarr-vectors,0.06450 ± 0.01845,,1.0,8,"edit_fragment via object manifest, in place"
+streamlines,9585211,833333,write whole dataset (s),TRK,12.30741 ± 0.11084,,5.826,3,
+streamlines,9585211,833333,write whole dataset (s),zarr-vectors,2.11244 ± 0.15068,,1.0,3,
+skeletons,1003,5,on-disk size (bytes),SWC,"48,850",48.7,2.034,1,text
+skeletons,1003,5,on-disk size (bytes),SWC (gzip),"22,609",22.54,0.941,1,text-gzip
+skeletons,1003,5,on-disk size (bytes),zarr-vectors (no codec),"26,405",26.33,1.1,1,
+skeletons,1003,5,on-disk size (bytes),zarr-vectors (zstd),"24,015",23.94,1.0,1,
+skeletons,9813,50,on-disk size (bytes),SWC,"504,513",51.41,2.995,1,text
+skeletons,9813,50,on-disk size (bytes),SWC (gzip),"233,310",23.78,1.385,1,text-gzip
+skeletons,9813,50,on-disk size (bytes),zarr-vectors (no codec),"190,397",19.4,1.13,1,
+skeletons,9813,50,on-disk size (bytes),zarr-vectors (zstd),"168,452",17.17,1.0,1,
 skeletons,100678,500,on-disk size (bytes),SWC,"5,369,063",53.33,3.618,1,text
 skeletons,100678,500,on-disk size (bytes),SWC (gzip),"2,391,725",23.76,1.612,1,text-gzip
-skeletons,100678,500,on-disk size (bytes),zarr-vectors (no codec),"1,772,012",17.6,1.194,1,
-skeletons,100678,500,on-disk size (bytes),zarr-vectors (zstd),"1,483,997",14.74,1.0,1,
+skeletons,100678,500,on-disk size (bytes),zarr-vectors (no codec),"1,772,086",17.6,1.194,1,
+skeletons,100678,500,on-disk size (bytes),zarr-vectors (zstd),"1,484,071",14.74,1.0,1,
 skeletons,100678,500,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,100678 in / 100678 out
 skeletons,998151,5000,on-disk size (bytes),SWC,"55,214,965",55.32,3.848,1,text
 skeletons,998151,5000,on-disk size (bytes),SWC (gzip),"24,088,489",24.13,1.679,1,text-gzip
-skeletons,998151,5000,on-disk size (bytes),zarr-vectors (no codec),"17,461,889",17.49,1.217,1,
-skeletons,998151,5000,on-disk size (bytes),zarr-vectors (zstd),"14,347,146",14.37,1.0,1,
+skeletons,998151,5000,on-disk size (bytes),zarr-vectors (no codec),"17,461,963",17.49,1.217,1,
+skeletons,998151,5000,on-disk size (bytes),zarr-vectors (zstd),"14,347,220",14.37,1.0,1,
 skeletons,9970853,50000,on-disk size (bytes),SWC,"571,437,415",57.31,4.001,1,text
 skeletons,9970853,50000,on-disk size (bytes),SWC (gzip),"242,962,628",24.37,1.701,1,text-gzip
-skeletons,9970853,50000,on-disk size (bytes),zarr-vectors (no codec),"174,288,146",17.48,1.22,1,
-skeletons,9970853,50000,on-disk size (bytes),zarr-vectors (zstd),"142,813,086",14.32,1.0,1,
+skeletons,9970853,50000,on-disk size (bytes),zarr-vectors (no codec),"174,288,220",17.48,1.22,1,
+skeletons,9970853,50000,on-disk size (bytes),zarr-vectors (zstd),"142,813,160",14.32,1.0,1,
 graphs,1000,1000,on-disk size (bytes),CSV edge-list,"39,250",39.25,0.109,1,text
 graphs,1000,1000,on-disk size (bytes),CSV edge-list (gzip),"19,571",19.57,0.054,1,text-gzip
 graphs,1000,1000,on-disk size (bytes),GraphML,"227,926",227.93,0.632,1,text
 graphs,1000,1000,on-disk size (bytes),GraphML (gzip),"37,626",37.63,0.104,1,text-gzip
-graphs,1000,1000,on-disk size (bytes),zarr-vectors (no codec),"345,403",345.4,0.958,1,
-graphs,1000,1000,on-disk size (bytes),zarr-vectors (zstd),"360,477",360.48,1.0,1,
+graphs,1000,1000,on-disk size (bytes),zarr-vectors (no codec),"345,457",345.46,0.958,1,
+graphs,1000,1000,on-disk size (bytes),zarr-vectors (zstd),"360,531",360.53,1.0,1,
 graphs,10000,10000,on-disk size (bytes),CSV edge-list,"432,264",43.23,0.504,1,text
 graphs,10000,10000,on-disk size (bytes),CSV edge-list (gzip),"202,534",20.25,0.236,1,text-gzip
 graphs,10000,10000,on-disk size (bytes),GraphML,"2,316,607",231.66,2.702,1,text
 graphs,10000,10000,on-disk size (bytes),GraphML (gzip),"374,540",37.45,0.437,1,text-gzip
-graphs,10000,10000,on-disk size (bytes),zarr-vectors (no codec),"1,028,802",102.88,1.2,1,
-graphs,10000,10000,on-disk size (bytes),zarr-vectors (zstd),"857,321",85.73,1.0,1,
+graphs,10000,10000,on-disk size (bytes),zarr-vectors (no codec),"1,028,856",102.89,1.2,1,
+graphs,10000,10000,on-disk size (bytes),zarr-vectors (zstd),"857,375",85.74,1.0,1,
 graphs,100000,100000,on-disk size (bytes),CSV edge-list,"4,722,676",47.23,1.69,1,text
 graphs,100000,100000,on-disk size (bytes),CSV edge-list (gzip),"2,178,797",21.79,0.78,1,text-gzip
 graphs,100000,100000,on-disk size (bytes),GraphML,"23,563,030",235.63,8.43,1,text
 graphs,100000,100000,on-disk size (bytes),GraphML (gzip),"3,827,640",38.28,1.369,1,text-gzip
-graphs,100000,100000,on-disk size (bytes),zarr-vectors (no codec),"5,392,056",53.92,1.929,1,
-graphs,100000,100000,on-disk size (bytes),zarr-vectors (zstd),"2,795,059",27.95,1.0,1,
+graphs,100000,100000,on-disk size (bytes),zarr-vectors (no codec),"5,392,110",53.92,1.929,1,
+graphs,100000,100000,on-disk size (bytes),zarr-vectors (zstd),"2,795,113",27.95,1.0,1,
 graphs,100000,100000,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,100000 in / 100000 out
 graphs,1000000,1000000,on-disk size (bytes),CSV edge-list,"51,223,262",51.22,2.662,1,text
 graphs,1000000,1000000,on-disk size (bytes),CSV edge-list (gzip),"23,487,823",23.49,1.22,1,text-gzip
-graphs,1000000,1000000,on-disk size (bytes),zarr-vectors (no codec),"48,504,227",48.5,2.52,1,
-graphs,1000000,1000000,on-disk size (bytes),zarr-vectors (zstd),"19,244,589",19.24,1.0,1,
+graphs,1000000,1000000,on-disk size (bytes),zarr-vectors (no codec),"48,504,281",48.5,2.52,1,
+graphs,1000000,1000000,on-disk size (bytes),zarr-vectors (zstd),"19,244,643",19.24,1.0,1,
 graphs,10000000,10000000,on-disk size (bytes),CSV edge-list,"552,233,717",55.22,2.759,1,text
 graphs,10000000,10000000,on-disk size (bytes),CSV edge-list (gzip),"251,612,269",25.16,1.257,1,text-gzip
-graphs,10000000,10000000,on-disk size (bytes),zarr-vectors (no codec),"479,638,432",47.96,2.396,1,
-graphs,10000000,10000000,on-disk size (bytes),zarr-vectors (zstd),"200,166,949",20.02,1.0,1,
-meshes,864,6,bounding-box query (s),STL,0.00022 ± 0.00001,,0.02,200,box sized to ~100 objects (fraction 1.0)
-meshes,864,6,bounding-box query (s),STL,0.00022 ± 0.00001,,0.034,200,"equal box, ~100 vertices (fraction 0.11574074)"
-meshes,864,6,bounding-box query (s),zarr-vectors,0.01146 ± 0.00009,,1.0,44,box sized to ~100 objects (fraction 1.0)
-meshes,864,6,bounding-box query (s),zarr-vectors,0.00658 ± 0.00057,,1.0,77,"equal box, ~100 vertices (fraction 0.11574074)"
-meshes,864,6,fetch one object (s),STL,0.00006 ± 0.00000,,0.005,200,no object index: full read
-meshes,864,6,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.005,200,vs precomputed meshes; by id
-meshes,864,6,fetch one object (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.008,200,vs precomputed meshes; by id
-meshes,864,6,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00014 ± 0.00000,,0.01,200,vs precomputed meshes; by id
-meshes,864,6,fetch one object (s),zarr-vectors,0.01339 ± 0.00064,,1.0,38,object_ids=; reads 1x the object
-meshes,864,6,fetch one object (s),zarr-vectors (no codec),0.01317 ± 0.00010,,0.984,38,object_ids=
-meshes,864,6,fetch one object (s),zarr-vectors (no codec),0.01359 ± 0.00027,,0.946,37,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object (s),"zarr-vectors (no codec, sharded)",0.01624 ± 0.00047,,1.13,31,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object (s),zarr-vectors (zstd),0.01437 ± 0.00031,,1.0,35,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object (s),"zarr-vectors (zstd, sharded)",0.01493 ± 0.00032,,1.038,34,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object: bytes fetched,precomputed mesh,"4,693",,0.401,6,vs precomputed meshes; by id
-meshes,864,6,fetch one object: bytes fetched,precomputed mesh (sharded),"5,027",,0.429,6,vs precomputed meshes; by id
+graphs,10000000,10000000,on-disk size (bytes),zarr-vectors (no codec),"479,638,486",47.96,2.396,1,
+graphs,10000000,10000000,on-disk size (bytes),zarr-vectors (zstd),"200,167,003",20.02,1.0,1,
+meshes,864,6,bounding-box query (s),STL,0.00021 ± 0.00000,,0.073,200,box sized to ~100 objects (fraction 1.0)
+meshes,864,6,bounding-box query (s),STL,0.00019 ± 0.00000,,0.157,200,"equal box, ~100 vertices (fraction 0.11574074)"
+meshes,864,6,bounding-box query (s),zarr-vectors,0.00295 ± 0.00009,,1.0,170,box sized to ~100 objects (fraction 1.0)
+meshes,864,6,bounding-box query (s),zarr-vectors,0.00125 ± 0.00009,,1.0,200,"equal box, ~100 vertices (fraction 0.11574074)"
+meshes,864,6,fetch one object (s),STL,0.00003 ± 0.00000,,0.014,200,no object index: full read
+meshes,864,6,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.023,200,vs precomputed meshes; by id
+meshes,864,6,fetch one object (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.039,200,vs precomputed meshes; by id
+meshes,864,6,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00014 ± 0.00000,,0.047,200,vs precomputed meshes; by id
+meshes,864,6,fetch one object (s),zarr-vectors,0.00243 ± 0.00003,,1.0,200,object_ids=; reads 1x the object
+meshes,864,6,fetch one object (s),zarr-vectors (no codec),0.00247 ± 0.00001,,1.017,200,object_ids=
+meshes,864,6,fetch one object (s),zarr-vectors (no codec),0.00305 ± 0.00003,,1.006,165,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object (s),"zarr-vectors (no codec, sharded)",0.00525 ± 0.00009,,1.734,96,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object (s),zarr-vectors (zstd),0.00303 ± 0.00003,,1.0,166,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object (s),"zarr-vectors (zstd, sharded)",0.00329 ± 0.00003,,1.085,153,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object: bytes fetched,precomputed mesh,"4,693",,0.399,6,vs precomputed meshes; by id
+meshes,864,6,fetch one object: bytes fetched,precomputed mesh (sharded),"5,027",,0.427,6,vs precomputed meshes; by id
 meshes,864,6,fetch one object: bytes fetched,"precomputed mesh (sharded, gzip)","2,148",,0.183,6,vs precomputed meshes; by id
-meshes,864,6,fetch one object: bytes fetched,zarr-vectors (no codec),"17,164",,1.466,6,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","34,542",,2.949,6,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object: bytes fetched,zarr-vectors (zstd),"11,712",,1.0,6,vs precomputed meshes; object_ids=
-meshes,864,6,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","32,334",,2.761,6,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object: bytes fetched,zarr-vectors (no codec),"17,218",,1.463,6,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","34,596",,2.94,6,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object: bytes fetched,zarr-vectors (zstd),"11,766",,1.0,6,vs precomputed meshes; object_ids=
+meshes,864,6,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","32,388",,2.753,6,vs precomputed meshes; object_ids=
 meshes,864,6,fetch one object: requests,precomputed mesh,3.0,,0.122,6,vs precomputed meshes; by id
 meshes,864,6,fetch one object: requests,precomputed mesh (sharded),4.0,,0.163,6,vs precomputed meshes; by id
 meshes,864,6,fetch one object: requests,"precomputed mesh (sharded, gzip)",4.0,,0.163,6,vs precomputed meshes; by id
@@ -384,60 +384,60 @@ meshes,864,6,fetch one object: requests,zarr-vectors (no codec),24.5,,1.0,6,vs p
 meshes,864,6,fetch one object: requests,"zarr-vectors (no codec, sharded)",31.7,,1.293,6,vs precomputed meshes; object_ids=
 meshes,864,6,fetch one object: requests,zarr-vectors (zstd),24.5,,1.0,6,vs precomputed meshes; object_ids=
 meshes,864,6,fetch one object: requests,"zarr-vectors (zstd, sharded)",33.2,,1.354,6,vs precomputed meshes; object_ids=
-meshes,864,6,on-disk size (bytes),OBJ,"49,313",57.08,2.147,1,text
-meshes,864,6,on-disk size (bytes),OBJ (gzip),"15,316",17.73,0.667,1,text-gzip
-meshes,864,6,on-disk size (bytes),STL,"72,684",84.12,3.165,1,binary
-meshes,864,6,on-disk size (bytes),STL (gzip),"30,089",34.83,1.31,1,binary-gzip
-meshes,864,6,on-disk size (bytes),precomputed mesh,"27,973",32.38,1.218,1,vs precomputed meshes
-meshes,864,6,on-disk size (bytes),precomputed mesh (sharded),"28,207",32.65,1.228,1,vs precomputed meshes
-meshes,864,6,on-disk size (bytes),"precomputed mesh (sharded, gzip)","10,931",12.65,0.476,1,vs precomputed meshes
-meshes,864,6,on-disk size (bytes),zarr-vectors (no codec),"58,811",68.07,2.561,1,
-meshes,864,6,on-disk size (bytes),zarr-vectors (no codec),"58,811",68.07,2.561,1,vs precomputed meshes
-meshes,864,6,on-disk size (bytes),"zarr-vectors (no codec, sharded)","78,603",90.98,3.423,1,vs precomputed meshes
-meshes,864,6,on-disk size (bytes),zarr-vectors (zstd),"22,965",26.58,1.0,1,
-meshes,864,6,on-disk size (bytes),zarr-vectors (zstd),"22,965",26.58,1.0,1,vs precomputed meshes
-meshes,864,6,on-disk size (bytes),"zarr-vectors (zstd, no object index)","22,920",26.53,0.998,1,
-meshes,864,6,on-disk size (bytes),"zarr-vectors (zstd, sharded)","43,093",49.88,1.876,1,vs precomputed meshes
-meshes,864,6,read whole dataset (s),STL,0.00006 ± 0.00000,,0.006,200,
-meshes,864,6,read whole dataset (s),precomputed mesh,0.00020 ± 0.00000,,0.017,200,vs precomputed meshes
-meshes,864,6,read whole dataset (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.01,200,vs precomputed meshes
-meshes,864,6,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.00022 ± 0.00000,,0.019,200,vs precomputed meshes
-meshes,864,6,read whole dataset (s),zarr-vectors,0.00991 ± 0.00035,,1.0,51,
-meshes,864,6,read whole dataset (s),zarr-vectors (no codec),0.01027 ± 0.00007,,1.037,49,
-meshes,864,6,read whole dataset (s),zarr-vectors (no codec),0.01137 ± 0.00009,,0.976,44,vs precomputed meshes
-meshes,864,6,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.01193 ± 0.00014,,1.024,42,vs precomputed meshes
-meshes,864,6,read whole dataset (s),zarr-vectors (zstd),0.01165 ± 0.00037,,1.0,43,vs precomputed meshes
-meshes,864,6,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.01323 ± 0.00011,,1.135,38,vs precomputed meshes
-meshes,864,6,write whole dataset (s),STL,0.00034 ± 0.00002,,0.003,200,
-meshes,864,6,write whole dataset (s),precomputed mesh,0.00090 ± 0.00003,,0.009,200,vs precomputed meshes
-meshes,864,6,write whole dataset (s),precomputed mesh (sharded),0.00033 ± 0.00001,,0.003,200,vs precomputed meshes
-meshes,864,6,write whole dataset (s),"precomputed mesh (sharded, gzip)",0.00147 ± 0.00001,,0.014,200,vs precomputed meshes
-meshes,864,6,write whole dataset (s),zarr-vectors,0.12096 ± 0.00215,,1.0,5,
-meshes,864,6,write whole dataset (s),zarr-vectors (no codec),0.12091 ± 0.00143,,1.154,7,vs precomputed meshes
-meshes,864,6,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.13741 ± 0.00703,,1.312,7,vs precomputed meshes
-meshes,864,6,write whole dataset (s),zarr-vectors (zstd),0.10474 ± 0.01599,,1.0,7,vs precomputed meshes
-meshes,864,6,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.14536 ± 0.00483,,1.388,7,vs precomputed meshes
-meshes,9936,69,bounding-box query (s),STL,0.00200 ± 0.00000,,0.034,200,box sized to ~100 objects (fraction 1.0)
-meshes,9936,69,bounding-box query (s),STL,0.00180 ± 0.00003,,0.167,200,"equal box, ~100 vertices (fraction 0.01006441)"
-meshes,9936,69,bounding-box query (s),zarr-vectors,0.05813 ± 0.00094,,1.0,9,box sized to ~100 objects (fraction 1.0)
-meshes,9936,69,bounding-box query (s),zarr-vectors,0.01082 ± 0.00025,,1.0,47,"equal box, ~100 vertices (fraction 0.01006441)"
-meshes,9936,69,fetch one object (s),STL,0.00022 ± 0.00001,,0.021,200,no object index: full read
-meshes,9936,69,fetch one object (s),precomputed mesh,0.00008 ± 0.00001,,0.006,200,vs precomputed meshes; by id
-meshes,9936,69,fetch one object (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.009,200,vs precomputed meshes; by id
-meshes,9936,69,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00000,,0.011,200,vs precomputed meshes; by id
-meshes,9936,69,fetch one object (s),zarr-vectors,0.01028 ± 0.00019,,1.0,49,object_ids=; reads 1x the object
-meshes,9936,69,fetch one object (s),zarr-vectors (no codec),0.01119 ± 0.00009,,1.089,45,object_ids=
-meshes,9936,69,fetch one object (s),zarr-vectors (no codec),0.01309 ± 0.00063,,0.986,39,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object (s),"zarr-vectors (no codec, sharded)",0.01666 ± 0.00108,,1.255,31,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object (s),zarr-vectors (zstd),0.01328 ± 0.00066,,1.0,38,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object (s),"zarr-vectors (zstd, sharded)",0.01472 ± 0.00086,,1.109,34,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object: bytes fetched,precomputed mesh,"4,693",,0.282,16,vs precomputed meshes; by id
-meshes,9936,69,fetch one object: bytes fetched,precomputed mesh (sharded),"5,298",,0.318,16,vs precomputed meshes; by id
-meshes,9936,69,fetch one object: bytes fetched,"precomputed mesh (sharded, gzip)","2,395",,0.144,16,vs precomputed meshes; by id
-meshes,9936,69,fetch one object: bytes fetched,zarr-vectors (no codec),"21,117",,1.268,16,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","38,194",,2.293,16,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object: bytes fetched,zarr-vectors (zstd),"16,656",,1.0,16,vs precomputed meshes; object_ids=
-meshes,9936,69,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","36,713",,2.204,16,vs precomputed meshes; object_ids=
+meshes,864,6,on-disk size (bytes),OBJ,"49,313",57.08,2.142,1,text
+meshes,864,6,on-disk size (bytes),OBJ (gzip),"15,316",17.73,0.665,1,text-gzip
+meshes,864,6,on-disk size (bytes),STL,"72,684",84.12,3.158,1,binary
+meshes,864,6,on-disk size (bytes),STL (gzip),"30,089",34.83,1.307,1,binary-gzip
+meshes,864,6,on-disk size (bytes),precomputed mesh,"27,973",32.38,1.215,1,vs precomputed meshes
+meshes,864,6,on-disk size (bytes),precomputed mesh (sharded),"28,207",32.65,1.225,1,vs precomputed meshes
+meshes,864,6,on-disk size (bytes),"precomputed mesh (sharded, gzip)","10,931",12.65,0.475,1,vs precomputed meshes
+meshes,864,6,on-disk size (bytes),zarr-vectors (no codec),"58,865",68.13,2.557,1,
+meshes,864,6,on-disk size (bytes),zarr-vectors (no codec),"58,865",68.13,2.557,1,vs precomputed meshes
+meshes,864,6,on-disk size (bytes),"zarr-vectors (no codec, sharded)","78,657",91.04,3.417,1,vs precomputed meshes
+meshes,864,6,on-disk size (bytes),zarr-vectors (zstd),"23,019",26.64,1.0,1,
+meshes,864,6,on-disk size (bytes),zarr-vectors (zstd),"23,019",26.64,1.0,1,vs precomputed meshes
+meshes,864,6,on-disk size (bytes),"zarr-vectors (zstd, no object index)","22,974",26.59,0.998,1,
+meshes,864,6,on-disk size (bytes),"zarr-vectors (zstd, sharded)","43,147",49.94,1.874,1,vs precomputed meshes
+meshes,864,6,read whole dataset (s),STL,0.00003 ± 0.00000,,0.012,200,
+meshes,864,6,read whole dataset (s),precomputed mesh,0.00021 ± 0.00000,,0.061,200,vs precomputed meshes
+meshes,864,6,read whole dataset (s),precomputed mesh (sharded),0.00011 ± 0.00000,,0.033,200,vs precomputed meshes
+meshes,864,6,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.00022 ± 0.00000,,0.066,200,vs precomputed meshes
+meshes,864,6,read whole dataset (s),zarr-vectors,0.00259 ± 0.00007,,1.0,193,
+meshes,864,6,read whole dataset (s),zarr-vectors (no codec),0.00232 ± 0.00006,,0.895,200,
+meshes,864,6,read whole dataset (s),zarr-vectors (no codec),0.00314 ± 0.00011,,0.928,160,vs precomputed meshes
+meshes,864,6,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.00341 ± 0.00014,,1.007,147,vs precomputed meshes
+meshes,864,6,read whole dataset (s),zarr-vectors (zstd),0.00338 ± 0.00012,,1.0,148,vs precomputed meshes
+meshes,864,6,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.00366 ± 0.00015,,1.081,137,vs precomputed meshes
+meshes,864,6,write whole dataset (s),STL,0.00031 ± 0.00001,,0.003,200,
+meshes,864,6,write whole dataset (s),precomputed mesh,0.00094 ± 0.00003,,0.01,200,vs precomputed meshes
+meshes,864,6,write whole dataset (s),precomputed mesh (sharded),0.00033 ± 0.00001,,0.004,200,vs precomputed meshes
+meshes,864,6,write whole dataset (s),"precomputed mesh (sharded, gzip)",0.00148 ± 0.00001,,0.016,200,vs precomputed meshes
+meshes,864,6,write whole dataset (s),zarr-vectors,0.10010 ± 0.00138,,1.0,5,
+meshes,864,6,write whole dataset (s),zarr-vectors (no codec),0.09667 ± 0.00164,,1.048,7,vs precomputed meshes
+meshes,864,6,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.11577 ± 0.00397,,1.255,7,vs precomputed meshes
+meshes,864,6,write whole dataset (s),zarr-vectors (zstd),0.09228 ± 0.01358,,1.0,7,vs precomputed meshes
+meshes,864,6,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.12985 ± 0.00326,,1.407,7,vs precomputed meshes
+meshes,9936,69,bounding-box query (s),STL,0.00199 ± 0.00000,,0.127,200,box sized to ~100 objects (fraction 1.0)
+meshes,9936,69,bounding-box query (s),STL,0.00178 ± 0.00000,,0.935,200,"equal box, ~100 vertices (fraction 0.01006441)"
+meshes,9936,69,bounding-box query (s),zarr-vectors,0.01565 ± 0.00078,,1.0,32,box sized to ~100 objects (fraction 1.0)
+meshes,9936,69,bounding-box query (s),zarr-vectors,0.00190 ± 0.00007,,1.0,200,"equal box, ~100 vertices (fraction 0.01006441)"
+meshes,9936,69,fetch one object (s),STL,0.00017 ± 0.00000,,0.084,200,no object index: full read
+meshes,9936,69,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.024,200,vs precomputed meshes; by id
+meshes,9936,69,fetch one object (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.041,200,vs precomputed meshes; by id
+meshes,9936,69,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00014 ± 0.00000,,0.049,200,vs precomputed meshes; by id
+meshes,9936,69,fetch one object (s),zarr-vectors,0.00201 ± 0.00001,,1.0,200,object_ids=; reads 1x the object
+meshes,9936,69,fetch one object (s),zarr-vectors (no codec),0.00204 ± 0.00001,,1.019,200,object_ids=
+meshes,9936,69,fetch one object (s),zarr-vectors (no codec),0.00297 ± 0.00007,,1.01,169,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object (s),"zarr-vectors (no codec, sharded)",0.00516 ± 0.00022,,1.756,97,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object (s),zarr-vectors (zstd),0.00294 ± 0.00008,,1.0,171,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object (s),"zarr-vectors (zstd, sharded)",0.00330 ± 0.00009,,1.122,152,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object: bytes fetched,precomputed mesh,"4,693",,0.281,16,vs precomputed meshes; by id
+meshes,9936,69,fetch one object: bytes fetched,precomputed mesh (sharded),"5,298",,0.317,16,vs precomputed meshes; by id
+meshes,9936,69,fetch one object: bytes fetched,"precomputed mesh (sharded, gzip)","2,395",,0.143,16,vs precomputed meshes; by id
+meshes,9936,69,fetch one object: bytes fetched,zarr-vectors (no codec),"21,171",,1.267,16,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","38,248",,2.289,16,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object: bytes fetched,zarr-vectors (zstd),"16,710",,1.0,16,vs precomputed meshes; object_ids=
+meshes,9936,69,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","36,767",,2.2,16,vs precomputed meshes; object_ids=
 meshes,9936,69,fetch one object: requests,precomputed mesh,3.0,,0.125,16,vs precomputed meshes; by id
 meshes,9936,69,fetch one object: requests,precomputed mesh (sharded),4.0,,0.167,16,vs precomputed meshes; by id
 meshes,9936,69,fetch one object: requests,"precomputed mesh (sharded, gzip)",4.0,,0.167,16,vs precomputed meshes; by id
@@ -445,60 +445,60 @@ meshes,9936,69,fetch one object: requests,zarr-vectors (no codec),23.9,,0.995,16
 meshes,9936,69,fetch one object: requests,"zarr-vectors (no codec, sharded)",31.1,,1.297,16,vs precomputed meshes; object_ids=
 meshes,9936,69,fetch one object: requests,zarr-vectors (zstd),24.0,,1.0,16,vs precomputed meshes; object_ids=
 meshes,9936,69,fetch one object: requests,"zarr-vectors (zstd, sharded)",32.6,,1.359,16,vs precomputed meshes; object_ids=
-meshes,9936,69,on-disk size (bytes),OBJ,"622,986",62.7,4.749,1,text
+meshes,9936,69,on-disk size (bytes),OBJ,"622,986",62.7,4.747,1,text
 meshes,9936,69,on-disk size (bytes),OBJ (gzip),"168,234",16.93,1.282,1,text-gzip
-meshes,9936,69,on-disk size (bytes),STL,"834,984",84.04,6.365,1,binary
-meshes,9936,69,on-disk size (bytes),STL (gzip),"344,360",34.66,2.625,1,binary-gzip
-meshes,9936,69,on-disk size (bytes),precomputed mesh,"321,360",32.34,2.45,1,vs precomputed meshes
-meshes,9936,69,on-disk size (bytes),precomputed mesh (sharded),"321,835",32.39,2.453,1,vs precomputed meshes
+meshes,9936,69,on-disk size (bytes),STL,"834,984",84.04,6.362,1,binary
+meshes,9936,69,on-disk size (bytes),STL (gzip),"344,360",34.66,2.624,1,binary-gzip
+meshes,9936,69,on-disk size (bytes),precomputed mesh,"321,360",32.34,2.449,1,vs precomputed meshes
+meshes,9936,69,on-disk size (bytes),precomputed mesh (sharded),"321,835",32.39,2.452,1,vs precomputed meshes
 meshes,9936,69,on-disk size (bytes),"precomputed mesh (sharded, gzip)","122,525",12.33,0.934,1,vs precomputed meshes
-meshes,9936,69,on-disk size (bytes),zarr-vectors (no codec),"554,208",55.78,4.225,1,
-meshes,9936,69,on-disk size (bytes),zarr-vectors (no codec),"554,208",55.78,4.225,1,vs precomputed meshes
-meshes,9936,69,on-disk size (bytes),"zarr-vectors (no codec, sharded)","578,932",58.27,4.413,1,vs precomputed meshes
-meshes,9936,69,on-disk size (bytes),zarr-vectors (zstd),"131,186",13.2,1.0,1,
-meshes,9936,69,on-disk size (bytes),zarr-vectors (zstd),"131,186",13.2,1.0,1,vs precomputed meshes
-meshes,9936,69,on-disk size (bytes),"zarr-vectors (zstd, no object index)","130,109",13.09,0.992,1,
-meshes,9936,69,on-disk size (bytes),"zarr-vectors (zstd, sharded)","156,330",15.73,1.192,1,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),STL,0.00017 ± 0.00000,,0.004,200,
-meshes,9936,69,read whole dataset (s),precomputed mesh,0.00179 ± 0.00001,,0.03,200,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),precomputed mesh (sharded),0.00041 ± 0.00000,,0.007,200,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.00157 ± 0.00000,,0.027,200,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),zarr-vectors,0.04356 ± 0.00045,,1.0,12,
-meshes,9936,69,read whole dataset (s),zarr-vectors (no codec),0.05127 ± 0.00068,,1.177,10,
-meshes,9936,69,read whole dataset (s),zarr-vectors (no codec),0.05328 ± 0.00035,,0.905,10,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.03305 ± 0.00015,,0.561,16,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),zarr-vectors (zstd),0.05888 ± 0.00151,,1.0,9,vs precomputed meshes
-meshes,9936,69,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.03600 ± 0.00077,,0.611,14,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),STL,0.00181 ± 0.00002,,0.008,200,
-meshes,9936,69,write whole dataset (s),precomputed mesh,0.00926 ± 0.00037,,0.04,54,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),precomputed mesh (sharded),0.00128 ± 0.00001,,0.006,200,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),"precomputed mesh (sharded, gzip)",0.01385 ± 0.00003,,0.06,37,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),zarr-vectors,0.21463 ± 0.02042,,1.0,5,
-meshes,9936,69,write whole dataset (s),zarr-vectors (no codec),0.21949 ± 0.00766,,0.947,7,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.22443 ± 0.00317,,0.969,7,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),zarr-vectors (zstd),0.23173 ± 0.00782,,1.0,7,vs precomputed meshes
-meshes,9936,69,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.25323 ± 0.01671,,1.093,7,vs precomputed meshes
-meshes,99936,694,bounding-box query (s),STL,0.01858 ± 0.00003,,0.33,27,box sized to ~100 objects (fraction 0.144092)
-meshes,99936,694,bounding-box query (s),STL,0.01813 ± 0.00016,,1.627,28,"equal box, ~100 vertices (fraction 0.00100064)"
-meshes,99936,694,bounding-box query (s),zarr-vectors,0.05622 ± 0.01626,,1.0,9,box sized to ~100 objects (fraction 0.144092)
-meshes,99936,694,bounding-box query (s),zarr-vectors,0.01114 ± 0.00161,,1.0,46,"equal box, ~100 vertices (fraction 0.00100064)"
-meshes,99936,694,fetch one object (s),STL,0.00162 ± 0.00003,,0.105,200,no object index: full read
-meshes,99936,694,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.005,200,vs precomputed meshes; by id
-meshes,99936,694,fetch one object (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.008,200,vs precomputed meshes; by id
-meshes,99936,694,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00000,,0.01,200,vs precomputed meshes; by id
-meshes,99936,694,fetch one object (s),zarr-vectors,0.01533 ± 0.00031,,1.0,33,object_ids=; reads 1x the object
-meshes,99936,694,fetch one object (s),zarr-vectors (no codec),0.01498 ± 0.00008,,0.977,34,object_ids=
-meshes,99936,694,fetch one object (s),zarr-vectors (no codec),0.01499 ± 0.00065,,0.994,34,vs precomputed meshes; object_ids=
-meshes,99936,694,fetch one object (s),"zarr-vectors (no codec, sharded)",0.01776 ± 0.00080,,1.178,29,vs precomputed meshes; object_ids=
-meshes,99936,694,fetch one object (s),zarr-vectors (zstd),0.01507 ± 0.00064,,1.0,34,vs precomputed meshes; object_ids=
-meshes,99936,694,fetch one object (s),"zarr-vectors (zstd, sharded)",0.01605 ± 0.00068,,1.065,32,vs precomputed meshes; object_ids=
+meshes,9936,69,on-disk size (bytes),zarr-vectors (no codec),"554,262",55.78,4.223,1,
+meshes,9936,69,on-disk size (bytes),zarr-vectors (no codec),"554,262",55.78,4.223,1,vs precomputed meshes
+meshes,9936,69,on-disk size (bytes),"zarr-vectors (no codec, sharded)","578,986",58.27,4.412,1,vs precomputed meshes
+meshes,9936,69,on-disk size (bytes),zarr-vectors (zstd),"131,240",13.21,1.0,1,
+meshes,9936,69,on-disk size (bytes),zarr-vectors (zstd),"131,240",13.21,1.0,1,vs precomputed meshes
+meshes,9936,69,on-disk size (bytes),"zarr-vectors (zstd, no object index)","130,163",13.1,0.992,1,
+meshes,9936,69,on-disk size (bytes),"zarr-vectors (zstd, sharded)","156,384",15.74,1.192,1,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),STL,0.00018 ± 0.00000,,0.012,200,
+meshes,9936,69,read whole dataset (s),precomputed mesh,0.00172 ± 0.00001,,0.115,200,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),precomputed mesh (sharded),0.00041 ± 0.00000,,0.027,200,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.00158 ± 0.00000,,0.105,200,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),zarr-vectors,0.01445 ± 0.00065,,1.0,35,
+meshes,9936,69,read whole dataset (s),zarr-vectors (no codec),0.01251 ± 0.00062,,0.866,40,
+meshes,9936,69,read whole dataset (s),zarr-vectors (no codec),0.01324 ± 0.00052,,0.884,38,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.01577 ± 0.00111,,1.053,32,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),zarr-vectors (zstd),0.01498 ± 0.00062,,1.0,34,vs precomputed meshes
+meshes,9936,69,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.01749 ± 0.00114,,1.167,29,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),STL,0.00178 ± 0.00001,,0.009,200,
+meshes,9936,69,write whole dataset (s),precomputed mesh,0.00979 ± 0.00029,,0.05,52,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),precomputed mesh (sharded),0.00133 ± 0.00001,,0.007,200,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),"precomputed mesh (sharded, gzip)",0.01386 ± 0.00003,,0.071,37,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),zarr-vectors,0.19008 ± 0.01107,,1.0,5,
+meshes,9936,69,write whole dataset (s),zarr-vectors (no codec),0.18267 ± 0.00299,,0.942,7,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.18428 ± 0.00802,,0.951,7,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),zarr-vectors (zstd),0.19387 ± 0.00738,,1.0,7,vs precomputed meshes
+meshes,9936,69,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.21922 ± 0.01007,,1.131,7,vs precomputed meshes
+meshes,99936,694,bounding-box query (s),STL,0.01854 ± 0.00002,,0.837,27,box sized to ~100 objects (fraction 0.144092)
+meshes,99936,694,bounding-box query (s),STL,0.01799 ± 0.00006,,9.392,28,"equal box, ~100 vertices (fraction 0.00100064)"
+meshes,99936,694,bounding-box query (s),zarr-vectors,0.02216 ± 0.00185,,1.0,23,box sized to ~100 objects (fraction 0.144092)
+meshes,99936,694,bounding-box query (s),zarr-vectors,0.00192 ± 0.00017,,1.0,200,"equal box, ~100 vertices (fraction 0.00100064)"
+meshes,99936,694,fetch one object (s),STL,0.00152 ± 0.00001,,0.567,200,no object index: full read
+meshes,99936,694,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.023,200,vs precomputed meshes; by id
+meshes,99936,694,fetch one object (s),precomputed mesh (sharded),0.00013 ± 0.00001,,0.041,200,vs precomputed meshes; by id
+meshes,99936,694,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00000,,0.048,200,vs precomputed meshes; by id
+meshes,99936,694,fetch one object (s),zarr-vectors,0.00268 ± 0.00001,,1.0,187,object_ids=; reads 1x the object
+meshes,99936,694,fetch one object (s),zarr-vectors (no codec),0.00268 ± 0.00001,,1.0,187,object_ids=
+meshes,99936,694,fetch one object (s),zarr-vectors (no codec),0.00302 ± 0.00007,,0.992,166,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object (s),"zarr-vectors (no codec, sharded)",0.00514 ± 0.00017,,1.687,98,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object (s),zarr-vectors (zstd),0.00305 ± 0.00007,,1.0,165,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object (s),"zarr-vectors (zstd, sharded)",0.00340 ± 0.00009,,1.117,148,vs precomputed meshes; object_ids=
 meshes,99936,694,fetch one object: bytes fetched,precomputed mesh,"4,694",,0.132,16,vs precomputed meshes; by id
 meshes,99936,694,fetch one object: bytes fetched,precomputed mesh (sharded),"5,403",,0.152,16,vs precomputed meshes; by id
 meshes,99936,694,fetch one object: bytes fetched,"precomputed mesh (sharded, gzip)","2,528",,0.071,16,vs precomputed meshes; by id
-meshes,99936,694,fetch one object: bytes fetched,zarr-vectors (no codec),"29,851",,0.841,16,vs precomputed meshes; object_ids=
-meshes,99936,694,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","44,750",,1.26,16,vs precomputed meshes; object_ids=
-meshes,99936,694,fetch one object: bytes fetched,zarr-vectors (zstd),"35,503",,1.0,16,vs precomputed meshes; object_ids=
-meshes,99936,694,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","52,616",,1.482,16,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object: bytes fetched,zarr-vectors (no codec),"29,905",,0.841,16,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","44,804",,1.26,16,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object: bytes fetched,zarr-vectors (zstd),"35,557",,1.0,16,vs precomputed meshes; object_ids=
+meshes,99936,694,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","52,670",,1.481,16,vs precomputed meshes; object_ids=
 meshes,99936,694,fetch one object: requests,precomputed mesh,3.0,,0.135,16,vs precomputed meshes; by id
 meshes,99936,694,fetch one object: requests,precomputed mesh (sharded),4.0,,0.18,16,vs precomputed meshes; by id
 meshes,99936,694,fetch one object: requests,"precomputed mesh (sharded, gzip)",4.0,,0.18,16,vs precomputed meshes; by id
@@ -508,76 +508,76 @@ meshes,99936,694,fetch one object: requests,zarr-vectors (zstd),22.2,,1.0,16,vs 
 meshes,99936,694,fetch one object: requests,"zarr-vectors (zstd, sharded)",29.5,,1.326,16,vs precomputed meshes; object_ids=
 meshes,99936,694,on-disk size (bytes),OBJ,"6,771,112",67.75,6.251,1,text
 meshes,99936,694,on-disk size (bytes),OBJ (gzip),"1,730,900",17.32,1.598,1,text-gzip
-meshes,99936,694,on-disk size (bytes),STL,"8,397,484",84.03,7.753,1,binary
+meshes,99936,694,on-disk size (bytes),STL,"8,397,484",84.03,7.752,1,binary
 meshes,99936,694,on-disk size (bytes),STL (gzip),"3,462,130",34.64,3.196,1,binary-gzip
 meshes,99936,694,on-disk size (bytes),precomputed mesh,"3,232,579",32.35,2.984,1,vs precomputed meshes
 meshes,99936,694,on-disk size (bytes),precomputed mesh (sharded),"3,234,783",32.37,2.986,1,vs precomputed meshes
 meshes,99936,694,on-disk size (bytes),"precomputed mesh (sharded, gzip)","1,231,076",12.32,1.137,1,vs precomputed meshes
-meshes,99936,694,on-disk size (bytes),zarr-vectors (no codec),"5,372,809",53.76,4.96,1,
-meshes,99936,694,on-disk size (bytes),zarr-vectors (no codec),"5,372,809",53.76,4.96,1,vs precomputed meshes
-meshes,99936,694,on-disk size (bytes),"zarr-vectors (no codec, sharded)","5,422,193",54.26,5.006,1,vs precomputed meshes
-meshes,99936,694,on-disk size (bytes),zarr-vectors (zstd),"1,083,144",10.84,1.0,1,
-meshes,99936,694,on-disk size (bytes),zarr-vectors (zstd),"1,083,144",10.84,1.0,1,vs precomputed meshes
-meshes,99936,694,on-disk size (bytes),"zarr-vectors (zstd, no object index)","1,067,598",10.68,0.986,1,
-meshes,99936,694,on-disk size (bytes),"zarr-vectors (zstd, sharded)","1,133,368",11.34,1.046,1,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),STL,0.00158 ± 0.00001,,0.01,200,
-meshes,99936,694,read whole dataset (s),precomputed mesh,0.01774 ± 0.00021,,0.112,29,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),precomputed mesh (sharded),0.00350 ± 0.00001,,0.022,143,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.01508 ± 0.00010,,0.096,34,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),zarr-vectors,0.15599 ± 0.00544,,1.0,5,
-meshes,99936,694,read whole dataset (s),zarr-vectors (no codec),0.14539 ± 0.00630,,0.932,5,
-meshes,99936,694,read whole dataset (s),zarr-vectors (no codec),0.14896 ± 0.00139,,0.944,7,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.07665 ± 0.00661,,0.486,7,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),zarr-vectors (zstd),0.15781 ± 0.00366,,1.0,7,vs precomputed meshes
-meshes,99936,694,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.08451 ± 0.00700,,0.536,7,vs precomputed meshes
+meshes,99936,694,on-disk size (bytes),zarr-vectors (no codec),"5,372,863",53.76,4.96,1,
+meshes,99936,694,on-disk size (bytes),zarr-vectors (no codec),"5,372,863",53.76,4.96,1,vs precomputed meshes
+meshes,99936,694,on-disk size (bytes),"zarr-vectors (no codec, sharded)","5,422,247",54.26,5.006,1,vs precomputed meshes
+meshes,99936,694,on-disk size (bytes),zarr-vectors (zstd),"1,083,198",10.84,1.0,1,
+meshes,99936,694,on-disk size (bytes),zarr-vectors (zstd),"1,083,198",10.84,1.0,1,vs precomputed meshes
+meshes,99936,694,on-disk size (bytes),"zarr-vectors (zstd, no object index)","1,067,652",10.68,0.986,1,
+meshes,99936,694,on-disk size (bytes),"zarr-vectors (zstd, sharded)","1,133,422",11.34,1.046,1,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),STL,0.00151 ± 0.00001,,0.029,200,
+meshes,99936,694,read whole dataset (s),precomputed mesh,0.01706 ± 0.00020,,0.322,30,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),precomputed mesh (sharded),0.00351 ± 0.00001,,0.066,143,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.01516 ± 0.00005,,0.286,33,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),zarr-vectors,0.05255 ± 0.00112,,1.0,10,
+meshes,99936,694,read whole dataset (s),zarr-vectors (no codec),0.04554 ± 0.00272,,0.867,11,
+meshes,99936,694,read whole dataset (s),zarr-vectors (no codec),0.04509 ± 0.00075,,0.852,12,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.05098 ± 0.00476,,0.963,10,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),zarr-vectors (zstd),0.05294 ± 0.00107,,1.0,10,vs precomputed meshes
+meshes,99936,694,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.05847 ± 0.00513,,1.104,9,vs precomputed meshes
 meshes,99936,694,round-trip max |Δ| (store units),STL,exact,,,1,99936 in / 99936 out
 meshes,99936,694,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,99936 in / 99936 out
-meshes,99936,694,write whole dataset (s),STL,0.01807 ± 0.00003,,0.042,28,
-meshes,99936,694,write whole dataset (s),precomputed mesh,0.09458 ± 0.00394,,0.21,7,vs precomputed meshes
-meshes,99936,694,write whole dataset (s),precomputed mesh (sharded),0.01150 ± 0.00003,,0.026,44,vs precomputed meshes
-meshes,99936,694,write whole dataset (s),"precomputed mesh (sharded, gzip)",0.13837 ± 0.00139,,0.308,7,vs precomputed meshes
-meshes,99936,694,write whole dataset (s),zarr-vectors,0.43330 ± 0.00708,,1.0,5,
-meshes,99936,694,write whole dataset (s),zarr-vectors (no codec),0.41570 ± 0.00926,,0.925,7,vs precomputed meshes
-meshes,99936,694,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.42718 ± 0.01002,,0.951,7,vs precomputed meshes
-meshes,99936,694,write whole dataset (s),zarr-vectors (zstd),0.44936 ± 0.01740,,1.0,7,vs precomputed meshes
-meshes,99936,694,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.51748 ± 0.00472,,1.152,7,vs precomputed meshes
-meshes,999936,6944,bounding-box query (s),STL,0.22541 ± 0.00017,,3.469,8,box sized to ~100 objects (fraction 0.014401)
-meshes,999936,6944,bounding-box query (s),STL,0.23230 ± 0.00097,,10.143,8,volume fraction 0.001
-meshes,999936,6944,bounding-box query (s),STL,0.23206 ± 0.00087,,3.955,8,volume fraction 0.01
-meshes,999936,6944,bounding-box query (s),STL,0.23285 ± 0.00043,,1.421,8,volume fraction 0.1
-meshes,999936,6944,bounding-box query (s),STL,0.24681 ± 0.00131,,0.394,8,volume fraction 0.5
-meshes,999936,6944,bounding-box query (s),STL,0.25733 ± 0.00111,,0.432,8,volume fraction 1.0
-meshes,999936,6944,bounding-box query (s),STL,0.18496 ± 0.00083,,16.407,8,"equal box, ~100 vertices (fraction 0.00010001)"
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.06498 ± 0.01203,,1.0,8,box sized to ~100 objects (fraction 0.014401)
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.02290 ± 0.00589,,1.0,23,volume fraction 0.001
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.05867 ± 0.00614,,1.0,9,volume fraction 0.01
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.16383 ± 0.01561,,1.0,8,volume fraction 0.1
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.62592 ± 0.04324,,1.0,8,volume fraction 0.5
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.59540 ± 0.00296,,1.0,8,volume fraction 1.0
-meshes,999936,6944,bounding-box query (s),zarr-vectors,0.01127 ± 0.00051,,1.0,45,"equal box, ~100 vertices (fraction 0.00010001)"
-meshes,999936,6944,fetch one object (s),STL,0.05999 ± 0.00239,,3.441,9,no object index: full read
-meshes,999936,6944,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.004,200,vs precomputed meshes; by id
-meshes,999936,6944,fetch one object (s),precomputed mesh (sharded),0.00013 ± 0.00000,,0.007,200,vs precomputed meshes; by id
-meshes,999936,6944,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00000,,0.008,200,vs precomputed meshes; by id
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.02915 ± 0.00356,,1.0,18,8 chunks over the domain; chunk side 500; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.01765 ± 0.00019,,1.0,29,64 chunks over the domain; chunk side 250; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.01783 ± 0.00019,,1.0,29,125 chunks over the domain; chunk side 200; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.01786 ± 0.00023,,1.0,28,512 chunks over the domain; chunk side 125; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.02145 ± 0.00023,,1.0,24,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.06132 ± 0.00252,,1.0,9,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.01743 ± 0.00048,,1.0,29,object_ids=; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors (no codec),0.01621 ± 0.00024,,0.93,31,object_ids=
-meshes,999936,6944,fetch one object (s),zarr-vectors (no codec),0.01803 ± 0.00048,,0.959,28,vs precomputed meshes; object_ids=
-meshes,999936,6944,fetch one object (s),"zarr-vectors (no codec, sharded)",0.02101 ± 0.00072,,1.118,24,vs precomputed meshes; object_ids=
-meshes,999936,6944,fetch one object (s),zarr-vectors (zstd),0.01880 ± 0.00065,,1.0,27,vs precomputed meshes; object_ids=
-meshes,999936,6944,fetch one object (s),"zarr-vectors (zstd, sharded)",0.02078 ± 0.00076,,1.106,25,vs precomputed meshes; object_ids=
+meshes,99936,694,write whole dataset (s),STL,0.01789 ± 0.00013,,0.055,28,
+meshes,99936,694,write whole dataset (s),precomputed mesh,0.09535 ± 0.00246,,0.294,7,vs precomputed meshes
+meshes,99936,694,write whole dataset (s),precomputed mesh (sharded),0.01192 ± 0.00004,,0.037,42,vs precomputed meshes
+meshes,99936,694,write whole dataset (s),"precomputed mesh (sharded, gzip)",0.13704 ± 0.00038,,0.423,7,vs precomputed meshes
+meshes,99936,694,write whole dataset (s),zarr-vectors,0.32581 ± 0.00923,,1.0,5,
+meshes,99936,694,write whole dataset (s),zarr-vectors (no codec),0.29561 ± 0.01887,,0.911,7,vs precomputed meshes
+meshes,99936,694,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.31310 ± 0.01262,,0.965,7,vs precomputed meshes
+meshes,99936,694,write whole dataset (s),zarr-vectors (zstd),0.32434 ± 0.01593,,1.0,7,vs precomputed meshes
+meshes,99936,694,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.41035 ± 0.01308,,1.265,7,vs precomputed meshes
+meshes,999936,6944,bounding-box query (s),STL,0.18608 ± 0.00071,,8.34,8,box sized to ~100 objects (fraction 0.014401)
+meshes,999936,6944,bounding-box query (s),STL,0.23175 ± 0.00066,,39.696,8,volume fraction 0.001
+meshes,999936,6944,bounding-box query (s),STL,0.23223 ± 0.00081,,13.087,8,volume fraction 0.01
+meshes,999936,6944,bounding-box query (s),STL,0.23432 ± 0.00021,,3.769,8,volume fraction 0.1
+meshes,999936,6944,bounding-box query (s),STL,0.24620 ± 0.00046,,1.013,8,volume fraction 0.5
+meshes,999936,6944,bounding-box query (s),STL,0.25886 ± 0.00103,,1.111,8,volume fraction 1.0
+meshes,999936,6944,bounding-box query (s),STL,0.18483 ± 0.00090,,82.548,8,"equal box, ~100 vertices (fraction 0.00010001)"
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.02231 ± 0.00295,,1.0,23,box sized to ~100 objects (fraction 0.014401)
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.00584 ± 0.00089,,1.0,86,volume fraction 0.001
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.01775 ± 0.00142,,1.0,29,volume fraction 0.01
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.06216 ± 0.00556,,1.0,9,volume fraction 0.1
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.24303 ± 0.01648,,1.0,8,volume fraction 0.5
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.23309 ± 0.00076,,1.0,8,volume fraction 1.0
+meshes,999936,6944,bounding-box query (s),zarr-vectors,0.00224 ± 0.00009,,1.0,200,"equal box, ~100 vertices (fraction 0.00010001)"
+meshes,999936,6944,fetch one object (s),STL,0.01929 ± 0.00002,,6.24,26,no object index: full read
+meshes,999936,6944,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.018,200,vs precomputed meshes; by id
+meshes,999936,6944,fetch one object (s),precomputed mesh (sharded),0.00013 ± 0.00000,,0.03,200,vs precomputed meshes; by id
+meshes,999936,6944,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00000,,0.036,200,vs precomputed meshes; by id
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.01039 ± 0.00081,,1.0,49,8 chunks over the domain; chunk side 500; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00364 ± 0.00013,,1.0,138,64 chunks over the domain; chunk side 250; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00320 ± 0.00009,,1.0,157,125 chunks over the domain; chunk side 200; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00297 ± 0.00003,,1.0,169,512 chunks over the domain; chunk side 125; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00383 ± 0.00004,,1.0,131,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.01454 ± 0.00059,,1.0,35,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00309 ± 0.00001,,1.0,162,object_ids=; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors (no codec),0.00264 ± 0.00001,,0.855,190,object_ids=
+meshes,999936,6944,fetch one object (s),zarr-vectors (no codec),0.00348 ± 0.00005,,0.847,144,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object (s),"zarr-vectors (no codec, sharded)",0.00512 ± 0.00012,,1.245,98,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object (s),zarr-vectors (zstd),0.00411 ± 0.00009,,1.0,122,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object (s),"zarr-vectors (zstd, sharded)",0.00433 ± 0.00011,,1.052,116,vs precomputed meshes; object_ids=
 meshes,999936,6944,fetch one object: bytes fetched,precomputed mesh,"4,695",,0.025,16,vs precomputed meshes; by id
 meshes,999936,6944,fetch one object: bytes fetched,precomputed mesh (sharded),"5,537",,0.03,16,vs precomputed meshes; by id
 meshes,999936,6944,fetch one object: bytes fetched,"precomputed mesh (sharded, gzip)","2,650",,0.014,16,vs precomputed meshes; by id
-meshes,999936,6944,fetch one object: bytes fetched,zarr-vectors (no codec),"82,944",,0.449,16,vs precomputed meshes; object_ids=
-meshes,999936,6944,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","96,224",,0.521,16,vs precomputed meshes; object_ids=
-meshes,999936,6944,fetch one object: bytes fetched,zarr-vectors (zstd),"184,538",,1.0,16,vs precomputed meshes; object_ids=
-meshes,999936,6944,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","199,521",,1.081,16,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object: bytes fetched,zarr-vectors (no codec),"82,998",,0.45,16,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","96,278",,0.522,16,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object: bytes fetched,zarr-vectors (zstd),"184,592",,1.0,16,vs precomputed meshes; object_ids=
+meshes,999936,6944,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","199,575",,1.081,16,vs precomputed meshes; object_ids=
 meshes,999936,6944,fetch one object: requests,precomputed mesh,3.0,,0.143,16,vs precomputed meshes; by id
 meshes,999936,6944,fetch one object: requests,precomputed mesh (sharded),4.0,,0.19,16,vs precomputed meshes; by id
 meshes,999936,6944,fetch one object: requests,"precomputed mesh (sharded, gzip)",4.0,,0.19,16,vs precomputed meshes; by id
@@ -592,65 +592,65 @@ meshes,999936,6944,on-disk size (bytes),STL (gzip),"34,632,229",34.63,3.392,1,bi
 meshes,999936,6944,on-disk size (bytes),precomputed mesh,"32,351,023",32.35,3.168,1,vs precomputed meshes
 meshes,999936,6944,on-disk size (bytes),precomputed mesh (sharded),"32,363,367",32.37,3.169,1,vs precomputed meshes
 meshes,999936,6944,on-disk size (bytes),"precomputed mesh (sharded, gzip)","12,306,235",12.31,1.205,1,vs precomputed meshes
-meshes,999936,6944,on-disk size (bytes),zarr-vectors (no codec),"53,366,708",53.37,5.226,1,
-meshes,999936,6944,on-disk size (bytes),zarr-vectors (no codec),"53,366,708",53.37,5.226,1,vs precomputed meshes
-meshes,999936,6944,on-disk size (bytes),"zarr-vectors (no codec, sharded)","53,453,082",53.46,5.235,1,vs precomputed meshes
-meshes,999936,6944,on-disk size (bytes),zarr-vectors (zstd),"10,211,178",10.21,1.0,1,
-meshes,999936,6944,on-disk size (bytes),zarr-vectors (zstd),"10,211,178",10.21,1.0,1,vs precomputed meshes
-meshes,999936,6944,on-disk size (bytes),"zarr-vectors (zstd, no object index)","10,100,624",10.1,0.989,1,
-meshes,999936,6944,on-disk size (bytes),"zarr-vectors (zstd, sharded)","10,299,022",10.3,1.009,1,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),STL,0.05965 ± 0.00059,,0.109,9,
-meshes,999936,6944,read whole dataset (s),precomputed mesh,0.18034 ± 0.00951,,0.317,5,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),precomputed mesh (sharded),0.03997 ± 0.00325,,0.07,13,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.15126 ± 0.00042,,0.266,5,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),zarr-vectors,0.54974 ± 0.00433,,1.0,5,
-meshes,999936,6944,read whole dataset (s),zarr-vectors (no codec),0.50610 ± 0.01145,,0.921,5,
-meshes,999936,6944,read whole dataset (s),zarr-vectors (no codec),0.51825 ± 0.01009,,0.912,5,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.41348 ± 0.02153,,0.728,5,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),zarr-vectors (zstd),0.56808 ± 0.00389,,1.0,5,vs precomputed meshes
-meshes,999936,6944,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.46654 ± 0.01146,,0.821,5,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),STL,0.23512 ± 0.00253,,0.141,5,
-meshes,999936,6944,write whole dataset (s),precomputed mesh,0.93855 ± 0.02573,,0.564,3,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),precomputed mesh (sharded),0.14870 ± 0.01526,,0.089,4,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),"precomputed mesh (sharded, gzip)",1.37348 ± 0.00123,,0.825,3,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),zarr-vectors,1.66761 ± 0.02160,,1.0,5,
-meshes,999936,6944,write whole dataset (s),zarr-vectors,1.38809 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,1.51690 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,1.69375 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,2.77774 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,3.92106 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-meshes,999936,6944,write whole dataset (s),zarr-vectors,16.13496 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
-meshes,999936,6944,write whole dataset (s),zarr-vectors (no codec),1.62981 ± 0.03198,,0.979,3,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),"zarr-vectors (no codec, sharded)",1.67104 ± 0.02739,,1.004,3,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),zarr-vectors (zstd),1.66419 ± 0.04523,,1.0,3,vs precomputed meshes
-meshes,999936,6944,write whole dataset (s),"zarr-vectors (zstd, sharded)",1.82506 ± 0.04290,,1.097,3,vs precomputed meshes
-meshes,1000000,6,fetch one object (s),zarr-vectors,0.06572 ± 0.01726,,1.0,70,"crosses 8 chunks; chunk side 500; 2304-vertex patch at 8 placements, spans 4-8 chunks; mean spans 6 chunks; 2304 vertices read"
-meshes,1000000,15,fetch one object (s),zarr-vectors,0.05028 ± 0.00869,,1.0,89,"crosses 64 chunks; chunk side 250; 2304-vertex patch at 8 placements, spans 12-20 chunks; mean spans 15 chunks; 2304 vertices read"
-meshes,1000000,24,fetch one object (s),zarr-vectors,0.07008 ± 0.02079,,1.0,66,"crosses 125 chunks; chunk side 200; 2304-vertex patch at 8 placements, spans 20-32 chunks; mean spans 24 chunks; 2304 vertices read"
-meshes,1000000,50,fetch one object (s),zarr-vectors,0.12488 ± 0.01595,,1.0,41,"crosses 512 chunks; chunk side 125; 2304-vertex patch at 8 placements, spans 35-66 chunks; mean spans 50 chunks; 2304 vertices read"
-meshes,1000000,83,fetch one object (s),zarr-vectors,0.16265 ± 0.00621,,1.0,40,"crosses 1000 chunks; chunk side 100; 2304-vertex patch at 8 placements, spans 77-91 chunks; mean spans 83 chunks; 2304 vertices read"
-meshes,1000000,294,fetch one object (s),zarr-vectors,0.38864 ± 0.01278,,1.0,40,"crosses 8000 chunks; chunk side 50; 2304-vertex patch at 8 placements, spans 273-312 chunks; mean spans 294 chunks; 2304 vertices read"
-meshes,9999936,69444,bounding-box query (s),STL,2.30018 ± 0.00523,,13.455,8,box sized to ~100 objects (fraction 0.00144)
-meshes,9999936,69444,bounding-box query (s),STL,2.30330 ± 0.00317,,42.865,8,"equal box, ~100 vertices (fraction 1e-05)"
-meshes,9999936,69444,bounding-box query (s),zarr-vectors,0.17095 ± 0.08325,,1.0,8,box sized to ~100 objects (fraction 0.00144)
-meshes,9999936,69444,bounding-box query (s),zarr-vectors,0.05373 ± 0.02258,,1.0,10,"equal box, ~100 vertices (fraction 1e-05)"
-meshes,9999936,69444,fetch one object (s),STL,0.60362 ± 0.00219,,23.823,3,no object index: full read
-meshes,9999936,69444,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.002,200,vs precomputed meshes; by id
-meshes,9999936,69444,fetch one object (s),precomputed mesh (sharded),0.00013 ± 0.00001,,0.004,200,vs precomputed meshes; by id
-meshes,9999936,69444,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00000,,0.005,200,vs precomputed meshes; by id
-meshes,9999936,69444,fetch one object (s),zarr-vectors,0.02534 ± 0.00098,,1.0,20,object_ids=; reads 1x the object
-meshes,9999936,69444,fetch one object (s),zarr-vectors (no codec),0.01871 ± 0.00035,,0.739,27,object_ids=
-meshes,9999936,69444,fetch one object (s),zarr-vectors (no codec),0.02081 ± 0.00081,,0.711,25,vs precomputed meshes; object_ids=
-meshes,9999936,69444,fetch one object (s),"zarr-vectors (no codec, sharded)",0.01969 ± 0.00129,,0.673,26,vs precomputed meshes; object_ids=
-meshes,9999936,69444,fetch one object (s),zarr-vectors (zstd),0.02927 ± 0.00295,,1.0,18,vs precomputed meshes; object_ids=
-meshes,9999936,69444,fetch one object (s),"zarr-vectors (zstd, sharded)",0.02976 ± 0.00313,,1.017,17,vs precomputed meshes; object_ids=
+meshes,999936,6944,on-disk size (bytes),zarr-vectors (no codec),"53,366,762",53.37,5.226,1,
+meshes,999936,6944,on-disk size (bytes),zarr-vectors (no codec),"53,366,762",53.37,5.226,1,vs precomputed meshes
+meshes,999936,6944,on-disk size (bytes),"zarr-vectors (no codec, sharded)","53,453,136",53.46,5.235,1,vs precomputed meshes
+meshes,999936,6944,on-disk size (bytes),zarr-vectors (zstd),"10,211,232",10.21,1.0,1,
+meshes,999936,6944,on-disk size (bytes),zarr-vectors (zstd),"10,211,232",10.21,1.0,1,vs precomputed meshes
+meshes,999936,6944,on-disk size (bytes),"zarr-vectors (zstd, no object index)","10,100,678",10.1,0.989,1,
+meshes,999936,6944,on-disk size (bytes),"zarr-vectors (zstd, sharded)","10,299,076",10.3,1.009,1,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),STL,0.01929 ± 0.00002,,0.098,26,
+meshes,999936,6944,read whole dataset (s),precomputed mesh,0.17923 ± 0.01087,,0.899,5,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),precomputed mesh (sharded),0.04013 ± 0.00314,,0.201,13,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),"precomputed mesh (sharded, gzip)",0.15317 ± 0.00296,,0.769,5,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),zarr-vectors,0.19676 ± 0.00443,,1.0,5,
+meshes,999936,6944,read whole dataset (s),zarr-vectors (no codec),0.15256 ± 0.00924,,0.775,5,
+meshes,999936,6944,read whole dataset (s),zarr-vectors (no codec),0.15080 ± 0.00424,,0.757,5,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.16631 ± 0.01587,,0.834,5,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),zarr-vectors (zstd),0.19931 ± 0.00464,,1.0,5,vs precomputed meshes
+meshes,999936,6944,read whole dataset (s),"zarr-vectors (zstd, sharded)",0.20807 ± 0.00901,,1.044,5,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),STL,0.23082 ± 0.00184,,0.346,5,
+meshes,999936,6944,write whole dataset (s),precomputed mesh,0.95299 ± 0.01569,,1.358,3,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),precomputed mesh (sharded),0.13845 ± 0.00422,,0.197,4,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),"precomputed mesh (sharded, gzip)",1.38006 ± 0.02594,,1.966,3,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.66642 ± 0.01943,,1.0,5,
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.38593 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.49659 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.70007 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,1.65149 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,2.73373 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+meshes,999936,6944,write whole dataset (s),zarr-vectors,14.03329 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (no codec),0.63423 ± 0.04152,,0.904,3,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.65749 ± 0.00379,,0.937,3,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),zarr-vectors (zstd),0.70185 ± 0.06004,,1.0,3,vs precomputed meshes
+meshes,999936,6944,write whole dataset (s),"zarr-vectors (zstd, sharded)",0.83325 ± 0.00802,,1.187,3,vs precomputed meshes
+meshes,1000000,6,fetch one object (s),zarr-vectors,0.04813 ± 0.01412,,1.0,97,"crosses 8 chunks; chunk side 500; 2304-vertex patch at 8 placements, spans 4-8 chunks; mean spans 6 chunks; 2304 vertices read"
+meshes,1000000,15,fetch one object (s),zarr-vectors,0.02696 ± 0.00621,,1.0,163,"crosses 64 chunks; chunk side 250; 2304-vertex patch at 8 placements, spans 12-20 chunks; mean spans 15 chunks; 2304 vertices read"
+meshes,1000000,24,fetch one object (s),zarr-vectors,0.03001 ± 0.00511,,1.0,141,"crosses 125 chunks; chunk side 200; 2304-vertex patch at 8 placements, spans 20-32 chunks; mean spans 24 chunks; 2304 vertices read"
+meshes,1000000,50,fetch one object (s),zarr-vectors,0.03435 ± 0.00568,,1.0,126,"crosses 512 chunks; chunk side 125; 2304-vertex patch at 8 placements, spans 35-66 chunks; mean spans 50 chunks; 2304 vertices read"
+meshes,1000000,83,fetch one object (s),zarr-vectors,0.04601 ± 0.00140,,1.0,90,"crosses 1000 chunks; chunk side 100; 2304-vertex patch at 8 placements, spans 77-91 chunks; mean spans 83 chunks; 2304 vertices read"
+meshes,1000000,294,fetch one object (s),zarr-vectors,0.11708 ± 0.00483,,1.0,40,"crosses 8000 chunks; chunk side 50; 2304-vertex patch at 8 placements, spans 273-312 chunks; mean spans 294 chunks; 2304 vertices read"
+meshes,9999936,69444,bounding-box query (s),STL,2.28910 ± 0.00452,,38.49,8,box sized to ~100 objects (fraction 0.00144)
+meshes,9999936,69444,bounding-box query (s),STL,2.30654 ± 0.00960,,128.994,8,"equal box, ~100 vertices (fraction 1e-05)"
+meshes,9999936,69444,bounding-box query (s),zarr-vectors,0.05947 ± 0.02565,,1.0,9,box sized to ~100 objects (fraction 0.00144)
+meshes,9999936,69444,bounding-box query (s),zarr-vectors,0.01788 ± 0.00426,,1.0,28,"equal box, ~100 vertices (fraction 1e-05)"
+meshes,9999936,69444,fetch one object (s),STL,0.58969 ± 0.00148,,82.717,3,no object index: full read
+meshes,9999936,69444,fetch one object (s),precomputed mesh,0.00007 ± 0.00000,,0.007,200,vs precomputed meshes; by id
+meshes,9999936,69444,fetch one object (s),precomputed mesh (sharded),0.00012 ± 0.00000,,0.012,200,vs precomputed meshes; by id
+meshes,9999936,69444,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00014 ± 0.00000,,0.014,200,vs precomputed meshes; by id
+meshes,9999936,69444,fetch one object (s),zarr-vectors,0.00713 ± 0.00003,,1.0,71,object_ids=; reads 1x the object
+meshes,9999936,69444,fetch one object (s),zarr-vectors (no codec),0.00344 ± 0.00001,,0.483,146,object_ids=
+meshes,9999936,69444,fetch one object (s),zarr-vectors (no codec),0.00449 ± 0.00012,,0.446,112,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object (s),"zarr-vectors (no codec, sharded)",0.00642 ± 0.00021,,0.637,78,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object (s),zarr-vectors (zstd),0.01007 ± 0.00071,,1.0,50,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object (s),"zarr-vectors (zstd, sharded)",0.01042 ± 0.00069,,1.035,48,vs precomputed meshes; object_ids=
 meshes,9999936,69444,fetch one object: bytes fetched,precomputed mesh,"4,696",,0.004,16,vs precomputed meshes; by id
 meshes,9999936,69444,fetch one object: bytes fetched,precomputed mesh (sharded),"5,292",,0.005,16,vs precomputed meshes; by id
 meshes,9999936,69444,fetch one object: bytes fetched,"precomputed mesh (sharded, gzip)","2,413",,0.002,16,vs precomputed meshes; by id
-meshes,9999936,69444,fetch one object: bytes fetched,zarr-vectors (no codec),"189,593",,0.172,16,vs precomputed meshes; object_ids=
-meshes,9999936,69444,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","201,197",,0.183,16,vs precomputed meshes; object_ids=
-meshes,9999936,69444,fetch one object: bytes fetched,zarr-vectors (zstd),"1,100,095",,1.0,16,vs precomputed meshes; object_ids=
-meshes,9999936,69444,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","1,112,635",,1.011,16,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object: bytes fetched,zarr-vectors (no codec),"189,647",,0.172,16,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object: bytes fetched,"zarr-vectors (no codec, sharded)","201,251",,0.183,16,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object: bytes fetched,zarr-vectors (zstd),"1,100,149",,1.0,16,vs precomputed meshes; object_ids=
+meshes,9999936,69444,fetch one object: bytes fetched,"zarr-vectors (zstd, sharded)","1,112,689",,1.011,16,vs precomputed meshes; object_ids=
 meshes,9999936,69444,fetch one object: requests,precomputed mesh,3.0,,0.154,16,vs precomputed meshes; by id
 meshes,9999936,69444,fetch one object: requests,precomputed mesh (sharded),4.0,,0.205,16,vs precomputed meshes; by id
 meshes,9999936,69444,fetch one object: requests,"precomputed mesh (sharded, gzip)",4.0,,0.205,16,vs precomputed meshes; by id
@@ -665,29 +665,29 @@ meshes,9999936,69444,on-disk size (bytes),STL (gzip),"346,351,250",34.64,3.43,1,
 meshes,9999936,69444,on-disk size (bytes),precomputed mesh,"323,597,967",32.36,3.204,1,vs precomputed meshes
 meshes,9999936,69444,on-disk size (bytes),precomputed mesh (sharded),"323,674,808",32.37,3.205,1,vs precomputed meshes
 meshes,9999936,69444,on-disk size (bytes),"precomputed mesh (sharded, gzip)","123,092,778",12.31,1.219,1,vs precomputed meshes
-meshes,9999936,69444,on-disk size (bytes),zarr-vectors (no codec),"532,742,372",53.27,5.275,1,
-meshes,9999936,69444,on-disk size (bytes),zarr-vectors (no codec),"532,742,372",53.27,5.275,1,vs precomputed meshes
-meshes,9999936,69444,on-disk size (bytes),"zarr-vectors (no codec, sharded)","532,841,076",53.28,5.276,1,vs precomputed meshes
-meshes,9999936,69444,on-disk size (bytes),zarr-vectors (zstd),"100,988,151",10.1,1.0,1,
-meshes,9999936,69444,on-disk size (bytes),zarr-vectors (zstd),"100,988,151",10.1,1.0,1,vs precomputed meshes
-meshes,9999936,69444,on-disk size (bytes),"zarr-vectors (zstd, no object index)","99,904,401",9.99,0.989,1,
-meshes,9999936,69444,on-disk size (bytes),"zarr-vectors (zstd, sharded)","101,088,535",10.11,1.001,1,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),STL,0.60427 ± 0.00966,,0.153,3,
-meshes,9999936,69444,read whole dataset (s),precomputed mesh,1.87732 ± 0.34124,,0.471,3,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),precomputed mesh (sharded),0.53181 ± 0.02108,,0.133,3,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),"precomputed mesh (sharded, gzip)",1.55904 ± 0.04508,,0.391,3,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),zarr-vectors,3.94224 ± 0.00999,,1.0,3,
-meshes,9999936,69444,read whole dataset (s),zarr-vectors (no codec),3.46710 ± 0.03422,,0.879,3,
-meshes,9999936,69444,read whole dataset (s),zarr-vectors (no codec),3.49150 ± 0.03652,,0.876,3,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),"zarr-vectors (no codec, sharded)",3.51104 ± 0.09694,,0.881,3,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),zarr-vectors (zstd),3.98687 ± 0.00892,,1.0,3,vs precomputed meshes
-meshes,9999936,69444,read whole dataset (s),"zarr-vectors (zstd, sharded)",3.88166 ± 0.09634,,0.974,3,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),STL,2.39967 ± 0.01253,,0.183,3,
-meshes,9999936,69444,write whole dataset (s),precomputed mesh,10.07615 ± 5.37905,,0.763,2,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),precomputed mesh (sharded),1.62183 ± 0.88871,,0.123,2,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),"precomputed mesh (sharded, gzip)",13.84999 ± 0.28511,,1.049,2,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),zarr-vectors,13.10084 ± 0.20438,,1.0,3,
-meshes,9999936,69444,write whole dataset (s),zarr-vectors (no codec),13.16607 ± 0.46434,,0.997,2,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),"zarr-vectors (no codec, sharded)",13.35028 ± 0.98667,,1.011,2,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),zarr-vectors (zstd),13.20298 ± 1.28138,,1.0,2,vs precomputed meshes
-meshes,9999936,69444,write whole dataset (s),"zarr-vectors (zstd, sharded)",13.46474 ± 1.34095,,1.02,2,vs precomputed meshes
+meshes,9999936,69444,on-disk size (bytes),zarr-vectors (no codec),"532,742,426",53.27,5.275,1,
+meshes,9999936,69444,on-disk size (bytes),zarr-vectors (no codec),"532,742,426",53.27,5.275,1,vs precomputed meshes
+meshes,9999936,69444,on-disk size (bytes),"zarr-vectors (no codec, sharded)","532,841,130",53.28,5.276,1,vs precomputed meshes
+meshes,9999936,69444,on-disk size (bytes),zarr-vectors (zstd),"100,988,205",10.1,1.0,1,
+meshes,9999936,69444,on-disk size (bytes),zarr-vectors (zstd),"100,988,205",10.1,1.0,1,vs precomputed meshes
+meshes,9999936,69444,on-disk size (bytes),"zarr-vectors (zstd, no object index)","99,904,455",9.99,0.989,1,
+meshes,9999936,69444,on-disk size (bytes),"zarr-vectors (zstd, sharded)","101,088,589",10.11,1.001,1,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),STL,0.58720 ± 0.00853,,0.541,3,
+meshes,9999936,69444,read whole dataset (s),precomputed mesh,1.77825 ± 0.21151,,1.687,3,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),precomputed mesh (sharded),0.54086 ± 0.01010,,0.513,3,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),"precomputed mesh (sharded, gzip)",1.56304 ± 0.06609,,1.483,3,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),zarr-vectors,1.08444 ± 0.13622,,1.0,3,
+meshes,9999936,69444,read whole dataset (s),zarr-vectors (no codec),0.84934 ± 0.06655,,0.783,3,
+meshes,9999936,69444,read whole dataset (s),zarr-vectors (no codec),0.81704 ± 0.01453,,0.775,3,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),"zarr-vectors (no codec, sharded)",0.88935 ± 0.09301,,0.844,3,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),zarr-vectors (zstd),1.05402 ± 0.07815,,1.0,3,vs precomputed meshes
+meshes,9999936,69444,read whole dataset (s),"zarr-vectors (zstd, sharded)",1.27609 ± 0.00266,,1.211,3,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),STL,2.43300 ± 0.09967,,0.709,3,
+meshes,9999936,69444,write whole dataset (s),precomputed mesh,9.92533 ± 0.69221,,2.817,2,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),precomputed mesh (sharded),1.59627 ± 0.35916,,0.453,2,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),"precomputed mesh (sharded, gzip)",13.89201 ± 0.52210,,3.943,2,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),zarr-vectors,3.42988 ± 0.49775,,1.0,3,
+meshes,9999936,69444,write whole dataset (s),zarr-vectors (no codec),3.21483 ± 0.27223,,0.912,2,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),"zarr-vectors (no codec, sharded)",3.42775 ± 0.47045,,0.973,2,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),zarr-vectors (zstd),3.52359 ± 3.29660,,1.0,2,vs precomputed meshes
+meshes,9999936,69444,write whole dataset (s),"zarr-vectors (zstd, sharded)",3.63948 ± 0.11615,,1.033,2,vs precomputed meshes

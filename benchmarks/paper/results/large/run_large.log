@@ -167,3 +167,54 @@ wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratch
   TOTAL          45:32
 wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv
 wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/run_large.log
+=== run_large 2026-11-13 12:37:06 sizes=1000,10000,100000,1000000,10000000 out=/tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv ===
+
+--- block 1/9: storage (elapsed 0:00) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks storage --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work
+--- storage done in 7:01 ---
+
+--- block 2/9: timing (elapsed 7:01) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks timing --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- timing done in 4:38 ---
+
+--- block 3/9: spatial (elapsed 11:40) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks spatial --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- spatial done in 4:17 ---
+
+--- block 4/9: chunked (elapsed 15:57) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks chunked --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- chunked done in 9:32 ---
+
+--- block 5/9: fidelity (elapsed 25:29) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks fidelity --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- fidelity done in 0:06 ---
+
+--- block 6/9: chunks (elapsed 25:35) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks chunks --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- chunks done in 0:52 ---
+
+--- block 7/9: fragments (elapsed 26:27) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks fragments --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- fragments done in 3:55 ---
+
+--- block 8/9: idchunk (elapsed 30:22) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks idchunk --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- idchunk done in 2:08 ---
+
+--- block 9/9: mesh_precomputed (elapsed 32:30) ---
+    /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/benchenv/bin/python /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv --blocks mesh_precomputed --workdir /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work --replace
+--- mesh_precomputed done in 4:00 ---
+
+=== summary ===
+  storage         7:01   19.2%
+  timing          4:38   12.7%
+  spatial         4:17   11.7%
+  chunked         9:32   26.1%
+  fidelity        0:06    0.3%
+  chunks          0:52    2.4%
+  fragments       3:55   10.7%
+  idchunk         2:08    5.9%
+  mesh_precomputed      4:00   11.0%
+  TOTAL          36:30
+wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/measurements.csv
+wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/large/run_large.log

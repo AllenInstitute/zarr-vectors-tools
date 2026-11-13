@@ -9,9 +9,9 @@
   "nibabel": "5.4.2",
   "networkx": "3.7",
   "zarr_vectors": "0.9.3.dev81+g3edf1ee0f",
-  "zarr_vectors_git": "41c3da9",
-  "zarr_vectors_tree_sha": "2c8a5a0f54ec",
-  "zarr_vectors_tools_git": "910bc68-dirty",
+  "zarr_vectors_git": "fae5b2e",
+  "zarr_vectors_tree_sha": "bfa0f3e97e2d",
+  "zarr_vectors_tools_git": "c38a0ab-dirty",
   "domain": 1000.0,
   "chunk_shape": [
     200.0,
@@ -28,13 +28,15 @@
     1000,
     10000,
     100000,
-    1000000
+    1000000,
+    10000000
   ],
   "timing_runs": {
     "1000": 5,
     "10000": 5,
     "100000": 5,
-    "1000000": 5
+    "1000000": 5,
+    "10000000": 3
   },
   "verts_per_object": {
     "points": 1,
@@ -44,6 +46,19 @@
     "meshes": 144
   },
   "codec": "zstd",
+  "point_codec": [
+    {
+      "name": "blosc",
+      "configuration": {
+        "cname": "lz4",
+        "clevel": 5,
+        "shuffle": "shuffle",
+        "typesize": 4,
+        "blocksize": 0
+      }
+    }
+  ],
+  "streamline_manifest_layout": "dense",
   "workdir": "/tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work",
   "workdir_fstype": "xfs",
   "fractions": [
@@ -63,11 +78,5 @@
     125.0,
     100.0,
     50.0
-  ],
-  "previous_run": {
-    "zarr_vectors_tools_git": "b8ea780-dirty"
-  },
-  "mixed_run": [
-    "fragments"
   ]
 }
