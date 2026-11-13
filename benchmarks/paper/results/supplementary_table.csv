@@ -100,12 +100,12 @@ point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.04152 ± 0.001
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.05479 ± 0.00066,,1.0,10,volume fraction 1.0
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00058 ± 0.00002,,1.0,200,"equal box, ~100 vertices (fraction 0.0001)"
 point cloud,1000000,1000000,fetch one object (s),PLY,0.00001 ± 0.00000,,0.023,200,fixed-width record: seek + 12-byte read
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00078 ± 0.00002,,1.0,200,8 chunks over the domain; chunk side 500; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00048 ± 0.00002,,1.0,200,64 chunks over the domain; chunk side 250; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00045 ± 0.00002,,1.0,200,125 chunks over the domain; chunk side 200; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00046 ± 0.00002,,1.0,200,512 chunks over the domain; chunk side 125; reads 1x the object
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00051 ± 0.00002,,1.0,200,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00114 ± 0.00002,,1.0,200,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00094 ± 0.00002,,1.0,200,8 chunks over the domain; chunk side 500; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00054 ± 0.00002,,1.0,200,64 chunks over the domain; chunk side 250; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00054 ± 0.00002,,1.0,200,125 chunks over the domain; chunk side 200; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00050 ± 0.00001,,1.0,200,512 chunks over the domain; chunk side 125; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00054 ± 0.00002,,1.0,200,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00137 ± 0.00003,,1.0,200,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00076 ± 0.00001,,1.0,200,crosses 8 chunks; chunk side 500; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00046 ± 0.00001,,1.0,200,crosses 64 chunks; chunk side 250; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00045 ± 0.00001,,1.0,200,crosses 125 chunks; chunk side 200; one point spans 1 chunks; 1 vertices read
@@ -135,12 +135,12 @@ point cloud,1000000,1000000,replace one object (s),PLY,0.00002 ± 0.00000,,0.003
 point cloud,1000000,1000000,replace one object (s),zarr-vectors,0.00844 ± 0.00005,,1.0,60,"VertexRef.from_position, in place"
 point cloud,1000000,1000000,write whole dataset (s),PLY,0.00292 ± 0.00000,,0.018,172,
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.15826 ± 0.00596,,1.0,5,
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.09469 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.12043 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.16137 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.34108 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.57098 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,3.89638 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.12128 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.14121 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.14979 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.29520 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.39925 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,3.14145 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
 streamlines,972,83,bounding-box query (s),TRK,0.00125 ± 0.00001,,0.19,200,box sized to ~100 objects (fraction 1.0)
 streamlines,972,83,bounding-box query (s),TRK,0.00118 ± 0.00001,,0.285,200,"equal box, ~100 vertices (fraction 0.10288066)"
 streamlines,972,83,bounding-box query (s),zarr-vectors,0.00656 ± 0.00007,,1.0,77,box sized to ~100 objects (fraction 1.0)
@@ -225,13 +225,19 @@ streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.52925 ± 0.03201,
 streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.50129 ± 0.01388,,1.0,8,volume fraction 1.0
 streamlines,958210,83333,bounding-box query (s),zarr-vectors,0.02787 ± 0.00298,,1.0,18,"equal box, ~100 vertices (fraction 0.00010436)"
 streamlines,958210,83333,fetch one object (s),TRK,0.29650 ± 0.00544,,46.248,5,variable-length records: full scan
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01007 ± 0.00011,,1.0,50,8 chunks over the domain; chunk side 500; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00682 ± 0.00004,,1.0,74,64 chunks over the domain; chunk side 250; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00679 ± 0.00004,,1.0,74,125 chunks over the domain; chunk side 200; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00698 ± 0.00007,,1.0,72,512 chunks over the domain; chunk side 125; reads 1x the object
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00669 ± 0.00007,,1.0,75,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00775 ± 0.00014,,1.0,65,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00803 ± 0.00033,,1.0,63,8 chunks over the domain; chunk side 500; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00718 ± 0.00018,,1.0,70,64 chunks over the domain; chunk side 250; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00648 ± 0.00018,,1.0,78,125 chunks over the domain; chunk side 200; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00630 ± 0.00054,,1.0,80,512 chunks over the domain; chunk side 125; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00594 ± 0.00024,,1.0,85,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00734 ± 0.00023,,1.0,69,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
 streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00641 ± 0.00015,,1.0,79,object_ids=; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00435 ± 0.00007,,1.0,115,8 chunks over the domain; 10417 objects per cell
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00280 ± 0.00006,,1.0,179,64 chunks over the domain; 1303 objects per cell
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00225 ± 0.00002,,1.0,200,125 chunks over the domain; 667 objects per cell
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00220 ± 0.00004,,1.0,200,512 chunks over the domain; 163 objects per cell
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00226 ± 0.00002,,1.0,200,993 chunks over the domain; 84 objects per cell
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00325 ± 0.00005,,1.0,154,"7,576 chunks over the domain; 11 objects per cell"
 streamlines,958210,83333,fetch one object (s),zarr-vectors (no codec),0.00641 ± 0.00006,,1.0,79,object_ids=
 streamlines,958210,83333,on-disk size (bytes),TRK,"11,832,852",12.35,1.017,1,binary
 streamlines,958210,83333,on-disk size (bytes),TRK (gzip),"10,459,797",10.92,0.899,1,binary-gzip
@@ -248,12 +254,18 @@ streamlines,958210,83333,replace one object (s),TRK,1.58182 ± 0.01970,,46.614,5
 streamlines,958210,83333,replace one object (s),zarr-vectors,0.03393 ± 0.00621,,1.0,15,"edit_fragment via object manifest, in place"
 streamlines,958210,83333,write whole dataset (s),TRK,1.26431 ± 0.01410,,2.39,5,
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.52907 ± 0.03232,,1.0,5,
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.28390 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.40547 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.54165 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.17510 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.86730 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-streamlines,958210,83333,write whole dataset (s),zarr-vectors,10.25083 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.26146 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.33855 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.43842 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,0.92704 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,1.56611 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors,9.27901 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),0.38381 ± 0.00000,,1.0,1,8 chunks over the domain; 10417 objects per cell
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),0.37556 ± 0.00000,,1.0,1,64 chunks over the domain; 1303 objects per cell
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),0.37847 ± 0.00000,,1.0,1,125 chunks over the domain; 667 objects per cell
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),0.56112 ± 0.00000,,1.0,1,512 chunks over the domain; 163 objects per cell
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),0.77465 ± 0.00000,,1.0,1,993 chunks over the domain; 84 objects per cell
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),3.90625 ± 0.00000,,1.0,1,"7,576 chunks over the domain; 11 objects per cell"
 streamlines,1000000,9,fetch one object (s),zarr-vectors,0.01817 ± 0.00004,,1.0,28,crosses 8 chunks; chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
 streamlines,1000000,27,fetch one object (s),zarr-vectors,0.01137 ± 0.00005,,1.0,44,crosses 64 chunks; chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
 streamlines,1000000,23,fetch one object (s),zarr-vectors,0.00674 ± 0.00004,,1.0,75,crosses 125 chunks; chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
@@ -503,13 +515,19 @@ meshes,999936,6944,fetch one object (s),STL,0.02347 ± 0.00001,,7.476,22,no obje
 meshes,999936,6944,fetch one object (s),precomputed mesh,0.00007 ± 0.00001,,0.017,200,vs precomputed meshes; by id
 meshes,999936,6944,fetch one object (s),precomputed mesh (sharded),0.00013 ± 0.00001,,0.031,200,vs precomputed meshes; by id
 meshes,999936,6944,fetch one object (s),"precomputed mesh (sharded, gzip)",0.00015 ± 0.00001,,0.035,200,vs precomputed meshes; by id
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.01027 ± 0.00008,,1.0,49,8 chunks over the domain; chunk side 500; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.00358 ± 0.00004,,1.0,140,64 chunks over the domain; chunk side 250; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.00317 ± 0.00003,,1.0,158,125 chunks over the domain; chunk side 200; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.00301 ± 0.00005,,1.0,166,512 chunks over the domain; chunk side 125; reads 1x the object
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.00386 ± 0.00004,,1.0,130,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-meshes,999936,6944,fetch one object (s),zarr-vectors,0.01484 ± 0.00067,,1.0,34,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.01070 ± 0.00055,,1.0,47,8 chunks over the domain; chunk side 500; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00370 ± 0.00003,,1.0,135,64 chunks over the domain; chunk side 250; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00334 ± 0.00007,,1.0,150,125 chunks over the domain; chunk side 200; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00311 ± 0.00004,,1.0,161,512 chunks over the domain; chunk side 125; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.00398 ± 0.00009,,1.0,126,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+meshes,999936,6944,fetch one object (s),zarr-vectors,0.01584 ± 0.00093,,1.0,32,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
 meshes,999936,6944,fetch one object (s),zarr-vectors,0.00314 ± 0.00002,,1.0,160,object_ids=; reads 1x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00963 ± 0.00007,,1.0,52,8 chunks over the domain; 868 objects per cell
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00314 ± 0.00003,,1.0,160,64 chunks over the domain; 109 objects per cell
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00275 ± 0.00005,,1.0,182,124 chunks over the domain; 56 objects per cell
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00258 ± 0.00005,,1.0,194,496 chunks over the domain; 14 objects per cell
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00255 ± 0.00003,,1.0,197,992 chunks over the domain; 7 objects per cell
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00427 ± 0.00006,,1.0,118,"6,944 chunks over the domain; 1 objects per cell"
 meshes,999936,6944,fetch one object (s),zarr-vectors (no codec),0.00271 ± 0.00001,,0.862,185,object_ids=
 meshes,999936,6944,fetch one object (s),zarr-vectors (no codec),0.00357 ± 0.00006,,0.843,141,vs precomputed meshes; object_ids=
 meshes,999936,6944,fetch one object (s),"zarr-vectors (no codec, sharded)",0.00566 ± 0.00015,,1.338,89,vs precomputed meshes; object_ids=
@@ -558,12 +576,18 @@ meshes,999936,6944,write whole dataset (s),precomputed mesh,0.96577 ± 0.08585,,
 meshes,999936,6944,write whole dataset (s),precomputed mesh (sharded),0.11897 ± 0.00026,,0.176,5,vs precomputed meshes
 meshes,999936,6944,write whole dataset (s),"precomputed mesh (sharded, gzip)",1.37431 ± 0.00318,,2.032,3,vs precomputed meshes
 meshes,999936,6944,write whole dataset (s),zarr-vectors,0.67708 ± 0.03086,,1.0,5,
-meshes,999936,6944,write whole dataset (s),zarr-vectors,0.36819 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,0.47130 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,0.68962 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,1.62939 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
-meshes,999936,6944,write whole dataset (s),zarr-vectors,2.63871 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
-meshes,999936,6944,write whole dataset (s),zarr-vectors,13.78049 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.37407 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.47978 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,0.65574 ± 0.00000,,1.0,1,125 chunks over the domain; chunk side 200; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,1.45312 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
+meshes,999936,6944,write whole dataset (s),zarr-vectors,2.68366 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
+meshes,999936,6944,write whole dataset (s),zarr-vectors,12.48385 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),0.35948 ± 0.00000,,1.0,1,8 chunks over the domain; 868 objects per cell
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),0.38982 ± 0.00000,,1.0,1,64 chunks over the domain; 109 objects per cell
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),0.48773 ± 0.00000,,1.0,1,124 chunks over the domain; 56 objects per cell
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),0.98554 ± 0.00000,,1.0,1,496 chunks over the domain; 14 objects per cell
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),1.61384 ± 0.00000,,1.0,1,992 chunks over the domain; 7 objects per cell
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),10.15272 ± 0.00000,,1.0,1,"6,944 chunks over the domain; 1 objects per cell"
 meshes,999936,6944,write whole dataset (s),zarr-vectors (no codec),0.61783 ± 0.00187,,0.913,3,vs precomputed meshes
 meshes,999936,6944,write whole dataset (s),"zarr-vectors (no codec, sharded)",0.64019 ± 0.01629,,0.947,3,vs precomputed meshes
 meshes,999936,6944,write whole dataset (s),zarr-vectors (zstd),0.67638 ± 0.03743,,1.0,3,vs precomputed meshes

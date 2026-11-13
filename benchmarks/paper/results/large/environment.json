@@ -11,7 +11,7 @@
   "zarr_vectors": "0.9.3.dev81+g3edf1ee0f",
   "zarr_vectors_git": "fae5b2e",
   "zarr_vectors_tree_sha": "bfa0f3e97e2d",
-  "zarr_vectors_tools_git": "c38a0ab-dirty",
+  "zarr_vectors_tools_git": "956c9cd-dirty",
   "domain": 1000.0,
   "chunk_shape": [
     200.0,
@@ -28,15 +28,13 @@
     1000,
     10000,
     100000,
-    1000000,
-    10000000
+    1000000
   ],
   "timing_runs": {
     "1000": 5,
     "10000": 5,
     "100000": 5,
-    "1000000": 5,
-    "10000000": 3
+    "1000000": 5
   },
   "verts_per_object": {
     "points": 1,
@@ -78,5 +76,11 @@
     125.0,
     100.0,
     50.0
+  ],
+  "previous_run": {
+    "zarr_vectors_tools_git": "c38a0ab-dirty"
+  },
+  "mixed_run": [
+    "chunks"
   ]
 }
