@@ -141,6 +141,17 @@ FIXED_SELECTION = 100          # objects targeted by the fixed-selection sweep
 FIXED_VERTICES = 100           # vertices targeted by the equal-box sweep
 
 CODEC = "zstd"                 # deployed configuration for every timing block
+# Point clouds are uniform float32 triples, which Blosc lz4 with byte
+# shuffle reads at close to uncompressed speed while staying smaller than
+# zstd; the other geometries keep zstd.
+POINT_CODEC = [{"name": "blosc", "configuration": {
+    "cname": "lz4", "clevel": 5, "shuffle": "shuffle", "typesize": 4,
+    "blocksize": 0}}]
+# Streamline stores carry one object per streamline, so their object
+# index is written in the dense layout (format 0.9.4+), which a box query
+# scans in one pass.  Skeletons and graphs have few objects and keep the
+# default.
+STREAMLINE_MANIFESTS = "dense"
 
 
 # --------------------------------------------------------------------
@@ -169,6 +180,31 @@ def n_runs(op: str, n: int) -> int:
 # zarr-vectors adapters
 # --------------------------------------------------------------------
 
+# Every read goes through a handle opened once per store, as a viewer or
+# an analysis session holds one: opening a store reads and checks its
+# root metadata, which is a per-session cost, not a per-query one.  The
+# handle caches metadata only -- a whole-store read takes the same time
+# through it as through a path -- so no measured read is served from a
+# previous one.  ``Workspace.clear`` drops the handle with the store, so
+# a store rewritten under the same name is opened afresh.
+_HANDLES: dict = {}
+
+
+def src(store):
+    """An open read handle on ``store``, opened on first use."""
+    key = str(store)
+    h = _HANDLES.get(key)
+    if h is None:
+        h = _HANDLES[key] = open_store(key)
+    return h
+
+
+def forget(prefix) -> None:
+    """Drop every handle on a store under ``prefix``."""
+    prefix = str(prefix)
+    for key in [k for k in _HANDLES if k.startswith(prefix)]:
+        del _HANDLES[key]
+
 def _cs(chunk):
     """Chunk shape: the deployed one unless a sweep asks for another."""
     return H.CHUNK if chunk is None else (float(chunk),) * 3
@@ -185,7 +221,7 @@ def _bs(chunk):
     return H.BIN if chunk is None else (float(chunk) / 4.0,) * 3
 
 
-def zv_write_points(path, data, *, codec=CODEC, object_ids=False,
+def zv_write_points(path, data, *, codec=POINT_CODEC, object_ids=False,
                     chunk=None):
     """A point cloud needs no object index.
 
@@ -205,7 +241,8 @@ def zv_write_points(path, data, *, codec=CODEC, object_ids=False,
 def zv_write_streamlines(path, data, *, codec=CODEC, object_ids=True,
                     chunk=None):
     write_polylines(str(path), data["polylines"], chunk_shape=_cs(chunk),
-                    bin_shape=_bs(chunk), bounds=H.BOUNDS, compressor=codec)
+                    bin_shape=_bs(chunk), bounds=H.BOUNDS, compressor=codec,
+                    manifest_layout=STREAMLINE_MANIFESTS)
 
 
 def zv_write_skeletons(path, data, *, codec=CODEC, object_ids=True,
@@ -224,11 +261,12 @@ def zv_write_graphs(path, data, *, codec=CODEC, object_ids=True,
 
 
 def zv_write_meshes(path, data, *, codec=CODEC, object_ids=True,
-                    chunk=None):
+                    chunk=None, shard_shape=None):
     write_mesh(str(path), data["vertices"], data["faces"],
                chunk_shape=_cs(chunk), bin_shape=_bs(chunk), bounds=H.BOUNDS,
                compressor=codec,
-               object_ids=data["object_ids"] if object_ids else None)
+               object_ids=data["object_ids"] if object_ids else None,
+               shard_shape=shard_shape)
 
 
 ZV_WRITERS = {
@@ -253,15 +291,18 @@ def zv_replace_point(path, index, data):
 
     ``VertexRef.from_position`` resolves the chunk and offset from the
     coordinate itself, so this works on a store with no object index.
+    The session is non-atomic: the row is overwritten in place, as PLY
+    does.  An atomic edit would append the new position as a new row
+    and keep the old one, so the store would gain a point per repeat
+    rather than replace one.
     """
     target = data["positions"][int(index)]
     got = read_points(str(path), bbox=_point_bbox(target))
     new = np.asarray(got["positions"][0], dtype=np.float32) + np.float32(0.25)
     root = open_store(str(path), mode="r+")
-    with EditSession(root, atomic=True, refresh_pyramid=False) as ed:
+    with EditSession(root, atomic=False, refresh_pyramid=False) as ed:
         ref = VertexRef.from_position(root, level=0, pos=target.tolist())
-        ed.edit_vertex(ref, new_pos=np.clip(new, 0.0, H.DOMAIN - 1).tolist(),
-                       atomic=True)
+        ed.edit_vertex(ref, new_pos=np.clip(new, 0.0, H.DOMAIN - 1).tolist())
 
 
 def zv_replace_streamline(path, oid):
@@ -270,12 +311,16 @@ def zv_replace_streamline(path, oid):
     A streamline that crosses a chunk boundary is stored as several
     fragments; each is rewritten with its own slice of the new vertices,
     so the operation is a true whole-object replacement regardless of how
-    the object is split.
+    the object is split.  The session is non-atomic: each fragment's rows
+    are overwritten in place and the manifest is left as it is, as TRK
+    rewrites its record.  An atomic edit is copy-on-write -- it appends
+    new fragments and gives the object a new id, leaving the original
+    unchanged -- which is a versioned edit, not a replacement.
     """
     frags = read_polylines(str(path), object_ids=[int(oid)])["polylines"][0]
     root = open_store(str(path), mode="r+")
     manifest = read_object_manifests(root["0"], ids=[int(oid)])[int(oid)]
-    with EditSession(root, atomic=True, refresh_pyramid=False) as ed:
+    with EditSession(root, atomic=False, refresh_pyramid=False) as ed:
         for (chunk, frag_idx), frag in zip(manifest, frags):
             new = np.clip(np.asarray(frag, dtype=np.float32) + np.float32(0.25),
                           0.0, H.DOMAIN - 1)
@@ -288,6 +333,31 @@ def bbox_for_fraction(fraction: float):
     side = H.DOMAIN * float(fraction) ** (1 / 3)
     lo = np.full(3, (H.DOMAIN - side) / 2.0)
     return lo.tolist(), (lo + side).tolist()
+
+
+# A chunked read costs what the chunks a box touches hold, so one box
+# position samples one alignment with the grid: a centred box shrinking
+# with N touched 125, then 27, then 1 of the 200-unit chunks, and the
+# mesh curve stepped with it (31 -> 162 -> 48 ms from 10^5 to 10^7).
+# Every region query is therefore timed over BOX_PLACEMENTS boxes of the
+# same volume at seeded random positions, round-robin, and reported as
+# the mean: the expected cost of a box of that size, not of one place.
+BOX_PLACEMENTS = 8
+
+
+def boxes_for_fraction(fraction: float, k: int = BOX_PLACEMENTS):
+    """``k`` boxes covering ``fraction`` of the domain, placed at random."""
+    side = H.DOMAIN * float(fraction) ** (1 / 3)
+    rng = np.random.default_rng(int(round(float(fraction) * 1e9)) + 7)
+    los = rng.uniform(0.0, max(0.0, H.DOMAIN - side), size=(k, 3))
+    return [(lo.tolist(), (lo + side).tolist()) for lo in los]
+
+
+def repeat_boxes(fn, boxes, n_min):
+    """``H.repeat`` over ``boxes`` in turn; each is used equally often."""
+    k = len(boxes)
+    runs = k * max(1, -(-int(n_min) // k))
+    return H.repeat(lambda b: fn(*b), runs, setup=lambda i: boxes[i % k])
 
 
 # --------------------------------------------------------------------
@@ -496,14 +566,46 @@ def block_timing(rows, sizes, ws):
             m, hw, k = H.repeat(lambda: _zv_fetch_one(geom, store, oid, data),
                                 r)
             over = _fetch_overshoot(geom, store, oid, data)
-            api = {"points": "bbox= around the point",
-                   "streamlines": "object_ids=",
-                   "meshes": "chunks= then filter (no object_ids= on read_mesh)"}
+            if geom == "points":
+                api = "bbox= around the point"
+            elif geom == "streamlines" or (
+                    mesh_fetch_route(store, oid) == "object_ids="):
+                api = "object_ids="
+            else:
+                api = "chunks= then filter (no object_ids= on read_mesh)"
             add("fetch_one", "zarr-vectors", m, hw, k,
-                detail=f"{api[geom]}; reads {over:.0f}x the object")
+                detail=f"{api}; reads {over:.0f}x the object")
             m, hw, k = H.repeat(lambda: _comp_fetch_one(geom, cfile, oid, data),
                                 r)
             add("fetch_one", comp, m, hw, k, detail=_fetch_note(geom))
+
+            # ---- the same reads from an uncompressed store -----------
+            # zstd is the deployed configuration and what the size panels
+            # claim; no codec is the read-speed end of that trade.  An
+            # uncompressed cell is range-readable, so a fragment or one
+            # object's rows arrive as a byte range rather than a decoded
+            # chunk.  Points get an object index here, so a point can be
+            # fetched by id -- the way PLY is -- as well as by position.
+            raw_tag = f"r_{geom}_{n_obj}"
+            raw = ws.store(raw_tag)
+            if geom == "points":
+                zv_write_points(raw, data, codec=None, object_ids=True)
+            else:
+                ZV_WRITERS[geom](raw, data, codec=None)
+            m, hw, k = H.repeat(lambda: _zv_read_full(geom, raw), r)
+            add("read_full", "zarr-vectors (no codec)", m, hw, k)
+            m, hw, k = H.repeat(lambda: _zv_fetch_one(geom, raw, oid, data), r)
+            add("fetch_one", "zarr-vectors (no codec)", m, hw, k, detail=api)
+            if geom == "points":
+                got = read_points(src(raw), object_ids=[int(oid)])["positions"]
+                if not np.array_equal(np.asarray(got).reshape(-1, 3),
+                                      data["positions"][int(oid)][None, :]):
+                    raise AssertionError(f"point {oid} by id came back wrong")
+                m, hw, k = H.repeat(
+                    lambda: read_points(src(raw), object_ids=[int(oid)]), r)
+                add("fetch_one", "zarr-vectors (no codec, by id)", m, hw, k,
+                    detail="object_ids= through the object index")
+            ws.clear(raw_tag)
 
             # ---- read-modify-write one object -----------------------
             if geom in ("points", "streamlines"):
@@ -517,8 +619,9 @@ def block_timing(rows, sizes, ws):
                 # benefits from the previous run's warm chunk.
                 m, hw, k = H.repeat(fn, r, setup=lambda i: i)
                 add("replace_one", "zarr-vectors", m, hw, k,
-                    detail="VertexRef.from_position" if geom == "points"
-                    else "edit_fragment via object manifest")
+                    detail="VertexRef.from_position, in place"
+                    if geom == "points"
+                    else "edit_fragment via object manifest, in place")
                 m, hw, k = H.repeat(
                     lambda i: _comp_replace_one(geom, cfile,
                                                 (oid + i * 7) % no, data),
@@ -539,10 +642,10 @@ def _comp_write(geom, path, data):
 
 def _zv_read_full(geom, store):
     if geom == "points":
-        return read_points(str(store))
+        return read_points(src(store))
     if geom == "streamlines":
-        return read_polylines(str(store))
-    return read_mesh(str(store))
+        return read_polylines(src(store))
+    return read_mesh(src(store))
 
 
 def _comp_read_full(geom, path):
@@ -567,22 +670,44 @@ def _mesh_object_chunks(data, oid, chunk=None):
     return [tuple(int(x) for x in c) for c in np.unique(cc, axis=0)]
 
 
+# Whether the installed ``read_mesh`` can scope a read by object.  Decided
+# on first use rather than by version, because what matters is what the
+# install does: zarr-vectors before the object read was added declared
+# ``object_ids=`` and raised ``NotImplementedError`` for it.  Running this
+# script against such an install is how the "before" numbers are made.
+_MESH_BY_OBJECT: bool | None = None
+
+
+def mesh_fetch_route(store, oid) -> str:
+    """``"object_ids="`` or, on an install without it, ``"chunks="``."""
+    global _MESH_BY_OBJECT
+    if _MESH_BY_OBJECT is None:
+        try:
+            read_mesh(src(store), object_ids=[int(oid)])
+            _MESH_BY_OBJECT = True
+        except NotImplementedError:
+            _MESH_BY_OBJECT = False
+    return "object_ids=" if _MESH_BY_OBJECT else "chunks="
+
+
 def _zv_fetch_one(geom, store, oid, data, chunk=None):
     """Fetch exactly one object, by the cheapest route the public API has.
 
-    All three geometries return the whole object and nothing less.  What
-    differs is how much extra comes with it: points and streamlines
-    return the object alone, while ``read_mesh`` has no ``object_ids=``
-    filter, so a mesh patch has to arrive inside its chunks and be
-    filtered locally.  ``fetch_overshoot`` records that amplification per
-    row so the mesh series is read for what it is.
+    All three geometries return the whole object and nothing less.  Points
+    and streamlines, and meshes on a current install, come back alone.  A
+    mesh on an install whose ``read_mesh`` cannot scope by object arrives
+    inside its chunks and is filtered locally, and ``fetch_overshoot``
+    records that amplification per row so the series is read for what
+    it is.
     """
     if geom == "points":
-        return read_points(str(store),
+        return read_points(src(store),
                            bbox=_point_bbox(data["positions"][int(oid)]))
     if geom == "streamlines":
-        return read_polylines(str(store), object_ids=[int(oid)])
-    got = read_mesh(str(store), chunks=_mesh_object_chunks(data, oid, chunk))
+        return read_polylines(src(store), object_ids=[int(oid)])
+    if mesh_fetch_route(store, oid) == "object_ids=":
+        return read_mesh(src(store), object_ids=[int(oid)])
+    got = read_mesh(src(store), chunks=_mesh_object_chunks(data, oid, chunk))
     want = data["vertices"][data["object_ids"] == oid]
     keep = np.isin(got["vertices"].view([("", got["vertices"].dtype)] * 3),
                    want.view([("", want.dtype)] * 3))
@@ -597,6 +722,9 @@ def _fetch_overshoot(geom, store, oid, data, chunk=None):
     elif geom == "streamlines":
         n_read = sum(sum(len(f) for f in o) for o in got["polylines"])
         n_want = len(data["polylines"][int(oid)])
+    elif mesh_fetch_route(store, oid) == "object_ids=":
+        n_read = len(got["vertices"])
+        n_want = int((data["object_ids"] == oid).sum())
     else:
         n_read = len(read_mesh(
             str(store),
@@ -613,11 +741,18 @@ def _fetch_note(geom):
     return "no object index: full read"
 
 
+_PLY_OFFSETS: dict = {}
+
+
 def _comp_fetch_one(geom, path, oid, data):
     if geom == "points":
         # Best case available to PLY: the row index is known, so seek
-        # straight to the record instead of reading the file.
-        off = F._ply_data_offset(path)
+        # straight to the record instead of reading the file.  The
+        # header is parsed once per file, as zarr-vectors' store is
+        # opened once per store (see ``src``).
+        off = _PLY_OFFSETS.get(str(path))
+        if off is None:
+            off = _PLY_OFFSETS[str(path)] = F._ply_data_offset(path)
         with open(path, "rb") as fh:
             fh.seek(off + int(oid) * F.PLY_ITEMSIZE)
             return np.frombuffer(fh.read(F.PLY_ITEMSIZE), dtype="<f4")
@@ -647,10 +782,27 @@ def _comp_replace_one(geom, path, oid, data):
 
 def _zv_bbox(geom, store, low, high):
     if geom == "points":
-        return read_points(str(store), bbox=(low, high))
+        return read_points(src(store), bbox=(low, high))
     if geom == "streamlines":
-        return read_polylines(str(store), bbox=(low, high))
-    return read_mesh(str(store), bbox=(low, high))
+        # read_polylines(bbox=) keeps every polyline with a fragment in a
+        # chunk the box touches; TRK's reader keeps those with a vertex in
+        # the box.  Same answer on both sides, so filter the same way, with
+        # the same vectorised pass over the flat vertex buffer as TRK's.
+        polys = read_polylines(src(store), bbox=(low, high))["polylines"]
+        frags = [f for fr in polys for f in fr]
+        if not frags:
+            return []
+        n_frags = np.fromiter((len(fr) for fr in polys), np.int64, len(polys))
+        lengths = np.fromiter((len(f) for f in frags), np.int64, len(frags))
+        flat = np.concatenate(frags)
+        inside = np.all((flat >= np.asarray(low)) & (flat <= np.asarray(high)),
+                        axis=1)
+        csum = np.concatenate([[0], np.cumsum(inside)])
+        ends = np.concatenate([[0], np.cumsum(lengths)])[np.cumsum(n_frags)]
+        starts = np.concatenate([[0], ends[:-1]])
+        hit = np.flatnonzero(csum[ends] - csum[starts] > 0)
+        return [polys[i] for i in hit]
+    return read_mesh(src(store), bbox=(low, high))
 
 
 def _comp_bbox(geom, path, low, high):
@@ -671,15 +823,17 @@ def block_spatial(rows, sizes, ws):
         cfile = ws.file(f"spc_{geom}", COMPETITOR_SUFFIX[geom])
         _comp_write(geom, cfile, data)
         for frac in FRACTIONS:
-            low, high = bbox_for_fraction(frac)
+            boxes = boxes_for_fraction(frac)
             log(f"  spatial {geom:12s} N={n:>9,} fraction={frac}")
-            m, hw, k = H.repeat(lambda: _zv_bbox(geom, store, low, high), 7)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _zv_bbox(geom, store, lo, hi), boxes, 7)
             rows.add(block="spatial_fraction", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl="zarr-vectors", unit="s",
                      value=round(m, 6), ci_hw=round(hw, 6), n_runs=k,
                      detail=frac)
-            m, hw, k = H.repeat(lambda: _comp_bbox(geom, cfile, low, high), 7)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _comp_bbox(geom, cfile, lo, hi), boxes, 7)
             rows.add(block="spatial_fraction", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl=COMPETITOR[geom], unit="s",
@@ -693,20 +847,22 @@ def block_spatial(rows, sizes, ws):
         for n in sizes:
             data = H.GENERATORS[geom](n)
             frac = min(1.0, FIXED_SELECTION / max(1, data["n_objects"]))
-            low, high = bbox_for_fraction(frac)
+            boxes = boxes_for_fraction(frac)
             store = ws.store(f"fx_{geom}_{n}")
             ZV_WRITERS[geom](store, data)
             cfile = ws.file(f"fxc_{geom}_{n}", COMPETITOR_SUFFIX[geom])
             _comp_write(geom, cfile, data)
             log(f"  fixed   {geom:12s} N={n:>9,} fraction={frac:.5f}")
             r = n_runs("bbox_query", n)
-            m, hw, k = H.repeat(lambda: _zv_bbox(geom, store, low, high), r)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _zv_bbox(geom, store, lo, hi), boxes, r)
             rows.add(block="spatial_fixed", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl="zarr-vectors", unit="s",
                      value=round(m, 6), ci_hw=round(hw, 6), n_runs=k,
                      detail=round(frac, 6))
-            m, hw, k = H.repeat(lambda: _comp_bbox(geom, cfile, low, high), r)
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _comp_bbox(geom, cfile, lo, hi), boxes, r)
             rows.add(block="spatial_fixed", geometry=geom, n_target=n,
                      n_vertices=data["n_vertices"], n_objects=data["n_objects"],
                      op="bbox_query", impl=COMPETITOR[geom], unit="s",
@@ -728,7 +884,7 @@ def block_spatial(rows, sizes, ws):
         for n in sizes:
             data = H.GENERATORS[geom](n)
             frac = min(1.0, FIXED_VERTICES / max(1, data["n_vertices"]))
-            low, high = bbox_for_fraction(frac)
+            boxes = boxes_for_fraction(frac)
             store = ws.store(f"eq_{geom}_{n}")
             ZV_WRITERS[geom](store, data)
             cfile = ws.file(f"eqc_{geom}_{n}", COMPETITOR_SUFFIX[geom])
@@ -736,10 +892,10 @@ def block_spatial(rows, sizes, ws):
             log(f"  equal   {geom:12s} N={n:>9,} fraction={frac:.6f}")
             r = n_runs("bbox_query", n)
             for impl, fn in (("zarr-vectors",
-                              lambda: _zv_bbox(geom, store, low, high)),
+                              lambda lo, hi: _zv_bbox(geom, store, lo, hi)),
                              (COMPETITOR[geom],
-                              lambda: _comp_bbox(geom, cfile, low, high))):
-                m, hw, k = H.repeat(fn, r)
+                              lambda lo, hi: _comp_bbox(geom, cfile, lo, hi))):
+                m, hw, k = repeat_boxes(fn, boxes, r)
                 rows.add(block="spatial_volume", geometry=geom, n_target=n,
                          n_vertices=data["n_vertices"],
                          n_objects=data["n_objects"], op="bbox_query",
@@ -798,6 +954,96 @@ def block_chunks(rows, ws):
 
 
 # --------------------------------------------------------------------
+# Block 6b -- chunked by object id
+# --------------------------------------------------------------------
+#
+# A store can be chunked along an object axis instead of space: the
+# whole domain is one spatial cell, and objects are grouped by id into
+# cells of about IDCHUNK_VERTS vertices (``chunk_by_attribute`` on an
+# ``id_bin`` column).  Fetching one object then reads one cell whatever
+# the store's size; a bounding-box query would have to read them all,
+# which is the trade this layout makes.
+
+IDCHUNK_VERTS = 4096
+IDCHUNK_GEOMS = ("streamlines", "meshes")
+
+
+def zv_write_idchunked(path, geom, data, codec=CODEC):
+    per = max(1, round(IDCHUNK_VERTS * data["n_objects"] / data["n_vertices"]))
+    dom = tuple(float(h - l) for l, h in zip(*H.BOUNDS))
+    if geom == "streamlines":
+        bins = [np.full(len(p), i // per, np.int32)
+                for i, p in enumerate(data["polylines"])]
+        write_polylines(str(path), data["polylines"], chunk_shape=dom,
+                        bin_shape=dom, bounds=H.BOUNDS, compressor=codec,
+                        vertex_attributes={"id_bin": bins},
+                        chunk_by_attribute="id_bin")
+    else:
+        write_mesh(str(path), data["vertices"], data["faces"],
+                   chunk_shape=dom, bin_shape=dom, bounds=H.BOUNDS,
+                   compressor=codec, object_ids=data["object_ids"],
+                   vertex_attributes={
+                       "id_bin": (data["object_ids"] // per).astype(np.int32)},
+                   chunk_by_attribute="id_bin")
+    return per
+
+
+def block_idchunk(rows, sizes, ws):
+    for geom in IDCHUNK_GEOMS:
+        if geom not in TIMED_GEOMS:
+            continue
+        for n_obj in sizes:
+            data = H.GENERATORS[geom](n_obj)
+            nv, no = data["n_vertices"], data["n_objects"]
+            oid = no // 2
+            r = timing_runs(n_obj)
+            log(f"  idchunk {geom:12s} N={n_obj:>9,}  ({nv:,} verts)")
+
+            def add(op, mean, hw, runs, unit="s", detail=""):
+                rows.add(block="idchunk", geometry=geom, n_target=n_obj,
+                         n_vertices=nv, n_objects=no, op=op,
+                         impl="zarr-vectors (chunked by id)", unit=unit,
+                         value=round(mean, 6), ci_hw=round(hw, 6),
+                         n_runs=runs, detail=detail)
+
+            m, hw, k = H.repeat(
+                lambda tag: zv_write_idchunked(ws.store(tag), geom, data),
+                r, setup=lambda i: f"iw_{geom}_{n_obj}_{i}",
+                teardown=lambda tag: ws.clear(tag))
+            add("write_full", m, hw, k)
+            tag = f"i_{geom}_{n_obj}"
+            store = ws.store(tag)
+            per = zv_write_idchunked(store, geom, data)
+            add("bytes", H.path_bytes(store), 0.0, 1, unit="bytes")
+            if geom == "streamlines":
+                def fetch():
+                    return read_polylines(src(store), object_ids=[oid])
+                got = fetch()["polylines"]
+                n_got = sum(len(f) for f in got[0]) if got else 0
+                want = len(data["polylines"][oid])
+            else:
+                def fetch():
+                    return read_mesh(src(store), object_ids=[oid])
+                n_got = len(fetch()["vertices"])
+                want = int((data["object_ids"] == oid).sum())
+            if n_got != want:
+                raise AssertionError(
+                    f"{geom} {oid} by id: {n_got} vertices, expected {want}")
+            m, hw, k = H.repeat(fetch, r)
+            add("fetch_one", m, hw, k,
+                detail=f"object_ids=; {per} objects per cell")
+            # What the layout gives up: the fixed-selection box of the
+            # spatial blocks, against cells that are not spatial, so
+            # every cell is a candidate.
+            frac = min(1.0, FIXED_SELECTION / max(1, no))
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _zv_bbox(geom, store, lo, hi),
+                boxes_for_fraction(frac), n_runs("bbox_query", n_obj))
+            add("bbox_query", m, hw, k, detail=f"box fraction {frac:.6f}")
+            ws.clear(tag)
+
+
+# --------------------------------------------------------------------
 # Block 7 -- fragmentation
 # --------------------------------------------------------------------
 #
@@ -837,14 +1083,33 @@ def _long_streamline():
                     axis=1).astype(np.float32)
 
 
-def _large_patch():
+# Where the patch sits against the grid decides how many cells it spans
+# (8, 24, 16, 48 ... for one centred placement as the grid refines), and
+# its fetch time followed that count rather than the grid.  It is planted
+# at FRAG_PLACEMENTS seeded positions per grid and the mean reported.
+FRAG_PLACEMENTS = 8
+
+
+def _patch_offsets():
+    """(x, y, z-centre) per placement.  z moves too: held at the domain
+    centre, the patch's 400-600 z range sat exactly in one layer of the
+    200-unit grid and straddled a boundary of the 250-unit one."""
+    rng = np.random.default_rng(11)
+    xy = rng.uniform(0.0, H.DOMAIN - FRAG_MESH_SPAN - 1.0,
+                     size=(FRAG_PLACEMENTS, 2))
+    z = rng.uniform(101.0, H.DOMAIN - 102.0, size=(FRAG_PLACEMENTS, 1))
+    return np.concatenate([xy, z], axis=1)
+
+
+def _large_patch(offset=None):
     """A 48x48 patch spanning ``FRAG_MESH_SPAN`` units, gently curved."""
     side, span = FRAG_MESH_SIDE, FRAG_MESH_SPAN
+    if offset is None:
+        offset = ((H.DOMAIN - span) / 2.0,) * 2 + (H.DOMAIN / 2.0,)
     u, v = np.meshgrid(np.linspace(0.0, span, side),
                        np.linspace(0.0, span, side), indexing="ij")
-    w = H.DOMAIN / 2.0 + 100.0 * np.sin(3.0 * np.pi * u / span)
-    verts = np.stack([u + (H.DOMAIN - span) / 2.0,
-                      v + (H.DOMAIN - span) / 2.0, w], -1).reshape(-1, 3)
+    w = offset[2] + 100.0 * np.sin(3.0 * np.pi * u / span)
+    verts = np.stack([u + offset[0], v + offset[1], w], -1).reshape(-1, 3)
     i = np.arange(side - 1)
     ii, jj = np.meshgrid(i, i, indexing="ij")
     a = (ii * side + jj).ravel()
@@ -867,14 +1132,16 @@ def block_fragments(rows, ws):
     line_oid = len(line_base)
 
     mesh = H.GENERATORS["meshes"](FRAG_N)
-    pv, pf = _large_patch()
     mesh_oid = int(mesh["object_ids"].max()) + 1
-    mesh_data = {
-        "vertices": np.concatenate([mesh["vertices"], pv]),
-        "faces": np.concatenate([mesh["faces"], pf + len(mesh["vertices"])]),
-        "object_ids": np.concatenate(
-            [mesh["object_ids"], np.full(len(pv), mesh_oid, np.int64)]),
-    }
+
+    def mesh_with_patch(offset):
+        pv, pf = _large_patch(offset)
+        return {
+            "vertices": np.concatenate([mesh["vertices"], pv]),
+            "faces": np.concatenate([mesh["faces"], pf + len(mesh["vertices"])]),
+            "object_ids": np.concatenate(
+                [mesh["object_ids"], np.full(len(pv), mesh_oid, np.int64)]),
+        }
 
     def add(geom, side, m, hw, runs, span, n_read, note):
         rows.add(block="fragments", geometry=geom,
@@ -893,8 +1160,8 @@ def block_fragments(rows, ws):
         zv_write_points(store, point_data, chunk=side)
         pos = point_data["positions"][len(point_data["positions"]) // 2]
         box = _point_bbox(pos)
-        n_read = len(read_points(str(store), bbox=box)["positions"])
-        m, hw, runs = H.repeat(lambda: read_points(str(store), bbox=box), 7)
+        n_read = len(read_points(src(store), bbox=box)["positions"])
+        m, hw, runs = H.repeat(lambda: read_points(src(store), bbox=box), 7)
         add("points", side, m, hw, runs, 1, n_read, "one point")
         ws.clear("fr_points")
 
@@ -903,26 +1170,39 @@ def block_fragments(rows, ws):
         write_polylines(str(store), lines, chunk_shape=(side,) * 3,
                         bin_shape=(side / 4,) * 3, bounds=H.BOUNDS,
                         compressor=CODEC)
-        got = read_polylines(str(store), object_ids=[line_oid])
+        got = read_polylines(src(store), object_ids=[line_oid])
         n_read = sum(sum(len(f) for f in o) for o in got["polylines"])
         n_frag = sum(len(o) for o in got["polylines"])
         m, hw, runs = H.repeat(
-            lambda: read_polylines(str(store), object_ids=[line_oid]), 7)
+            lambda: read_polylines(src(store), object_ids=[line_oid]), 7)
         add("streamlines", side, m, hw, runs, n_frag, n_read,
             f"{FRAG_LINE_VERTS}-vertex streamline")
         ws.clear("fr_lines")
 
-        # ---- one large mesh patch ----------------------------------
-        store = ws.store("fr_mesh")
-        zv_write_meshes(store, mesh_data, chunk=side)
-        chunks = _mesh_object_chunks(mesh_data, mesh_oid, side)
-        n_read = len(read_mesh(str(store), chunks=chunks)["vertices"])
-        m, hw, runs = H.repeat(
-            lambda: _zv_fetch_one("meshes", store, mesh_oid, mesh_data, side),
-            5)
-        add("meshes", side, m, hw, runs, len(chunks), n_read,
-            f"{FRAG_MESH_SIDE ** 2}-vertex patch")
-        ws.clear("fr_mesh")
+        # ---- one large mesh patch, at several placements ------------
+        means, spans_, total_runs, n_read = [], [], 0, 0
+        for offset in _patch_offsets():
+            mesh_data = mesh_with_patch(offset)
+            store = ws.store("fr_mesh")
+            zv_write_meshes(store, mesh_data, chunk=side)
+            chunks = _mesh_object_chunks(mesh_data, mesh_oid, side)
+            if mesh_fetch_route(store, mesh_oid) == "object_ids=":
+                n_read = len(_zv_fetch_one("meshes", store, mesh_oid,
+                                           mesh_data, side)["vertices"])
+            else:
+                n_read = len(read_mesh(src(store), chunks=chunks)["vertices"])
+            m, _hw, runs = H.repeat(
+                lambda: _zv_fetch_one("meshes", store, mesh_oid, mesh_data,
+                                      side), 5)
+            means.append(m)
+            spans_.append(len(chunks))
+            total_runs += runs
+            ws.clear("fr_mesh")
+        m, hw = H.mean_ci95(means)
+        add("meshes", side, m, hw, total_runs, int(round(np.mean(spans_))),
+            n_read, f"{FRAG_MESH_SIDE ** 2}-vertex patch at "
+                    f"{FRAG_PLACEMENTS} placements, spans "
+                    f"{min(spans_)}-{max(spans_)} chunks; mean")
 
 
 # --------------------------------------------------------------------
@@ -946,10 +1226,10 @@ CHUNKED_FORMATS = ("precomputed annotations", "Parquet", "plain Zarr", "HDF5")
 
 # Precomputed's ``by_id`` index is one file per annotation, so a write at
 # N = 10^7 creates ten million files -- per repeat, and again for the
-# persistent copy.  That is hours of inode churn to measure a curve whose
-# shape is already settled by 10^6, so the format is dropped above this
-# and the omission is logged.  The other three chunked formats scale fine.
-PRECOMPUTED_MAX_N = 1_000_000
+# persistent copy: about 9 minutes a write and 35-40 minutes for the
+# point.  It is measured all the same, so the comparison runs to the
+# same size as everything else; above this it is dropped and logged.
+PRECOMPUTED_MAX_N = 10_000_000
 _CHUNKED_SUFFIX = {"precomputed annotations": "", "Parquet": ".parquet",
                    "plain Zarr": "", "HDF5": ".h5"}
 
@@ -990,7 +1270,7 @@ def block_chunked(rows, sizes, ws):
         data = H.GENERATORS[geom](n)
         nv, no = data["n_vertices"], data["n_objects"]
         frac = min(1.0, FIXED_SELECTION / max(1, no))
-        low, high = bbox_for_fraction(frac)
+        boxes = boxes_for_fraction(frac)
         log(f"  chunked {geom} N={n:>9,} (box fraction {frac:.6f})")
 
         for fmt in CHUNKED_FORMATS:
@@ -1025,9 +1305,9 @@ def block_chunked(rows, sizes, ws):
                                 n_runs("read_full", n))
             add("read_full", m, hw, k)
 
-            m, hw, k = H.repeat(
-                lambda: _chunked_read_bbox(fmt, target, low, high),
-                n_runs("bbox_query", n))
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _chunked_read_bbox(fmt, target, lo, hi),
+                boxes, n_runs("bbox_query", n))
             add("bbox_query", m, hw, k, f"box fraction {frac:.6f}")
 
             if fmt == "precomputed annotations":
@@ -1036,6 +1316,178 @@ def block_chunked(rows, sizes, ws):
                     n_runs("fetch_one", n))
                 add("fetch_one", m, hw, k, "by_id: one file, one read")
             ws.clear(f"c_{tag}_{n}")
+
+
+# --------------------------------------------------------------------
+# Block 9 -- meshes versus Neuroglancer precomputed
+# --------------------------------------------------------------------
+#
+# The mesh comparison that matters.  STL is what a mesh store replaces on
+# disk; precomputed legacy meshes are what it competes with for serving,
+# and that format's whole design is that one mesh is one fragment -- two
+# reads unsharded, three ranged reads sharded.  A chunked store reaches
+# the same object through its object index and fragment indices, so the
+# question is what that indirection costs.
+#
+# Both sides are measured compressed and raw, and unsharded and
+# sharded, because the answer depends on it: a compressed chunk must be
+# decoded whole, while an uncompressed one can be range-read down to the
+# object's own rows, which is the like-for-like comparison with an
+# uncompressed precomputed fragment.  Sharding packs the 125 chunk cells
+# of each zarr-vectors array into one shard, and every precomputed mesh
+# into one shard, so the two sharded layouts are the same shape.
+#
+# Wall time here is a warm local disk, which hides most of what differs.
+# The rows that carry over to object storage are ``fetch_one_bytes`` and
+# ``fetch_one_requests``: every request a read sends -- data, ranged
+# data, metadata, listings -- counted through the store, on both sides.
+
+MESH_SHARD = (int(round(H.DOMAIN / H.CHUNK[0])),) * 3    # whole grid, one shard
+
+ZV_MESH_VARIANTS = (
+    ("zarr-vectors (zstd)", dict(codec="zstd")),
+    ("zarr-vectors (zstd, sharded)", dict(codec="zstd", shard_shape=MESH_SHARD)),
+    ("zarr-vectors (no codec)", dict(codec=None)),
+    ("zarr-vectors (no codec, sharded)", dict(codec=None, shard_shape=MESH_SHARD)),
+)
+PC_MESH_VARIANTS = (
+    ("precomputed mesh", None),
+    ("precomputed mesh (sharded)", "raw"),
+    ("precomputed mesh (sharded, gzip)", "gzip"),
+)
+
+# Objects a fetch_one cycles through, spread over the id range, so no
+# run is timed against the chunk the previous run left warmest.
+MESH_PROBES = 16
+
+
+def _zv_mesh_fetch(store, oid, data, route):
+    """One mesh, vertices and faces, from a zarr-vectors store.
+
+    ``store`` is a path or a zarr Store (the counting one); ``route`` is
+    :func:`mesh_fetch_route`'s answer.  Through ``object_ids=`` where the
+    install has it; otherwise the object's chunks are read and the object
+    cut out of them locally -- vertices *and* faces, so both routes
+    deliver the same product as precomputed.
+    """
+    if route == "object_ids=":
+        got = read_mesh(store, object_ids=[int(oid)])
+        return {"vertices": got["vertices"], "faces": got["faces"]}
+    got = read_mesh(store, chunks=_mesh_object_chunks(data, oid))
+    want = data["vertices"][data["object_ids"] == oid]
+    view = [("", got["vertices"].dtype)] * 3
+    keep = np.isin(got["vertices"].view(view), want.view(view)).ravel()
+    remap = np.full(len(keep), -1, dtype=np.int64)
+    remap[keep] = np.arange(int(keep.sum()))
+    faces = remap[got["faces"]]
+    return {"vertices": got["vertices"][keep],
+            "faces": faces[(faces >= 0).all(axis=1)]}
+
+
+def _mesh_face_set(m):
+    return {tuple(map(tuple, m["vertices"][f].tolist())) for f in m["faces"]}
+
+
+def block_mesh_precomputed(rows, sizes, ws):
+    geom = "meshes"
+    if geom not in GEOM_ALL:
+        return
+    for n in sizes:
+        data = H.GENERATORS[geom](n)
+        nv, no = data["n_vertices"], data["n_objects"]
+        probes = np.unique(np.linspace(0, no - 1, min(MESH_PROBES, no)).astype(int))
+        log(f"  mesh/precomputed N={n:>9,}  ({nv:,} verts, {no:,} meshes)")
+
+        def add(impl, op, value, *, unit="s", hw=0.0, runs=1, detail=""):
+            rows.add(block="mesh_precomputed", geometry=geom, n_target=n,
+                     n_vertices=nv, n_objects=no, op=op, impl=impl, unit=unit,
+                     value=round(value, 6) if unit == "s" else value,
+                     ci_hw=round(hw, 6), n_runs=runs, detail=detail)
+
+        reference = {}
+        variants = (
+            [(label, "zv", kw) for label, kw in ZV_MESH_VARIANTS]
+            + [(label, "pc", enc) for label, enc in PC_MESH_VARIANTS]
+        )
+        for label, kind, cfg in variants:
+            tag = "m_" + "".join(c if c.isalnum() else "_" for c in label)
+
+            if kind == "zv":
+                def write(path, _kw=cfg):
+                    zv_write_meshes(path, data, **_kw)
+                def make(t_):
+                    return ws.store(t_)
+            else:
+                sharding = (None if cfg is None else
+                            F.precomputed_mesh_sharding(no, data_encoding=cfg))
+
+                def write(path, _sh=sharding):
+                    F.precomputed_mesh_write(path, data["vertices"], data["faces"],
+                                             data["object_ids"], sharding=_sh)
+                def make(t_):
+                    return ws.file(t_)
+
+            m, hw, k = H.repeat(lambda p: write(p), n_runs("write_full", n),
+                                setup=lambda i: make(f"{tag}_w{i}"),
+                                teardown=lambda p: ws.clear(p.parent.name))
+            add(label, "write_full", m, hw=hw, runs=k)
+
+            target = make(tag)
+            write(target)
+            add(label, "bytes", H.path_bytes(target), unit="bytes")
+
+            if kind == "zv":
+                route = mesh_fetch_route(str(target), int(probes[0]))
+
+                def fetch(oid, _t=str(target), _r=route):
+                    return _zv_mesh_fetch(_t, oid, data, _r)
+
+                def counted(oid, _t=target, _r=route):
+                    store = H.counting_store(_t)
+                    out = _zv_mesh_fetch(store, oid, data, _r)
+                    return out, type(store).requests, type(store).bytes
+
+                def read_all(_t=str(target)):
+                    return read_mesh(_t)
+            else:
+                route = "by id"
+
+                def fetch(oid, _t=target):
+                    return F.precomputed_mesh_read_one(H.FileFetch(_t), oid)
+
+                def counted(oid, _t=target):
+                    fe = H.FileFetch(_t)
+                    out = F.precomputed_mesh_read_one(fe, oid)
+                    return out, fe.requests, fe.bytes
+
+                def read_all(_t=target):
+                    return F.precomputed_mesh_read_full(H.FileFetch(_t))
+
+            m, hw, k = H.repeat(read_all, n_runs("read_full", n))
+            add(label, "read_full", m, hw=hw, runs=k)
+
+            m, hw, k = H.repeat(lambda i: fetch(int(probes[i % len(probes)])),
+                                n_runs("fetch_one", n), setup=lambda i: i)
+            add(label, "fetch_one", m, hw=hw, runs=k, detail=route)
+
+            reqs, nbytes = [], []
+            for oid in probes.tolist():
+                got, r, b = counted(oid)
+                reqs.append(r)
+                nbytes.append(b)
+                # Every implementation must hand back the same mesh, or
+                # the timings compare different products.
+                ref = reference.setdefault(oid, _mesh_face_set(got))
+                if _mesh_face_set(got) != ref:
+                    raise AssertionError(
+                        f"{label} returned a different mesh {oid} at N={n:,}")
+            add(label, "fetch_one_requests", float(np.mean(reqs)), unit="requests",
+                runs=len(probes), detail=route)
+            add(label, "fetch_one_bytes", float(np.mean(nbytes)), unit="bytes",
+                runs=len(probes), detail=route)
+            log(f"    {label:34s} fetch_one {m * 1e3:8.2f} ms  "
+                f"{np.mean(reqs):6.1f} req  {np.mean(nbytes):>12,.0f} B  ({route})")
+            ws.clear(tag)
 
 # --------------------------------------------------------------------
 # Block 5 -- round-trip fidelity
@@ -1098,12 +1550,12 @@ def block_fidelity(rows, sizes, ws):
 
 def _zv_read_back(geom, store):
     if geom == "points":
-        return read_points(str(store))["positions"]
+        return read_points(src(store))["positions"]
     if geom == "graphs":
         return read_graph(str(store))["positions"]
     if geom == "meshes":
-        return read_mesh(str(store))["vertices"]
-    out = read_polylines(str(store))["polylines"]
+        return read_mesh(src(store))["vertices"]
+    out = read_polylines(src(store))["polylines"]
     return np.concatenate([np.concatenate(frags) for frags in out])
 
 
@@ -1172,7 +1624,7 @@ def main():
     ap.add_argument("--out", default=str(RESULTS / "measurements.csv"))
     ap.add_argument("--blocks",
                     default="storage,timing,spatial,chunks,fragments,"
-                            "chunked,fidelity")
+                            "chunked,mesh_precomputed,idchunk,fidelity")
     ap.add_argument("--geometries", default=None,
                     help="comma-separated subset to measure, e.g. 'points'; "
                          "used with --append to re-measure one geometry")
@@ -1211,6 +1663,12 @@ def main():
         log(f"geometries restricted to {sorted(keep)}")
     rows = Rows()
     ws = H.Workspace(args.workdir)
+    _clear = ws.clear
+
+    def _clear_and_forget(name, _clear=_clear):
+        forget(ws.root / name)
+        _clear(name)
+    ws.clear = _clear_and_forget
     log(f"scratch: {ws.root}")
     try:
         if "storage" in wanted:
@@ -1231,6 +1689,12 @@ def main():
         if "chunked" in wanted:
             log("== versus other chunked formats ==")
             block_chunked(rows, sizes, ws)
+        if "idchunk" in wanted:
+            log("== chunked by object id ==")
+            block_idchunk(rows, sizes, ws)
+        if "mesh_precomputed" in wanted:
+            log("== meshes versus precomputed ==")
+            block_mesh_precomputed(rows, sizes, ws)
         if "fidelity" in wanted:
             log("== round-trip fidelity ==")
             block_fidelity(rows, sizes, ws)
@@ -1295,6 +1759,8 @@ def main():
     env["timing_runs"] = {str(n): timing_runs(n) for n in sizes}
     env["verts_per_object"] = dict(H.VERTS_PER_OBJECT)
     env["codec"] = CODEC
+    env["point_codec"] = POINT_CODEC
+    env["streamline_manifest_layout"] = STREAMLINE_MANIFESTS
     env["workdir"] = str(args.workdir or "(system temp)")
     env["workdir_fstype"] = H.fstype(args.workdir or "/tmp")
     env["fractions"] = FRACTIONS

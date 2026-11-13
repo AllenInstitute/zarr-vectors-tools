@@ -1,27 +1,161 @@
-scratch: C:\Users\andre\zvb\zv_paper_1etmiq_g
+scratch: /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/work/zv_paper_b50y6nsr
 == storage ==
   storage points       N=    1,000  (1,000 verts, 1,000 objects)
   storage points       N=   10,000  (10,000 verts, 10,000 objects)
   storage points       N=  100,000  (100,000 verts, 100,000 objects)
+  storage points       N=1,000,000  (1,000,000 verts, 1,000,000 objects)
   storage streamlines  N=    1,000  (972 verts, 83 objects)
   storage streamlines  N=   10,000  (9,720 verts, 833 objects)
   storage streamlines  N=  100,000  (95,747 verts, 8,333 objects)
+  storage streamlines  N=1,000,000  (958,210 verts, 83,333 objects)
   storage skeletons    N=    1,000  (1,003 verts, 5 objects)
   storage skeletons    N=   10,000  (9,813 verts, 50 objects)
   storage skeletons    N=  100,000  (100,678 verts, 500 objects)
+  storage skeletons    N=1,000,000  (998,151 verts, 5,000 objects)
   storage graphs       N=    1,000  (1,000 verts, 1,000 objects)
   storage graphs       N=   10,000  (10,000 verts, 10,000 objects)
   storage graphs       N=  100,000  (100,000 verts, 100,000 objects)
+  storage graphs       N=1,000,000  (1,000,000 verts, 1,000,000 objects)
+    skip GraphML at N=1,000,000 (writer does not scale)
   storage meshes       N=    1,000  (864 verts, 6 objects)
   storage meshes       N=   10,000  (9,936 verts, 69 objects)
   storage meshes       N=  100,000  (99,936 verts, 694 objects)
+  storage meshes       N=1,000,000  (999,936 verts, 6,944 objects)
 == bulk + per-object timing ==
   timing  points       N=    1,000  (1,000 verts, 1,000 objects)
   timing  points       N=   10,000  (10,000 verts, 10,000 objects)
   timing  points       N=  100,000  (100,000 verts, 100,000 objects)
+  timing  points       N=1,000,000  (1,000,000 verts, 1,000,000 objects)
   timing  streamlines  N=    1,000  (972 verts, 83 objects)
   timing  streamlines  N=   10,000  (9,720 verts, 833 objects)
   timing  streamlines  N=  100,000  (95,747 verts, 8,333 objects)
+  timing  streamlines  N=1,000,000  (958,210 verts, 83,333 objects)
   timing  meshes       N=    1,000  (864 verts, 6 objects)
   timing  meshes       N=   10,000  (9,936 verts, 69 objects)
   timing  meshes       N=  100,000  (99,936 verts, 694 objects)
+  timing  meshes       N=1,000,000  (999,936 verts, 6,944 objects)
+== spatial queries ==
+  spatial points       N=1,000,000 fraction=0.001
+  spatial points       N=1,000,000 fraction=0.01
+  spatial points       N=1,000,000 fraction=0.1
+  spatial points       N=1,000,000 fraction=0.5
+  spatial points       N=1,000,000 fraction=1.0
+  spatial streamlines  N=1,000,000 fraction=0.001
+  spatial streamlines  N=1,000,000 fraction=0.01
+  spatial streamlines  N=1,000,000 fraction=0.1
+  spatial streamlines  N=1,000,000 fraction=0.5
+  spatial streamlines  N=1,000,000 fraction=1.0
+  spatial meshes       N=1,000,000 fraction=0.001
+  spatial meshes       N=1,000,000 fraction=0.01
+  spatial meshes       N=1,000,000 fraction=0.1
+  spatial meshes       N=1,000,000 fraction=0.5
+  spatial meshes       N=1,000,000 fraction=1.0
+  fixed   points       N=    1,000 fraction=0.10000
+  fixed   points       N=   10,000 fraction=0.01000
+  fixed   points       N=  100,000 fraction=0.00100
+  fixed   points       N=1,000,000 fraction=0.00010
+  fixed   streamlines  N=    1,000 fraction=1.00000
+  fixed   streamlines  N=   10,000 fraction=0.12005
+  fixed   streamlines  N=  100,000 fraction=0.01200
+  fixed   streamlines  N=1,000,000 fraction=0.00120
+  fixed   meshes       N=    1,000 fraction=1.00000
+  fixed   meshes       N=   10,000 fraction=1.00000
+  fixed   meshes       N=  100,000 fraction=0.14409
+  fixed   meshes       N=1,000,000 fraction=0.01440
+  equal   points       N=    1,000 fraction=0.100000
+  equal   points       N=   10,000 fraction=0.010000
+  equal   points       N=  100,000 fraction=0.001000
+  equal   points       N=1,000,000 fraction=0.000100
+  equal   streamlines  N=    1,000 fraction=0.102881
+  equal   streamlines  N=   10,000 fraction=0.010288
+  equal   streamlines  N=  100,000 fraction=0.001044
+  equal   streamlines  N=1,000,000 fraction=0.000104
+  equal   meshes       N=    1,000 fraction=0.115741
+  equal   meshes       N=   10,000 fraction=0.010064
+  equal   meshes       N=  100,000 fraction=0.001001
+  equal   meshes       N=1,000,000 fraction=0.000100
+== chunk-count sweep ==
+  chunks  points       side= 500.0       8 chunks  (1,000,000 verts)
+  chunks  points       side= 250.0      64 chunks  (1,000,000 verts)
+  chunks  points       side= 200.0     125 chunks  (1,000,000 verts)
+  chunks  points       side= 125.0     512 chunks  (1,000,000 verts)
+  chunks  points       side= 100.0   1,000 chunks  (1,000,000 verts)
+  chunks  points       side=  50.0   8,000 chunks  (1,000,000 verts)
+  chunks  streamlines  side= 500.0       8 chunks  (958,210 verts)
+  chunks  streamlines  side= 250.0      64 chunks  (958,210 verts)
+  chunks  streamlines  side= 200.0     125 chunks  (958,210 verts)
+  chunks  streamlines  side= 125.0     512 chunks  (958,210 verts)
+  chunks  streamlines  side= 100.0   1,000 chunks  (958,210 verts)
+  chunks  streamlines  side=  50.0   8,000 chunks  (958,210 verts)
+  chunks  meshes       side= 500.0       8 chunks  (999,936 verts)
+  chunks  meshes       side= 250.0      64 chunks  (999,936 verts)
+  chunks  meshes       side= 200.0     125 chunks  (999,936 verts)
+  chunks  meshes       side= 125.0     512 chunks  (999,936 verts)
+  chunks  meshes       side= 100.0   1,000 chunks  (999,936 verts)
+  chunks  meshes       side=  50.0   8,000 chunks  (999,936 verts)
+== fragmentation ==
+  frag    grid side  500.0  (     8 chunks)
+  frag    grid side  250.0  (    64 chunks)
+  frag    grid side  200.0  (   125 chunks)
+  frag    grid side  125.0  (   512 chunks)
+  frag    grid side  100.0  ( 1,000 chunks)
+  frag    grid side   50.0  ( 8,000 chunks)
+== versus other chunked formats ==
+  chunked points N=    1,000 (box fraction 0.100000)
+  chunked points N=   10,000 (box fraction 0.010000)
+  chunked points N=  100,000 (box fraction 0.001000)
+  chunked points N=1,000,000 (box fraction 0.000100)
+== chunked by object id ==
+  idchunk streamlines  N=    1,000  (972 verts)
+  idchunk streamlines  N=   10,000  (9,720 verts)
+  idchunk streamlines  N=  100,000  (95,747 verts)
+  idchunk streamlines  N=1,000,000  (958,210 verts)
+  idchunk meshes       N=    1,000  (864 verts)
+  idchunk meshes       N=   10,000  (9,936 verts)
+  idchunk meshes       N=  100,000  (99,936 verts)
+  idchunk meshes       N=1,000,000  (999,936 verts)
+== meshes versus precomputed ==
+  mesh/precomputed N=    1,000  (864 verts, 6 meshes)
+    zarr-vectors (zstd)                fetch_one     2.97 ms    24.5 req        11,766 B  (object_ids=)
+    zarr-vectors (zstd, sharded)       fetch_one     3.40 ms    33.2 req        32,388 B  (object_ids=)
+    zarr-vectors (no codec)            fetch_one     3.16 ms    24.5 req        17,219 B  (object_ids=)
+    zarr-vectors (no codec, sharded)   fetch_one     5.18 ms    31.7 req        34,597 B  (object_ids=)
+    precomputed mesh                   fetch_one     0.07 ms     3.0 req         4,693 B  (by id)
+    precomputed mesh (sharded)         fetch_one     0.12 ms     4.0 req         5,027 B  (by id)
+    precomputed mesh (sharded, gzip)   fetch_one     0.14 ms     4.0 req         2,148 B  (by id)
+  mesh/precomputed N=   10,000  (9,936 verts, 69 meshes)
+    zarr-vectors (zstd)                fetch_one     2.96 ms    24.0 req        16,710 B  (object_ids=)
+    zarr-vectors (zstd, sharded)       fetch_one     3.38 ms    32.6 req        36,768 B  (object_ids=)
+    zarr-vectors (no codec)            fetch_one     3.09 ms    23.9 req        21,172 B  (object_ids=)
+    zarr-vectors (no codec, sharded)   fetch_one     5.23 ms    31.1 req        38,248 B  (object_ids=)
+    precomputed mesh                   fetch_one     0.07 ms     3.0 req         4,694 B  (by id)
+    precomputed mesh (sharded)         fetch_one     0.12 ms     4.0 req         5,298 B  (by id)
+    precomputed mesh (sharded, gzip)   fetch_one     0.15 ms     4.0 req         2,396 B  (by id)
+  mesh/precomputed N=  100,000  (99,936 verts, 694 meshes)
+    zarr-vectors (zstd)                fetch_one     3.11 ms    22.2 req        35,557 B  (object_ids=)
+    zarr-vectors (zstd, sharded)       fetch_one     3.47 ms    29.5 req        52,670 B  (object_ids=)
+    zarr-vectors (no codec)            fetch_one     3.14 ms    22.1 req        29,905 B  (object_ids=)
+    zarr-vectors (no codec, sharded)   fetch_one     5.18 ms    28.3 req        44,804 B  (object_ids=)
+    precomputed mesh                   fetch_one     0.07 ms     3.0 req         4,695 B  (by id)
+    precomputed mesh (sharded)         fetch_one     0.13 ms     4.0 req         5,404 B  (by id)
+    precomputed mesh (sharded, gzip)   fetch_one     0.15 ms     4.0 req         2,529 B  (by id)
+  mesh/precomputed N=1,000,000  (999,936 verts, 6,944 meshes)
+    zarr-vectors (zstd)                fetch_one     4.23 ms    21.0 req       184,593 B  (object_ids=)
+    zarr-vectors (zstd, sharded)       fetch_one     4.55 ms    27.2 req       199,576 B  (object_ids=)
+    zarr-vectors (no codec)            fetch_one     3.57 ms    20.9 req        82,998 B  (object_ids=)
+    zarr-vectors (no codec, sharded)   fetch_one     5.66 ms    26.4 req        96,279 B  (object_ids=)
+    precomputed mesh                   fetch_one     0.07 ms     3.0 req         4,696 B  (by id)
+    precomputed mesh (sharded)         fetch_one     0.13 ms     4.0 req         5,537 B  (by id)
+    precomputed mesh (sharded, gzip)   fetch_one     0.15 ms     4.0 req         2,650 B  (by id)
+== round-trip fidelity ==
+  fidelity points       max|Δ| = 0  (100,000 in, 100,000 out)
+  fidelity points       PLY  max|Δ| = 0
+  fidelity streamlines  max|Δ| = 0  (95,747 in, 95,747 out)
+  fidelity streamlines  TRK  max|Δ| = 3.05176e-05
+  fidelity streamlines  TRX  max|Δ| = 0
+  fidelity skeletons    max|Δ| = 0  (100,678 in, 100,678 out)
+  fidelity graphs       max|Δ| = 0  (100,000 in, 100,000 out)
+  fidelity meshes       max|Δ| = 0  (99,936 in, 99,936 out)
+  fidelity meshes       STL  max|Δ| = 0
+wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/measurements.csv  (659 new rows, 0 carried over)
+wrote /tmp/claude-1001/-home-andrew/60a6d851-c825-4ca0-ae65-6cebb26d619b/scratchpad/tools/benchmarks/paper/results/environment.json
