@@ -549,7 +549,7 @@ def parquet_write(path, positions, chunk_shape, bounds) -> None:
     _, pos, _, index = spatial_cells(positions, chunk_shape, bounds)
     schema = pa.schema([("x", pa.float32()), ("y", pa.float32()),
                         ("z", pa.float32())])
-    with pq.ParquetWriter(str(path), schema, compression="zstd") as wr:
+    with pq.ParquetWriter(str(path), schema, compression="lz4") as wr:
         for s, e in sorted(index.values()):
             block = pos[s:e]
             wr.write_table(pa.table(
@@ -606,7 +606,11 @@ def zarr_write(path, positions, chunk_shape, bounds) -> None:
     root.mkdir(parents=True, exist_ok=True)
     g = zarr.open_group(store=str(root), mode="w")
     arr = g.create_array("positions", shape=pos.shape, chunks=(rows, 3),
-                         dtype="<f4", compressors=zarr.codecs.ZstdCodec())
+                         dtype="<f4",
+                         # the store's point codec: Blosc lz4, byte shuffle
+                         compressors=zarr.codecs.BloscCodec(
+                             cname="lz4", clevel=5, shuffle="shuffle",
+                             typesize=4))
     arr[:] = pos
     (root / "cells.json").write_text(json.dumps(
         {"_".join(map(str, k)): v for k, v in index.items()}))

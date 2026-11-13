@@ -141,6 +141,17 @@ FIXED_SELECTION = 100          # objects targeted by the fixed-selection sweep
 FIXED_VERTICES = 100           # vertices targeted by the equal-box sweep
 
 CODEC = "zstd"                 # deployed configuration for every timing block
+# Point clouds are uniform float32 triples, which Blosc lz4 with byte
+# shuffle reads at close to uncompressed speed while staying smaller than
+# zstd; the other geometries keep zstd.
+POINT_CODEC = [{"name": "blosc", "configuration": {
+    "cname": "lz4", "clevel": 5, "shuffle": "shuffle", "typesize": 4,
+    "blocksize": 0}}]
+# Streamline stores carry one object per streamline, so their object
+# index is written in the dense layout (format 0.9.4+), which a box query
+# scans in one pass.  Skeletons and graphs have few objects and keep the
+# default.
+STREAMLINE_MANIFESTS = "dense"
 
 
 # --------------------------------------------------------------------
@@ -210,7 +221,7 @@ def _bs(chunk):
     return H.BIN if chunk is None else (float(chunk) / 4.0,) * 3
 
 
-def zv_write_points(path, data, *, codec=CODEC, object_ids=False,
+def zv_write_points(path, data, *, codec=POINT_CODEC, object_ids=False,
                     chunk=None):
     """A point cloud needs no object index.
 
@@ -230,7 +241,8 @@ def zv_write_points(path, data, *, codec=CODEC, object_ids=False,
 def zv_write_streamlines(path, data, *, codec=CODEC, object_ids=True,
                     chunk=None):
     write_polylines(str(path), data["polylines"], chunk_shape=_cs(chunk),
-                    bin_shape=_bs(chunk), bounds=H.BOUNDS, compressor=codec)
+                    bin_shape=_bs(chunk), bounds=H.BOUNDS, compressor=codec,
+                    manifest_layout=STREAMLINE_MANIFESTS)
 
 
 def zv_write_skeletons(path, data, *, codec=CODEC, object_ids=True,
@@ -279,15 +291,18 @@ def zv_replace_point(path, index, data):
 
     ``VertexRef.from_position`` resolves the chunk and offset from the
     coordinate itself, so this works on a store with no object index.
+    The session is non-atomic: the row is overwritten in place, as PLY
+    does.  An atomic edit would append the new position as a new row
+    and keep the old one, so the store would gain a point per repeat
+    rather than replace one.
     """
     target = data["positions"][int(index)]
     got = read_points(str(path), bbox=_point_bbox(target))
     new = np.asarray(got["positions"][0], dtype=np.float32) + np.float32(0.25)
     root = open_store(str(path), mode="r+")
-    with EditSession(root, atomic=True, refresh_pyramid=False) as ed:
+    with EditSession(root, atomic=False, refresh_pyramid=False) as ed:
         ref = VertexRef.from_position(root, level=0, pos=target.tolist())
-        ed.edit_vertex(ref, new_pos=np.clip(new, 0.0, H.DOMAIN - 1).tolist(),
-                       atomic=True)
+        ed.edit_vertex(ref, new_pos=np.clip(new, 0.0, H.DOMAIN - 1).tolist())
 
 
 def zv_replace_streamline(path, oid):
@@ -296,12 +311,16 @@ def zv_replace_streamline(path, oid):
     A streamline that crosses a chunk boundary is stored as several
     fragments; each is rewritten with its own slice of the new vertices,
     so the operation is a true whole-object replacement regardless of how
-    the object is split.
+    the object is split.  The session is non-atomic: each fragment's rows
+    are overwritten in place and the manifest is left as it is, as TRK
+    rewrites its record.  An atomic edit is copy-on-write -- it appends
+    new fragments and gives the object a new id, leaving the original
+    unchanged -- which is a versioned edit, not a replacement.
     """
     frags = read_polylines(str(path), object_ids=[int(oid)])["polylines"][0]
     root = open_store(str(path), mode="r+")
     manifest = read_object_manifests(root["0"], ids=[int(oid)])[int(oid)]
-    with EditSession(root, atomic=True, refresh_pyramid=False) as ed:
+    with EditSession(root, atomic=False, refresh_pyramid=False) as ed:
         for (chunk, frag_idx), frag in zip(manifest, frags):
             new = np.clip(np.asarray(frag, dtype=np.float32) + np.float32(0.25),
                           0.0, H.DOMAIN - 1)
@@ -600,8 +619,9 @@ def block_timing(rows, sizes, ws):
                 # benefits from the previous run's warm chunk.
                 m, hw, k = H.repeat(fn, r, setup=lambda i: i)
                 add("replace_one", "zarr-vectors", m, hw, k,
-                    detail="VertexRef.from_position" if geom == "points"
-                    else "edit_fragment via object manifest")
+                    detail="VertexRef.from_position, in place"
+                    if geom == "points"
+                    else "edit_fragment via object manifest, in place")
                 m, hw, k = H.repeat(
                     lambda i: _comp_replace_one(geom, cfile,
                                                 (oid + i * 7) % no, data),
@@ -766,12 +786,22 @@ def _zv_bbox(geom, store, low, high):
     if geom == "streamlines":
         # read_polylines(bbox=) keeps every polyline with a fragment in a
         # chunk the box touches; TRK's reader keeps those with a vertex in
-        # the box.  Same answer on both sides, so filter the same way.
-        got = read_polylines(src(store), bbox=(low, high))
-        lo, hi = np.asarray(low), np.asarray(high)
-        return [frags for frags in got["polylines"]
-                if any(np.all((f >= lo) & (f <= hi), axis=1).any()
-                       for f in frags)]
+        # the box.  Same answer on both sides, so filter the same way, with
+        # the same vectorised pass over the flat vertex buffer as TRK's.
+        polys = read_polylines(src(store), bbox=(low, high))["polylines"]
+        frags = [f for fr in polys for f in fr]
+        if not frags:
+            return []
+        n_frags = np.fromiter((len(fr) for fr in polys), np.int64, len(polys))
+        lengths = np.fromiter((len(f) for f in frags), np.int64, len(frags))
+        flat = np.concatenate(frags)
+        inside = np.all((flat >= np.asarray(low)) & (flat <= np.asarray(high)),
+                        axis=1)
+        csum = np.concatenate([[0], np.cumsum(inside)])
+        ends = np.concatenate([[0], np.cumsum(lengths)])[np.cumsum(n_frags)]
+        starts = np.concatenate([[0], ends[:-1]])
+        hit = np.flatnonzero(csum[ends] - csum[starts] > 0)
+        return [polys[i] for i in hit]
     return read_mesh(src(store), bbox=(low, high))
 
 
@@ -1002,6 +1032,14 @@ def block_idchunk(rows, sizes, ws):
             m, hw, k = H.repeat(fetch, r)
             add("fetch_one", m, hw, k,
                 detail=f"object_ids=; {per} objects per cell")
+            # What the layout gives up: the fixed-selection box of the
+            # spatial blocks, against cells that are not spatial, so
+            # every cell is a candidate.
+            frac = min(1.0, FIXED_SELECTION / max(1, no))
+            m, hw, k = repeat_boxes(
+                lambda lo, hi: _zv_bbox(geom, store, lo, hi),
+                boxes_for_fraction(frac), n_runs("bbox_query", n_obj))
+            add("bbox_query", m, hw, k, detail=f"box fraction {frac:.6f}")
             ws.clear(tag)
 
 
@@ -1721,6 +1759,8 @@ def main():
     env["timing_runs"] = {str(n): timing_runs(n) for n in sizes}
     env["verts_per_object"] = dict(H.VERTS_PER_OBJECT)
     env["codec"] = CODEC
+    env["point_codec"] = POINT_CODEC
+    env["streamline_manifest_layout"] = STREAMLINE_MANIFESTS
     env["workdir"] = str(args.workdir or "(system temp)")
     env["workdir_fstype"] = H.fstype(args.workdir or "/tmp")
     env["fractions"] = FRACTIONS
