@@ -19,9 +19,9 @@ from __future__ import annotations
 import json
 import struct
 import zipfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 
@@ -45,7 +45,7 @@ class Tractogram:
     property_names: list[str]
     expected_count: int
     extent: float
-    batches: "callable[[], Iterator[Batch]]" = field(repr=False)
+    batches: callable[[], Iterator[Batch]] = field(repr=False)
 
 
 def _mat_mul(a: list[float], b: list[float]) -> list[float]:
@@ -63,10 +63,44 @@ _AXES = {"R": (0, 1), "L": (0, -1), "A": (1, 1), "P": (1, -1), "S": (2, 1), "I":
 
 def trk_to_ras(dims, voxel_size, vox_to_ras, voxel_order) -> list[float]:
     """nibabel's get_affine_trackvis_to_rasmm, row-major."""
-    m = [1 / voxel_size[0], 0, 0, -0.5, 0, 1 / voxel_size[1], 0, -0.5, 0, 0, 1 / voxel_size[2], -0.5, 0, 0, 0, 1]
+    m = [
+        1 / voxel_size[0],
+        0,
+        0,
+        -0.5,
+        0,
+        1 / voxel_size[1],
+        0,
+        -0.5,
+        0,
+        0,
+        1 / voxel_size[2],
+        -0.5,
+        0,
+        0,
+        0,
+        1,
+    ]
     affine = list(vox_to_ras)
     if affine[15] == 0:
-        affine = [voxel_size[0], 0, 0, 0, 0, voxel_size[1], 0, 0, 0, 0, voxel_size[2], 0, 0, 0, 0, 1]
+        affine = [
+            voxel_size[0],
+            0,
+            0,
+            0,
+            0,
+            voxel_size[1],
+            0,
+            0,
+            0,
+            0,
+            voxel_size[2],
+            0,
+            0,
+            0,
+            0,
+            1,
+        ]
     affine_axes = []
     for c in range(3):
         column = [affine[c], affine[4 + c], affine[8 + c]]
@@ -146,14 +180,31 @@ def open_trk(path: str | Path, per_batch: int = 100_000) -> Tractogram:
             while at < len(words) and len(starts) < per_batch:
                 n = int(ints[at])
                 if n < 0 or at + 1 + n * (3 + n_scalars) + n_properties > len(words):
-                    raise ValueError(f"{path}: a broken streamline record at byte {TRK_HEADER_SIZE + 4 * at}")
+                    raise ValueError(
+                        f"{path}: a broken streamline record at byte {TRK_HEADER_SIZE + 4 * at}"
+                    )
                 starts.append(at + 1)
                 counts.append(n)
                 at += 1 + n * (3 + n_scalars) + n_properties
             offsets = np.zeros(len(counts) + 1, np.uint32)
             offsets[1:] = np.cumsum(counts)
-            raw = np.concatenate([words[s : s + n * (3 + n_scalars)].reshape(n, 3 + n_scalars) for s, n in zip(starts, counts)]) if counts else np.zeros((0, 3 + n_scalars), np.float32)
-            props = np.array([words[s + n * (3 + n_scalars) : s + n * (3 + n_scalars) + n_properties] for s, n in zip(starts, counts)], np.float32).reshape(len(counts), n_properties)
+            raw = (
+                np.concatenate(
+                    [
+                        words[s : s + n * (3 + n_scalars)].reshape(n, 3 + n_scalars)
+                        for s, n in zip(starts, counts)
+                    ]
+                )
+                if counts
+                else np.zeros((0, 3 + n_scalars), np.float32)
+            )
+            props = np.array(
+                [
+                    words[s + n * (3 + n_scalars) : s + n * (3 + n_scalars) + n_properties]
+                    for s, n in zip(starts, counts)
+                ],
+                np.float32,
+            ).reshape(len(counts), n_properties)
             points = _apply(raw[:, :3].astype(np.float64), to_ras)
             yield Batch(points, offsets, raw[:, 3:].astype(np.float32), props)
 
@@ -190,20 +241,47 @@ def open_tck(path: str | Path, per_batch: int = 100_000) -> Tractogram:
             triplets = triplets[: stop[0]]
             x = triplets[:, 0]
         breaks = np.flatnonzero(np.isnan(x))
-        bounds = np.concatenate([[-1], breaks, [len(triplets)] if len(breaks) == 0 or breaks[-1] != len(triplets) - 1 else []]).astype(np.int64)
+        bounds = np.concatenate(
+            [
+                [-1],
+                breaks,
+                [len(triplets)] if len(breaks) == 0 or breaks[-1] != len(triplets) - 1 else [],
+            ]
+        ).astype(np.int64)
         lines = [(int(a) + 1, int(b)) for a, b in zip(bounds[:-1], bounds[1:])]
         for first in range(0, len(lines), per_batch):
             part = lines[first : first + per_batch]
             counts = [b - a for a, b in part]
             offsets = np.zeros(len(part) + 1, np.uint32)
             offsets[1:] = np.cumsum(counts)
-            points = np.concatenate([triplets[a:b] for a, b in part]).astype(np.float32) if part else np.zeros((0, 3), np.float32)
-            yield Batch(points, offsets, np.zeros((len(points), 0), np.float32), np.zeros((len(part), 0), np.float32))
+            points = (
+                np.concatenate([triplets[a:b] for a, b in part]).astype(np.float32)
+                if part
+                else np.zeros((0, 3), np.float32)
+            )
+            yield Batch(
+                points,
+                offsets,
+                np.zeros((len(points), 0), np.float32),
+                np.zeros((len(part), 0), np.float32),
+            )
 
     return Tractogram(path, [], [], count, 0.0, batches)
 
 
-_DTYPES = {"float16", "float32", "float64", "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"}
+_DTYPES = {
+    "float16",
+    "float32",
+    "float64",
+    "int8",
+    "uint8",
+    "int16",
+    "uint16",
+    "int32",
+    "uint32",
+    "int64",
+    "uint64",
+}
 
 
 def _array_name(name: str):
@@ -229,7 +307,9 @@ def open_trx(path: str | Path, per_batch: int = 100_000) -> Tractogram:
     pos_info, columns, pos_dtype = arrays[("", "positions")]
     off_info, _, off_dtype = arrays[("", "offsets")]
     scalars = [(n, i, d) for (f, n), (i, c, d) in sorted(arrays.items()) if f == "dpv" and c == 1]
-    properties = [(n, i, d) for (f, n), (i, c, d) in sorted(arrays.items()) if f == "dps" and c == 1]
+    properties = [
+        (n, i, d) for (f, n), (i, c, d) in sorted(arrays.items()) if f == "dps" and c == 1
+    ]
     count = int(header.get("NB_STREAMLINES", 0))
     voxel_to_ras = np.asarray(header.get("VOXEL_TO_RASMM", np.eye(4)), np.float64)
     dims = header.get("DIMENSIONS", [0, 0, 0])
@@ -237,24 +317,40 @@ def open_trx(path: str | Path, per_batch: int = 100_000) -> Tractogram:
     extent = max([0.0] + [float(d) * s for d, s in zip(dims, sizes)])
 
     def batches() -> Iterator[Batch]:
-        positions = np.frombuffer(archive.read(pos_info), dtype="<" + np.dtype(pos_dtype).str[1:]).reshape(-1, 3)
-        offsets = np.frombuffer(archive.read(off_info), dtype="<" + np.dtype(off_dtype).str[1:]).astype(np.int64)
+        positions = np.frombuffer(
+            archive.read(pos_info), dtype="<" + np.dtype(pos_dtype).str[1:]
+        ).reshape(-1, 3)
+        offsets = np.frombuffer(
+            archive.read(off_info), dtype="<" + np.dtype(off_dtype).str[1:]
+        ).astype(np.int64)
         n = count or len(offsets)
         if len(offsets) == n:
             offsets = np.concatenate([offsets, [len(positions)]])
-        point_values = [np.frombuffer(archive.read(i), dtype="<" + np.dtype(d).str[1:]).astype(np.float64) for _, i, d in scalars]
-        line_values = [np.frombuffer(archive.read(i), dtype="<" + np.dtype(d).str[1:]).astype(np.float64) for _, i, d in properties]
+        point_values = [
+            np.frombuffer(archive.read(i), dtype="<" + np.dtype(d).str[1:]).astype(np.float64)
+            for _, i, d in scalars
+        ]
+        line_values = [
+            np.frombuffer(archive.read(i), dtype="<" + np.dtype(d).str[1:]).astype(np.float64)
+            for _, i, d in properties
+        ]
         for first in range(0, n, per_batch):
             last = min(n, first + per_batch)
             v0, v1 = int(offsets[first]), int(offsets[last])
             yield Batch(
                 positions[v0:v1].astype(np.float64).astype(np.float32),
                 (offsets[first : last + 1] - v0).astype(np.uint32),
-                np.stack([v[v0:v1] for v in point_values], axis=1).astype(np.float32) if point_values else np.zeros((v1 - v0, 0), np.float32),
-                np.stack([v[first:last] for v in line_values], axis=1).astype(np.float32) if line_values else np.zeros((last - first, 0), np.float32),
+                np.stack([v[v0:v1] for v in point_values], axis=1).astype(np.float32)
+                if point_values
+                else np.zeros((v1 - v0, 0), np.float32),
+                np.stack([v[first:last] for v in line_values], axis=1).astype(np.float32)
+                if line_values
+                else np.zeros((last - first, 0), np.float32),
             )
 
-    return Tractogram(path, [s[0] for s in scalars], [p[0] for p in properties], count, extent, batches)
+    return Tractogram(
+        path, [s[0] for s in scalars], [p[0] for p in properties], count, extent, batches
+    )
 
 
 def open_tractogram(path: str | Path) -> Tractogram:

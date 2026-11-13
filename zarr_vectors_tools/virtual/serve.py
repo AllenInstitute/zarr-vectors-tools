@@ -18,7 +18,9 @@ from . import open_virtual
 
 def make_handler(stores: dict):
     class Handler(BaseHTTPRequestHandler):
-        def _headers(self, status: int, length: int, content_type: str, extra: dict | None = None) -> None:
+        def _headers(
+            self, status: int, length: int, content_type: str, extra: dict | None = None
+        ) -> None:
             self.send_response(status)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Expose-Headers", "Content-Range, Content-Length")
@@ -47,7 +49,10 @@ def make_handler(stores: dict):
             store = stores.get(name)
             if store is None:
                 if path == "":
-                    body = "".join(f'<li><a href="{html.escape(n)}/">{html.escape(n)}/</a></li>' for n in sorted(stores)).encode()
+                    body = "".join(
+                        f'<li><a href="{html.escape(n)}/">{html.escape(n)}/</a></li>'
+                        for n in sorted(stores)
+                    ).encode()
                     self._headers(200, len(body), "text/html")
                     if not head:
                         self.wfile.write(body)
@@ -59,7 +64,15 @@ def make_handler(stores: dict):
                 if names is None:
                     self._headers(404, 0, "text/plain")
                     return
-                body = ("<!DOCTYPE html><html><body><ul>" + "".join(f'<li><a href="{html.escape(urllib.parse.quote(n))}">{html.escape(n)}</a></li>' for n in names) + "</ul></body></html>").encode()
+                body = (
+                    "<!DOCTYPE html><html><body><ul>"
+                    + "".join(
+                        f'<li><a href="{html.escape(urllib.parse.quote(n))}">'
+                        f"{html.escape(n)}</a></li>"
+                        for n in names
+                    )
+                    + "</ul></body></html>"
+                ).encode()
                 self._headers(200, len(body), "text/html")
                 if not head:
                     self.wfile.write(body)
@@ -80,7 +93,12 @@ def make_handler(stores: dict):
                     self._headers(416, 0, "text/plain", {"Content-Range": f"bytes */{size}"})
                     return
                 part = data[start:end]
-                self._headers(206, len(part), "application/octet-stream", {"Content-Range": f"bytes {start}-{max(start, end - 1)}/{size}"})
+                self._headers(
+                    206,
+                    len(part),
+                    "application/octet-stream",
+                    {"Content-Range": f"bytes {start}-{max(start, end - 1)}/{size}"},
+                )
                 if not head:
                     self.wfile.write(part)
                 return

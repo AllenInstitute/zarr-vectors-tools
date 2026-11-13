@@ -6,8 +6,8 @@ import sys
 
 from ._args import (
     build_factors,
-    check_pyramid_method,
     check_executor,
+    check_pyramid_method,
     check_rdp_tolerances,
     executor_ctx,
 )

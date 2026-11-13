@@ -27,11 +27,32 @@ from __future__ import annotations
 from pathlib import Path
 
 from .meshes import MeshStore, is_mesh_file
-from .points import CellStore, is_point_file, open_point_file, parse_point_table, parse_swc, parse_swc_collection, point_store, skeleton_store
+from .points import (
+    CellStore,
+    is_point_file,
+    open_point_file,
+    parse_point_table,
+    parse_swc,
+    parse_swc_collection,
+    point_store,
+    skeleton_store,
+)
 from .streamlines import StreamlineStore, cell_size, fragment_index
 from .tractograms import open_tck, open_tractogram, open_trk, open_trx
 
-VIRTUAL_SUFFIXES = (".trk", ".tck", ".trx", ".obj", ".stl", ".ply", ".gii", ".swc", ".csv", ".tsv", ".xyz")
+VIRTUAL_SUFFIXES = (
+    ".trk",
+    ".tck",
+    ".trx",
+    ".obj",
+    ".stl",
+    ".ply",
+    ".gii",
+    ".swc",
+    ".csv",
+    ".tsv",
+    ".xyz",
+)
 
 
 def open_virtual(path: str | Path) -> StreamlineStore | MeshStore | CellStore:
