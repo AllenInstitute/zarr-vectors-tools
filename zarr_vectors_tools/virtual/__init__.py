@@ -5,7 +5,7 @@ The file is read once and binned into spatial cells; every key of the store
 (``zarr.json``, ``0/vertices/c/1/0/2``, …) is then made when asked.  The
 layout matches, chunk for chunk, the one the browser makes from the same
 file (ngplatform's Zarr Vectors plugin reads local tractograms this way),
-and is a valid format 0.9.2 store (``zarr_vectors.validate(level=3)``).
+and is a valid format 0.9.4 store (``zarr_vectors.validate(level=3)``).
 
 Tractograms (TrackVis ``.trk``, MRtrix ``.tck``, ``.trx``), meshes
 (``.obj`` by object, ``.stl``, ``.ply``, GIFTI ``.gii`` and FreeSurfer

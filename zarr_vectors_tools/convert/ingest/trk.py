@@ -14,6 +14,7 @@ from zarr_vectors.typing import BinShape, ChunkShape
 from zarr_vectors_tools.convert.ingest._attribute_widths import (
     record_vertex_attribute_widths,
 )
+from zarr_vectors_tools.convert.ingest._axes import declare_axis_unit
 from zarr_vectors_tools.convert.ingest._object_columns import stamp_object_columns
 from zarr_vectors_tools.convert.ingest.trk_helpers import (
     _apply_trk_enrichments,
@@ -99,6 +100,8 @@ def ingest_trk(
     # not produce one. Without this, the ingest succeeds but coarsening
     # refuses the store.  Each streamline's vertex_count comes with it.
     stamp_object_columns(output_path)
+    # nibabel returns streamlines in RAS+ millimetres.
+    declare_axis_unit(output_path, "millimeter")
 
     record_vertex_attribute_widths(
         output_path,

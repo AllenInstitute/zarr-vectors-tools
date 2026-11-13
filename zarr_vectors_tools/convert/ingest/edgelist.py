@@ -10,6 +10,7 @@ back to pandas otherwise (``pandas`` is a top-level dependency).
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -94,7 +95,10 @@ def ingest_edgelist(
             Same semantics as :func:`ingest_graphml`.
 
     Returns:
-        Summary dict from :func:`write_graph`, plus enrichment counters.
+        Summary dict from :func:`write_graph`, plus enrichment counters and
+        ``dropped_edges_missing_node``: the edges dropped because an endpoint
+        is not in the node table.  When that is not zero it also warns, and
+        ``warnings`` says so.
 
     Raises:
         IngestError: For missing files, cuDF errors, or empty results.
@@ -148,6 +152,15 @@ def ingest_edgelist(
         [s in node_to_idx and t in node_to_idx for s, t in zip(sources, targets)],
         dtype=bool,
     )
+    dropped = int(np.count_nonzero(~edge_kept))
+    enrichment_summary["dropped_edges_missing_node"] = dropped
+    if dropped:
+        message = (
+            f"{dropped} of {len(edge_kept)} edges name a node that is not in "
+            f"the node table and were dropped"
+        )
+        warnings.warn(message, stacklevel=2)
+        enrichment_summary.setdefault("warnings", []).append(message)
     edges_arr = np.array(
         [[node_to_idx[s], node_to_idx[t]]
          for s, t in zip(sources[edge_kept], targets[edge_kept])],

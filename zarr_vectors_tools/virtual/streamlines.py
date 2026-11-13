@@ -1,5 +1,5 @@
 """A virtual zarr-vectors streamline store: streamlines binned once into
-spatial cells, every key of a format 0.9.2 store made from that when asked.
+spatial cells, every key of a format 0.9.4 store made from that when asked.
 
 The same layout, byte for byte in its chunks, as the browser's
 (ngplatform's Zarr Vectors plugin, ``src/virtual/streamlines.ts``):
@@ -26,6 +26,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .tractograms import Tractogram
+
+#: The format version every virtual store declares.
+ZV_VERSION = "0.9.4"
 
 MAGIC = 0x5A564647
 MANIFEST_ROWS = 16384
@@ -364,7 +367,7 @@ class StreamlineStore:
     def _root(self):
         values = self.levels[0].value_names
         zv = {
-            "zv_version": "0.9.2",
+            "zv_version": ZV_VERSION,
             "format_capabilities": ["preserved_object_ids"],
             "chunk_shape": [self.levels[0].chunk] * 3,
             "bounds": [self.lo, self.hi],

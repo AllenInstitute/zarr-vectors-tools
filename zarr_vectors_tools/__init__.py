@@ -2,7 +2,8 @@
 
 The core read/write APIs live in the ``zarr_vectors`` package. This package
 provides format-conversion workflows that wrap third-party libraries
-(nibabel, laspy, plyfile, trimesh, networkx, trx-python), the rich multi-scale
+(nibabel, laspy, plyfile, networkx, trx-python and others, each an optional
+extra), the rich multi-scale
 coordination + compute layer (``zarr_vectors_tools.multiresolution``), and the
 example notebooks that demonstrate end-to-end pipelines.
 
@@ -35,14 +36,16 @@ def _register_multiscale_strategies() -> None:
 
     Importing ``coarsen`` runs its bottom-of-module ``register_coarsener(...)``
     calls (tools-local registry). Then, when core exposes the plug-in registry
-    (PR #27), register the same coarsen methods and the object-selection
-    strategies into core so ``zarr_vectors.multiresolution.coarsen_level`` /
+    (``zarr_vectors.building.register_coarsen_strategy`` and
+    ``register_selection_strategy``), register the same coarsen methods and
+    the object-selection strategies into core so
+    ``zarr_vectors.multiresolution.coarsen_level`` /
     ``apply_sparsity`` dispatch to them by name.
     """
     # Tools-local registry (used by zarr_vectors_tools.multiresolution.coarsen).
     from zarr_vectors_tools.multiresolution import coarsen as _coarsen  # noqa: F401
 
-    # Core plug-in registry — absent on pre-PR#27 cores; degrade quietly.
+    # Core plug-in registry — when core lacks it, return without registering.
     try:
         from zarr_vectors.building import register_coarsen_strategy, register_selection_strategy
     except ImportError:

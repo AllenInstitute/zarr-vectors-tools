@@ -83,8 +83,9 @@ zvtools convert neuron.zv neuron_out.swc
 ```
 
 - **SWC.** One file, one tree per object. With `--object-id`, OUTPUT is a
-  directory of one file per object, named by segment id. Node ids start at 1;
-  without `radius` and `compartment` every node gets radius 1.0 and type 3.
+  directory of one file per object, named by segment id. Each tree is written
+  from its root (parent `-1`) in depth-first order, node ids 1, 2, … in that
+  order, so every parent comes before its children. Without `radius` and `compartment` every node gets radius 1.0 and type 3.
 - **Precomputed.** A segmentation layer with `skeletons/` and its
   `segment_properties`, in nm. Segment ids come from `segment_id`, else object
   id + 1. Pass `--unit micrometer` if the store records no unit and is not in

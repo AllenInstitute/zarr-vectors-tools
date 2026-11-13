@@ -107,6 +107,16 @@ def read_streamline_level(
     from zarr_vectors.constants import OBJECT_ATTRIBUTES
     from zarr_vectors.types.polylines import read_polylines
 
+    if group_ids is not None:
+        from zarr_vectors.constants import GROUPS
+
+        groups_level = get_resolution_level(open_store(str(store_path)), level)
+        if not groups_level.array_exists(GROUPS):
+            raise ExportError(
+                f"group ids {list(group_ids)} were asked for, but level {level} "
+                f"of '{store_path}' has no groups"
+            )
+
     try:
         result = read_polylines(
             str(store_path), level=level, object_ids=object_ids,

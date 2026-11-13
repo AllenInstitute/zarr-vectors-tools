@@ -50,12 +50,12 @@ def _extract_trk_data(
     Args:
         trk: A nibabel TRK object.
         dtype: Dtype for streamline position data.
-        integer_object_attributes: Object-attribute names that should
-            retain their integer dtype instead of being converted to
-            float32.
 
     Returns:
-        ``(polylines, vertex_attributes, object_attributes)``.
+        ``(polylines, vertex_attributes, object_attributes)``.  Every
+        per-point and per-streamline value is float32; a per-streamline
+        property with one value per streamline has shape ``(N,)``, one
+        with ``k`` values shape ``(N, k)``.
     """
     np_dtype = np.dtype(dtype)
 
@@ -82,10 +82,10 @@ def _extract_trk_data(
         object_attributes = {}
 
         for key, values in trk.tractogram.data_per_streamline.items():
-            object_attributes[key] = np.asarray(
-                values,
-                dtype=np.float32,
-            )
+            column = np.asarray(values, dtype=np.float32)
+            if column.ndim == 2 and column.shape[1] == 1:
+                column = column[:, 0]
+            object_attributes[key] = column
 
     return polylines, vertex_attributes, object_attributes
 

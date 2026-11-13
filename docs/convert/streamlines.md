@@ -21,8 +21,11 @@ ingest_trk_parallel("tracts.trk", "tracts.zv", num_chunks=64, build_multiscale=F
 ```
 
 TRK takes `--num-chunks`, not `--chunk-shape`. TCK and TRX need
-`--chunk-shape` in mm. In Python, `ingest_trk_parallel` runs serially unless
-given an `executor`, and builds a pyramid unless `build_multiscale=False`.
+`--chunk-shape` in mm. The CLI builds a pyramid only when given `--coarsen` or
+`--sparsity`, and its `--sparsity-strategy` default is `random`. In Python,
+`ingest_trk_parallel` runs serially unless given an `executor`, builds a
+pyramid unless `build_multiscale=False`, and keeps the longest streamlines
+(`sparsity_strategy="length"`).
 
 | Option | Format | Effect |
 |---|---|---|
@@ -38,9 +41,11 @@ given an `executor`, and builds a pyramid unless `build_multiscale=False`.
 
 - One object per streamline; its points are the object's vertices.
 - TRK scalars and TRX `dpv` as vertex attributes; TRK properties and TRX `dps`
-  as object attributes. TRX keeps its dtypes (float16 becomes float32).
+  as object attributes. TRX keeps its dtypes (float16 becomes float32). A TRK
+  property of one value per streamline is one column, shape (N,).
 - TRX `groups` as named groups and `dpg` as group attributes, on every level.
-- The TRK or TRX header, and millimetres as the axis unit.
+- The TRK or TRX header. Every streamline ingest records millimetres as the
+  axis unit.
 - Every name: [Headers and attributes](../reference/headers_attributes.md).
 
 ## Coordinates

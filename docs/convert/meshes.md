@@ -55,8 +55,9 @@ holds the selected segments until they are written, so `--segment-id` bounds it.
 zvtools convert model.zv model_out.obj
 ```
 
-OBJ export writes vertices and faces only. `--bbox` keeps faces whose corners
-are all inside, so a box that cuts the mesh leaves an open edge.
+OBJ export writes vertices and faces only. `--object-id` keeps those objects.
+`--bbox` keeps faces whose corners are all inside, so a box that cuts the mesh
+leaves an open edge.
 
 Precomputed export writes a segmentation layer with a single-resolution
 `mesh/` in nm, one segment per object. Segment ids come from `segment_id`, else

@@ -5,12 +5,10 @@ whole network" — and every coarsener in this package preserves object ids
 (``CAP_PRESERVED_OBJECT_IDS``).  A group's membership is therefore meaningful
 at a coarse level unchanged, minus whatever sparsification dropped.
 
-Historically no coarsener wrote ``groups/`` at all, so a pyramid's coarse levels
-had object indices but no way to say what any object *was*: a reader asking for
-"the network object" at level 2 got nothing, and had to reach back to level 0
-for the taxonomy while reading manifests from level 2.  This module closes that
-gap, so ``<N>/groups/<id>`` answers at every level the same way ``0/groups/<id>``
-does.
+The coarseners write ``<N>/groups/`` with :func:`propagate_groupings`, so
+``<N>/groups/<id>`` answers at every level the same way ``0/groups/<id>``
+does: a reader asking for "the network object" at level 2 finds it there,
+without reaching back to level 0 for the taxonomy.
 
 Group attributes (``group_attributes/<name>``) ride along, since they are
 indexed by group id and are what carry human-readable group names.

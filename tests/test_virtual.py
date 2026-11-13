@@ -1,5 +1,5 @@
 """Virtual zarr-vectors stores: tractograms read as zarr-vectors stores without
-converting them.  The store must be a valid 0.9.2 store whose streamlines
+converting them.  The store must be a valid store of the core's format version whose streamlines
 read back as nibabel reads the file, and the server must answer keys,
 ranges and listings as Neuroglancer asks for them."""
 
@@ -38,6 +38,9 @@ def trk(tmp_path):
 
 
 def _write(store, root):
+    from zarr_vectors.constants import FORMAT_VERSION
+
+    assert json.loads(store.get("zarr.json"))["attributes"]["zarr_vectors"]["zv_version"] == FORMAT_VERSION
     for key in store.keys():
         data = store.get(key)
         assert data is not None, key

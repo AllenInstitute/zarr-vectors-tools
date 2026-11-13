@@ -537,7 +537,7 @@ def _plan_file_data(
 # ---------------------------------------------------------------------------
 
 def _looks_like_store(path: Path) -> bool:
-    return path.is_dir() and ((path / "zarr.json").exists() or (path / ".zattrs").exists())
+    return path.is_dir() and (path / "zarr.json").exists()
 
 
 def _part_files(npz_path: str) -> list[Path]:

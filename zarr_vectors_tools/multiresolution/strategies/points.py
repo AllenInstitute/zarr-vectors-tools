@@ -265,16 +265,15 @@ def build_point_subset_pyramid(
     from zarr_vectors.constants import VERTEX_ATTRIBUTES
 
     from zarr_vectors_tools.multiresolution.additive import (
+        additive_support_error,
         check_refinement,
         refuse_additive,
-        supports_additive,
     )
 
     check_refinement(refinement)
-    if refinement == "add" and not supports_additive():
-        raise CoarseningError(
-            "refinement='add' needs a zarr-vectors-py that writes additive levels"
-        )
+    refusal = additive_support_error() if refinement == "add" else None
+    if refusal is not None:
+        raise CoarseningError(refusal)
     refuse_additive(store_path, "build_point_subset_pyramid")
     root = open_store(str(store_path), "r+")
     root_meta = read_root_metadata(root)

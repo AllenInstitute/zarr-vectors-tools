@@ -1,5 +1,5 @@
 """Mesh files (.obj, .stl, .ply, GIFTI .gii, FreeSurfer surfaces) as virtual
-zarr-vectors 0.9.3 mesh stores.
+zarr-vectors 0.9.4 mesh stores.
 
 The browser's layout (ngplatform's Zarr Vectors plugin,
 ``src/virtual/meshes.ts``), chunk for chunk: one cell holds the whole mesh;
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .streamlines import _column, _group, element, fragment_index, vlen_chunk
+from .streamlines import ZV_VERSION, _column, _group, element, fragment_index, vlen_chunk
 
 MANIFEST_ROWS = 16384
 COLUMN_ROWS = 65536
@@ -375,7 +375,7 @@ class MeshStore:
         fixed = {
             "zarr.json": lambda: j(_group({
                 "zarr_vectors": {
-                    "zv_version": "0.9.3", "format_capabilities": ["fragment_link_groups"], "chunk_shape": [c, c, c],
+                    "zv_version": ZV_VERSION, "format_capabilities": ["fragment_link_groups"], "chunk_shape": [c, c, c],
                     "bounds": [self.lo, self.hi], "coordinate_offset": self.offset, "geometry_types": ["mesh"],
                     "links_convention": "explicit", "object_index_convention": "standard", "cross_chunk_strategy": "explicit_links",
                 },

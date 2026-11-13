@@ -7,6 +7,7 @@ import sys
 from ._args import (
     build_factors,
     check_pyramid_method,
+    check_executor,
     check_rdp_tolerances,
     executor_ctx,
 )
@@ -120,6 +121,7 @@ def run_pyramid(args) -> int:
         check_pyramid_request(str(args.store), **options)
     except ValueError as exc:
         raise SystemExit(f"error: {exc}") from None
+    check_executor(args.workers, args.workers_backend)
     _clear_existing_levels(args.store, replace=args.replace)
 
     from zarr_vectors_tools.multiresolution.additive import (

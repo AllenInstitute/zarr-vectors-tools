@@ -1,5 +1,5 @@
 """SWC neurons and point tables (.csv, .tsv, .xyz) as virtual zarr-vectors
-0.9.2 skeleton and point-cloud stores.
+0.9.4 skeleton and point-cloud stores.
 
 The browser's layout (ngplatform's Zarr Vectors plugin,
 ``src/virtual/points.ts``), chunk for chunk: one cell holds everything,
@@ -35,7 +35,7 @@ from pathlib import Path
 import numpy as np
 
 from .meshes import mesh_unit
-from .streamlines import _column, _group, element, fragment_index, vlen_chunk
+from .streamlines import ZV_VERSION, _column, _group, element, fragment_index, vlen_chunk
 
 MANIFEST_ROWS = 16384
 COLUMN_ROWS = 65536
@@ -273,7 +273,7 @@ class CellStore:
         fixed = {
             "zarr.json": lambda: j(_group({
                 "zarr_vectors": {
-                    "zv_version": "0.9.2", "format_capabilities": [], "chunk_shape": [c, c, c], "bounds": [self.lo, self.hi],
+                    "zv_version": ZV_VERSION, "format_capabilities": [], "chunk_shape": [c, c, c], "bounds": [self.lo, self.hi],
                     "geometry_types": [self.kind],
                     "links_convention": "implicit_sequential_with_branches" if skeleton else "implicit_sequential",
                     "object_index_convention": "standard", "cross_chunk_strategy": "explicit_links", "coordinate_offset": self.offset,

@@ -21,7 +21,8 @@ ingest_edgelist("edges.csv", "nodes.csv", "connectome.zv", (250.0, 250.0, 250.0)
 ```
 
 Edges find their nodes by `node_id`, not by row. An edge naming a missing node
-is dropped without a count. Other column names, column choice and graph
+is dropped, with a warning; the summary counts them as
+`dropped_edges_missing_node`. Other column names, column choice and graph
 metrics (`compute_degree`, `compute_component`, `compute_clustering`; these
 need the `graph` extra) are Python-only.
 

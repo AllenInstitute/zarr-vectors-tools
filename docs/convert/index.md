@@ -72,7 +72,7 @@ error: --compressor applies to trk input — not 'csv'
 | Option | Effect | Formats |
 |---|---|---|
 | `--level N` | Pyramid level to export. Default 0, the finest. | all |
-| `--object-id ID` | Only these objects (repeatable). | all but `gifti`, `obj` |
+| `--object-id ID` | Only these objects (repeatable). | all but `gifti` |
 | `--bbox X0,Y0,Z0,X1,Y1,Z1` | Only what falls in the box (min corner, max corner). | `csv`, `ply`, `h5ad`, `obj` |
 | `--attribute NAME` | Vertex attributes to write (repeatable). `csv` and `ply` write none unless named; `h5ad`, `trk` and `trx` write all. A missing name is an error. | all but `obj`, `swc` |
 | `--group-id ID` | Only these streamline groups (repeatable). | `trk`, `trx` |

@@ -60,27 +60,79 @@ def check_refinement(refinement: str) -> str:
     return refinement
 
 
+#: What zarr-vectors-py must provide to write and read additive levels:
+#: ``(module, name)`` pairs.
+_CORE_SUPPORT = (
+    ("zarr_vectors.building", "level_chain"),
+    ("zarr_vectors.multiresolution.additive", "make_levels_additive"),
+)
+
+
+def missing_additive_support() -> list[str]:
+    """The zarr-vectors-py functions additive levels need that the installed
+    version lacks, as dotted names -- empty when it has them all."""
+    import importlib
+
+    missing = []
+    for module, name in _CORE_SUPPORT:
+        try:
+            found = hasattr(importlib.import_module(module), name)
+        except ImportError:
+            found = False
+        if not found:
+            missing.append(f"{module}.{name}")
+    return missing
+
+
 def supports_additive() -> bool:
     """Whether the installed zarr-vectors-py can write additive levels."""
-    try:
-        from zarr_vectors.building import level_chain  # noqa: F401
-        from zarr_vectors.multiresolution.additive import (  # noqa: F401
-            make_levels_additive,
-        )
-    except ImportError:
-        return False
-    return True
+    return not missing_additive_support()
+
+
+def additive_support_error() -> str | None:
+    """Why ``refinement="add"`` cannot run here, or ``None`` when it can.
+    Every entry point asks before it writes anything."""
+    missing = missing_additive_support()
+    if not missing:
+        return None
+    return (
+        f"refinement 'add' (additive pyramids) needs zarr-vectors-py support "
+        f"that the installed version lacks: {', '.join(missing)}"
+    )
+
+
+#: The root ``required_capabilities`` entry of a store with additive levels.
+ADDITIVE_CAPABILITY = "additive_levels"
 
 
 def refuse_additive(store_path: Any, action: str) -> None:
     """Raise if ``store_path`` already has additive levels: ``action``
     rebuilds levels from one another, which an additive pyramid -- each
-    level holding only what the next one lacks -- cannot survive."""
+    level holding only what the next one lacks -- cannot survive.
+
+    zarr-vectors-py's ``refuse_additive`` decides where it exists.  Where it
+    does not, the store's root ``required_capabilities`` decides: a store
+    with additive levels lists ``"additive_levels"`` there.  Raises
+    ``ValueError`` in that case.
+    """
+    target = store_path if hasattr(store_path, "attrs") else str(store_path)
     try:
         from zarr_vectors.building import refuse_additive as _refuse
-    except ImportError:  # no additive levels can exist without it
+    except ImportError:
+        _refuse = None
+    if _refuse is not None:
+        _refuse(target, action)
         return
-    _refuse(str(store_path) if not hasattr(store_path, "attrs") else store_path, action)
+    from zarr_vectors.building import open_store, read_root_metadata
+
+    root = target if hasattr(target, "attrs") else open_store(target, mode="r")
+    if ADDITIVE_CAPABILITY in read_root_metadata(root).required_capabilities:
+        raise ValueError(
+            f"{action} refused: the store has additive levels "
+            f"(required_capabilities lists {ADDITIVE_CAPABILITY!r}), each "
+            f"holding only what the next coarser level lacks, so its levels "
+            f"cannot be rebuilt one from another"
+        )
 
 
 def additive_concerns(
@@ -170,11 +222,9 @@ def make_pyramid_additive(
     Returns:
         ``{"levels": [per-level report], "concerns": [...]}``.
     """
-    if not supports_additive():
-        raise RuntimeError(
-            "the installed zarr-vectors-py cannot write additive levels "
-            "(zarr_vectors.multiresolution.additive.make_levels_additive)"
-        )
+    refusal = additive_support_error()
+    if refusal is not None:
+        raise RuntimeError(refusal)
     from zarr_vectors.building import list_resolution_levels, open_store
     from zarr_vectors.multiresolution.additive import make_levels_additive
 

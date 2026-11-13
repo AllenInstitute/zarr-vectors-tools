@@ -77,3 +77,21 @@ def test_linc_trk_groups(tmp_path: Path) -> None:
 
     assert result["object_ids"] == [2, 3]
     assert np.all(result["vertex_attributes"]["label_id"] == 35)
+
+
+def test_linc_trk_axes_are_millimetres(tmp_path: Path) -> None:
+    """The store records the RAS+ millimetres nibabel reads the file in."""
+    import zarr
+
+    source = tmp_path / "gpihb.trk"
+    _write_linc_trk(source)
+    lut = tmp_path / "labels.txt"
+    lut.write_text("34 GPi-Hb 85 117 203 255\n35 GPi-Pf 158 252 235 255\n")
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(json.dumps({"gpihb.trk": 34}))
+    store = tmp_path / "store.zarrvectors"
+    ingest_linc_trk(source, store, (50, 50, 50), lut_path=lut, mapping_path=mapping)
+
+    attrs = zarr.open_group(str(store), mode="r").attrs.asdict()
+    assert [a.get("unit") for a in attrs["multiscales"][0]["axes"]] == ["millimeter"] * 3
+    assert zarr.open_array(str(store / "0/object_attributes/label_id"), mode="r").shape == (4,)

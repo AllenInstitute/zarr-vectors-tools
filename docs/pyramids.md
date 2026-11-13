@@ -67,8 +67,10 @@ geometry. In Python, pass `method=` to `build_pyramid`.
 ### Face groups for per-object reads
 
 Each mesh level stores each object's faces together in every chunk, so a viewer
-can read one object's faces alone. The level is stamped `fragment_link_groups`.
-To group and stamp a store written some other way, run:
+can read one object's faces alone. With a zarr-vectors core that supports it,
+the level is stamped `fragment_link_groups`; without that support the faces are
+still grouped but not stamped, and `zvtools index-faces` refuses to run. To
+group and stamp a store written some other way, run:
 
 ```bash
 zvtools index-faces brain.zv            # all levels; --levels 0 for one
@@ -92,7 +94,8 @@ stamp, so run it again afterwards. After `zvtools shard`, run it with
 | `attribute` | the highest values of the object attribute named by `--sparsity-attribute NAME` |
 
 The [Pyramid reference](pyramid_reference.md#coarseners) lists the strategies
-each geometry supports. For `length` on streamlines in a later
+each geometry supports; any other is refused before anything is written, as is
+`group` on a store without groups. For `length` on streamlines in a later
 `zvtools pyramid`, convert with `--compute-length`. The CLI has no seed, so two
 runs keep different objects; in Python, pass `sparsity_seed` to `build_pyramid`.
 
@@ -121,7 +124,8 @@ zvtools pyramid tracts.zv --sparsity 2,2,2 --refinement add
 
 Additive pyramids need a zarr-vectors core that supports them;
 `zarr_vectors_tools.multiresolution.additive.supports_additive()` reports
-whether this one does.
+whether this one does. Without it, `--refinement add` is refused before
+anything is written or removed.
 
 :::{warning}
 Level 0 is rewritten in place: afterwards it holds only the objects no coarser

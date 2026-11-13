@@ -46,7 +46,9 @@ zvtools merge atlas.zv atlas.trk --create --cell-size 10,10,10 \
 
 `--pyramid rebuild` (default) rebuilds each coarser level with its recorded
 settings. Pass the `--sparsity-strategy` the levels were built with, because
-it is not recorded. `drop` removes the levels; `keep` leaves them out of date.
+it is not recorded. `drop` removes the levels; `keep` leaves them out of date and marks each one
+with `"compose_stale": true` in the `zarr_vectors_tools` block of its level
+attributes.
 For a different pyramid, merge with `--pyramid drop` and run `zvtools pyramid`
 ([Pyramids](pyramids.md)).
 
@@ -78,5 +80,16 @@ merge_stores("tracts.zv", [FileSource("subject_b.trk")],
 split_store("atlas.zv", "bundles", by="groups")
 ```
 
-Keywords follow the CLI options. `plan_merge` and `plan_split` are the
-`--dry-run` equivalents.
+Most keywords are the CLI options with `_` for `-` (`create`, `cell_size`,
+`group_prefix`, `on_out_of_bounds`, `pyramid`; for `split_store` also `by`,
+`attribute`, `level`, `bounds`, `min_objects`, `overwrite`). These differ:
+
+| CLI | Python |
+|---|---|
+| `--source-attr NAME` | `merge_stores(source_attribute=NAME)` |
+| `--pyramid-coarsen`, `--pyramid-sparsity` | `pyramid_factors=[(coarsen, sparsity), ...]`, one pair per level |
+| `--sparsity-strategy`, `--coarsen-mode` | `pyramid_options={"sparsity_strategy": ..., "coarsen_mode": ...}` |
+| `--lut FILE` (split) | `split_store(names=load_lut(FILE))` |
+| `--format`, `--transform`, `--space` (merge) | per source: `FileSource(path, format=..., transform=..., space=...)` (`space` for TRK) |
+| `--group-by NAME --lut FILE` (merge) | per source: `derive_groups(read_geometry(path, fmt), NAME, names=load_lut(FILE))` in a `GeometrySource` |
+| `--dry-run` | `plan_merge`, `plan_split` |
