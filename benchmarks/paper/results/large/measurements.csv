@@ -770,49 +770,30 @@ chunks,points,8000,1000000,1000000,fetch_one,zarr-vectors,s,0.00122,2.9e-05,200,
 chunks,points,8000,1000000,1000000,write_full,zarr-vectors,s,3.456283,0.0,1,chunk side 50; reads 1x the object
 chunks,streamlines,8,958210,83333,fetch_one,zarr-vectors,s,0.009864,0.000727,51,chunk side 500; reads 1x the object
 chunks,streamlines,8,958210,83333,write_full,zarr-vectors,s,0.273171,0.0,1,chunk side 500; reads 1x the object
-chunks,streamlines,8,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.004471,9.2e-05,112,10417 objects per cell
-chunks,streamlines,8,958210,83333,write_full,zarr-vectors (chunked by id),s,0.342245,0.0,1,10417 objects per cell
 chunks,streamlines,64,958210,83333,fetch_one,zarr-vectors,s,0.0054,0.000216,93,chunk side 250; reads 1x the object
 chunks,streamlines,64,958210,83333,write_full,zarr-vectors,s,0.40277,0.0,1,chunk side 250; reads 1x the object
-chunks,streamlines,64,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.0028,5e-05,179,1303 objects per cell
-chunks,streamlines,64,958210,83333,write_full,zarr-vectors (chunked by id),s,0.351305,0.0,1,1303 objects per cell
 chunks,streamlines,125,958210,83333,fetch_one,zarr-vectors,s,0.006536,0.00021,77,chunk side 200; reads 1x the object
 chunks,streamlines,125,958210,83333,write_full,zarr-vectors,s,0.48059,0.0,1,chunk side 200; reads 1x the object
-chunks,streamlines,125,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.00251,4.5e-05,200,667 objects per cell
-chunks,streamlines,125,958210,83333,write_full,zarr-vectors (chunked by id),s,0.390566,0.0,1,667 objects per cell
 chunks,streamlines,512,958210,83333,fetch_one,zarr-vectors,s,0.007175,0.000241,70,chunk side 125; reads 1x the object
 chunks,streamlines,512,958210,83333,write_full,zarr-vectors,s,1.080211,0.0,1,chunk side 125; reads 1x the object
-chunks,streamlines,512,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.002246,1.9e-05,200,163 objects per cell
-chunks,streamlines,512,958210,83333,write_full,zarr-vectors (chunked by id),s,0.567628,0.0,1,163 objects per cell
 chunks,streamlines,1000,958210,83333,fetch_one,zarr-vectors,s,0.006975,0.000224,72,chunk side 100; reads 1x the object
 chunks,streamlines,1000,958210,83333,write_full,zarr-vectors,s,1.503892,0.0,1,chunk side 100; reads 1x the object
-chunks,streamlines,993,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.002324,2.6e-05,200,84 objects per cell
-chunks,streamlines,993,958210,83333,write_full,zarr-vectors (chunked by id),s,0.722034,0.0,1,84 objects per cell
 chunks,streamlines,8000,958210,83333,fetch_one,zarr-vectors,s,0.008349,0.000358,60,chunk side 50; reads 1x the object
 chunks,streamlines,8000,958210,83333,write_full,zarr-vectors,s,9.082848,0.0,1,chunk side 50; reads 1x the object
-chunks,streamlines,7576,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.003479,8.6e-05,144,11 objects per cell
-chunks,streamlines,7576,958210,83333,write_full,zarr-vectors (chunked by id),s,3.741606,0.0,1,11 objects per cell
 chunks,meshes,8,999936,6944,fetch_one,zarr-vectors,s,0.012292,0.000965,41,chunk side 500; reads 1x the object
 chunks,meshes,8,999936,6944,write_full,zarr-vectors,s,0.422302,0.0,1,chunk side 500; reads 1x the object
-chunks,meshes,8,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.010723,0.000229,47,868 objects per cell
-chunks,meshes,8,999936,6944,write_full,zarr-vectors (chunked by id),s,0.404439,0.0,1,868 objects per cell
 chunks,meshes,64,999936,6944,fetch_one,zarr-vectors,s,0.00403,5.3e-05,125,chunk side 250; reads 1x the object
 chunks,meshes,64,999936,6944,write_full,zarr-vectors,s,0.551246,0.0,1,chunk side 250; reads 1x the object
-chunks,meshes,64,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003555,6.6e-05,141,109 objects per cell
-chunks,meshes,64,999936,6944,write_full,zarr-vectors (chunked by id),s,0.424734,0.0,1,109 objects per cell
 chunks,meshes,125,999936,6944,fetch_one,zarr-vectors,s,0.003789,9.7e-05,132,chunk side 200; reads 1x the object
 chunks,meshes,125,999936,6944,write_full,zarr-vectors,s,0.726229,0.0,1,chunk side 200; reads 1x the object
-chunks,meshes,124,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003357,0.00011,149,56 objects per cell
-chunks,meshes,124,999936,6944,write_full,zarr-vectors (chunked by id),s,0.550632,0.0,1,56 objects per cell
 chunks,meshes,512,999936,6944,fetch_one,zarr-vectors,s,0.003153,6.3e-05,159,chunk side 125; reads 1x the object
 chunks,meshes,512,999936,6944,write_full,zarr-vectors,s,1.443517,0.0,1,chunk side 125; reads 1x the object
-chunks,meshes,496,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003008,9.2e-05,167,14 objects per cell
-chunks,meshes,496,999936,6944,write_full,zarr-vectors (chunked by id),s,0.967369,0.0,1,14 objects per cell
 chunks,meshes,1000,999936,6944,fetch_one,zarr-vectors,s,0.004745,0.00016,106,chunk side 100; reads 1x the object
 chunks,meshes,1000,999936,6944,write_full,zarr-vectors,s,2.341823,0.0,1,chunk side 100; reads 1x the object
-chunks,meshes,992,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.002998,8e-05,167,7 objects per cell
-chunks,meshes,992,999936,6944,write_full,zarr-vectors (chunked by id),s,1.587495,0.0,1,7 objects per cell
 chunks,meshes,8000,999936,6944,fetch_one,zarr-vectors,s,0.017337,0.000872,29,chunk side 50; reads 1x the object
 chunks,meshes,8000,999936,6944,write_full,zarr-vectors,s,11.585871,0.0,1,chunk side 50; reads 1x the object
-chunks,meshes,6944,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.004728,8.9e-05,106,1 objects per cell
-chunks,meshes,6944,999936,6944,write_full,zarr-vectors (chunked by id),s,8.382489,0.0,1,1 objects per cell
+chunked,points,10000000,10000000,10000000,write_full,precomputed annotations,s,545.667493,22.008778,2,
+storage,points,10000000,10000000,10000000,bytes,precomputed annotations,bytes,320001395,,1,chunked
+chunked,points,10000000,10000000,10000000,read_full,precomputed annotations,s,0.087553,0.000386,6,
+chunked,points,10000000,10000000,10000000,bbox_query,precomputed annotations,s,0.00404,0.00047,125,box fraction 0.000010
+chunked,points,10000000,10000000,10000000,fetch_one,precomputed annotations,s,2.2e-05,1e-06,200,"by_id: one file, one read"

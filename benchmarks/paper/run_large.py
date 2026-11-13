@@ -35,7 +35,7 @@ this actually wants.
 
 What the extra decade costs, and what it does not
 -------------------------------------------------
-Three competitors are already capped below 10^7 by ``run_sweep``, and
+Two competitors are already capped below 10^7 by ``run_sweep``, and
 the caps are deliberate rather than incidental -- each one skips a point
 whose *shape* is already settled and whose cost is superlinear in a way
 that says more about the writer than about the format:
@@ -44,8 +44,6 @@ that says more about the writer than about the format:
 * ``zarr-vectors (zstd, per-point object index)`` above 10^6 -- the
   writer groups vertices by object with one full-array mask per object,
   which is quadratic in points per chunk.
-* ``precomputed annotations`` above 10^6 -- ``by_id`` is one file per
-  annotation, so 10^7 is ten million files, per repeat.
 
 Each is logged as a skip when the sweep reaches it, so the omission is
 in the run's own output and not only in this docstring.

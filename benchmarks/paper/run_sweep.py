@@ -952,30 +952,6 @@ def block_chunks(rows, ws):
                                 f"the object")
             ws.clear(tag)
 
-            # The same object from a store chunked by id into about as
-            # many cells, so the chunk count is the only thing that moves.
-            if geom not in IDCHUNK_GEOMS:
-                continue
-            per = -(-no // n_chunks)
-            n_cells = -(-no // per)
-            tag = f"cki_{geom}_{int(side)}"
-            store = ws.store(tag)
-            t_write, _ = H.timed(zv_write_idchunked, store, geom, data,
-                                 per=per)
-            reader = read_polylines if geom == "streamlines" else read_mesh
-            m, hw, k = H.repeat(
-                lambda: reader(src(store), object_ids=[oid]),
-                n_runs("fetch_one", nv))
-            for op, val, half, runs in (("fetch_one", m, hw, k),
-                                        ("write_full", t_write, 0.0, 1)):
-                rows.add(block="chunks", geometry=geom, n_target=n_cells,
-                         n_vertices=nv, n_objects=no, op=op,
-                         impl="zarr-vectors (chunked by id)", unit="s",
-                         value=round(val, 6), ci_hw=round(half, 6),
-                         n_runs=runs,
-                         detail=f"{per} objects per cell")
-            ws.clear(tag)
-
 
 # --------------------------------------------------------------------
 # Block 6b -- chunked by object id
@@ -992,12 +968,8 @@ IDCHUNK_VERTS = 4096
 IDCHUNK_GEOMS = ("streamlines", "meshes")
 
 
-def zv_write_idchunked(path, geom, data, codec=CODEC, per=None):
-    """Chunk by object id: ``per`` objects to a cell (default: about
-    IDCHUNK_VERTS vertices a cell)."""
-    if per is None:
-        per = max(1, round(IDCHUNK_VERTS * data["n_objects"]
-                           / data["n_vertices"]))
+def zv_write_idchunked(path, geom, data, codec=CODEC):
+    per = max(1, round(IDCHUNK_VERTS * data["n_objects"] / data["n_vertices"]))
     dom = tuple(float(h - l) for l, h in zip(*H.BOUNDS))
     if geom == "streamlines":
         bins = [np.full(len(p), i // per, np.int32)
@@ -1254,10 +1226,10 @@ CHUNKED_FORMATS = ("precomputed annotations", "Parquet", "plain Zarr", "HDF5")
 
 # Precomputed's ``by_id`` index is one file per annotation, so a write at
 # N = 10^7 creates ten million files -- per repeat, and again for the
-# persistent copy.  That is hours of inode churn to measure a curve whose
-# shape is already settled by 10^6, so the format is dropped above this
-# and the omission is logged.  The other three chunked formats scale fine.
-PRECOMPUTED_MAX_N = 1_000_000
+# persistent copy: about 9 minutes a write and 35-40 minutes for the
+# point.  It is measured all the same, so the comparison runs to the
+# same size as everything else; above this it is dropped and logged.
+PRECOMPUTED_MAX_N = 10_000_000
 _CHUNKED_SUFFIX = {"precomputed annotations": "", "Parquet": ".parquet",
                    "plain Zarr": "", "HDF5": ".h5"}
 
