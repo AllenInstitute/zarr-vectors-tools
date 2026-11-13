@@ -19,8 +19,9 @@ per-neuron measures, such as cable length or Strahler order, use
 ## Vertex numbers
 
 Vertices are numbered in store order (chunk by chunk), not in the input
-file's order. Row `i` of core's `read_graph(...)["positions"]` is vertex `i`,
-so you can find a vertex by its position:
+file's order. Row `i` of `read_graph(...)["positions"]` (from the parent
+package's {zvpy}`graph type <api/types.html>`) is vertex `i`, so you can find
+a vertex by its position:
 
 ```python
 import numpy as np
@@ -57,8 +58,8 @@ shortest_path("net.zv", source, target, weight="length", heuristic=remaining)
 
 - `predecessors[v]` is the lowest-numbered neighbour of `v` one hop nearer
   the source.
-- `shortest_path` returns `{'path': [], 'cost': inf}` when the target cannot
-  be reached. `visited` counts the vertices taken off the queue.
+- `visited` counts the vertices taken off the queue. When the target cannot
+  be reached, `path` is `[]` and `cost` is `inf`.
 - `weight` names an edge attribute. Numeric GraphML edge data and extra
   edge-list columns are stored as edge attributes under their own names. If
   the store has no attribute of that name, every edge weighs 1, without error.

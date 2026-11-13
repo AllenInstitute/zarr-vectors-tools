@@ -99,6 +99,9 @@ carries the rows as `dpg`. After changing the groups, run it again.
 `compute_skeleton_metrics` measures every object at one level and, by default
 (`write=True`), stores each metric at that level as `object_attributes/<metric>`.
 
+Tree 0 in `neurons.swc` is a 100-unit trunk that forks into tips 10 and
+10√2 long:
+
 ```bash
 zvtools convert neurons.swc neurons.zv --chunk-shape 32,32,32
 ```
@@ -108,7 +111,7 @@ from zarr_vectors_tools.algorithms import compute_skeleton_metrics
 
 metrics = compute_skeleton_metrics("neurons.zv")       # 2 trees; DataFrame indexed by object_id
 metrics.loc[0, ["cable_length", "leaf_count", "branch_count", "max_strahler"]].tolist()
-# [124.8528137423857, 3.0, 1.0, 2.0]
+# [124.14213562373095, 3.0, 1.0, 2.0]
 ```
 
 | Metric | Meaning |
@@ -120,7 +123,8 @@ metrics.loc[0, ["cable_length", "leaf_count", "branch_count", "max_strahler"]].t
 | `extent` | bounding-box size per axis: one `(objects, 3)` attribute; `extent_x/y/z` in the table |
 
 Options: `metrics=[...]`; `write=False`; `object_ids=[...]` (needs
-`write=False`); `executor=`, a `map`-like callable over chunks, for parallel runs.
+`write=False`); `executor=ex`, where `with process_pool_executor(4) as ex:`
+(from `zarr_vectors_tools.parallel`), to summarise chunks in parallel.
 
 ## One segment across stores
 
@@ -147,7 +151,9 @@ link.resolve_many([720575940611111111, 720575940633333333, 99])
 ## Cortical surfaces
 
 `anat/` holds GIFTI midthickness and white surfaces, `thickness` and an `aparc`
-parcellation for both hemispheres (see [Surfaces](../convert/surfaces.md)).
+parcellation for both hemispheres (see [Surfaces](../convert/surfaces.md)). Each
+hemisphere is a sphere of 642 vertices centred 40 mm from the midline, split at
+its equator into `superior` and `inferior`.
 
 ```bash
 zvtools convert anat surf.zv --chunk-shape 20,20,20
@@ -161,8 +167,8 @@ lh["vertices"].shape, lh["faces"].shape    # (642, 3) (1280, 3); vertex i = sour
 
 table = parcel_summary("surf.zv", "aparc", metrics=["thickness"])   # index (hemisphere, parcel)
 table.loc[("left", "superior"), ["vertex_count", "surface_area", "thickness_mean"]].round(2).tolist()
-# [305.0, 481.88, 2.53]
-parcel_at("surf.zv", [[-30.0, 0.0, 12.0]], "aparc")   # one row: left, superior, code 1, vertex 25, distance 3.0
+# [305.0, 481.88, 2.76]
+parcel_at("surf.zv", [[-40.0, 0.0, 12.0]], "aparc")   # one row: left, superior, code 1, vertex 25, distance 3.0
 ```
 
 `read_hemisphere` returns `vertices`, `faces`, `source_vertex`, `attributes`

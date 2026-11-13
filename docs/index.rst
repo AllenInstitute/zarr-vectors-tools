@@ -45,7 +45,7 @@ Where to start
    * - :doc:`reference/cli`
      - Every ``zvtools`` subcommand and flag.
 
-The format was originally specified by Forrest Collman at the Allen Institute
+The format was specified by Forrest Collman at the Allen Institute
 for Brain Science. Source and issues:
 `github.com/AllenInstitute/zarr-vectors-tools
 <https://github.com/AllenInstitute/zarr-vectors-tools>`__.

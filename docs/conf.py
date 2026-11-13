@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(".."))
 project = "zarr-vectors-tools"
 copyright = (
     "2024, BRIDGE Neuroscience. Aligned to the Zarr Vectors specification by "
-    "Forrest Collman, Allen Institute for Brain Sciences."
+    "Forrest Collman, Allen Institute for Brain Science."
 )
 author = "BRIDGE Neuroscience"
 # Package version. Independent of the on-disk FORMAT version this package

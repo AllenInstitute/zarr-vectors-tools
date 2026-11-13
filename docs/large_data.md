@@ -1,5 +1,8 @@
 # Large data
 
+Run conversions and pyramids on several worker processes, resume a long TRK
+ingest, and prepare a store for cloud storage.
+
 ## Workers
 
 ```bash
@@ -37,9 +40,9 @@ disk, then writes level 0 chunk by chunk: memory scales with a part, not the fil
 
 | Option | Meaning |
 |---|---|
-| `--num-chunks N` | Target total chunk count (default 125), or `X,Y,Z` per axis. It sets the chunk edge in whole mm, from the first, middle and last point of every streamline, so the grid lands near N: 1000 gave a 6 × 16 × 12 grid (1,152 chunks of 8-9 mm) on a 2.4 M-vertex test file. |
+| `--num-chunks N` | Target total chunk count (default 125), or `X,Y,Z` per axis. It sets the chunk edge in whole mm, from the first, middle and last point of every streamline, so the grid lands near N. |
 | `--n-parts N` | Parts the file is cut into (default 4 × workers, at least 16). More parts balance uneven files better. |
-| `--scratch-dir DIR` | Keep the parts and a progress record (`trk_parallel_run.json`) in DIR, not a temporary directory. DIR is kept afterwards; delete it when done. It took 36 MB for a 28 MB TRK. |
+| `--scratch-dir DIR` | Keep the parts and a progress record (`trk_parallel_run.json`) in DIR, not a temporary directory. DIR is kept afterwards; delete it when done. |
 | `--resume` | Rerun the same command with this after a run stops; Ctrl-C stops a run and its workers at once. It reuses the file scan, the parts, a complete level 0 and finished pyramid levels, and rebuilds a half-written level. Changed options are refused. |
 
 ## Precomputed layers and Python scripts
@@ -73,8 +76,10 @@ bottleneck; `batch_size` sets peak memory, not the result
 ([Skeletons](convert/skeletons.md)). Worker processes re-import the script that
 starts them, so put any parallel ingest or pyramid call under
 `if __name__ == "__main__":`. `zarr_vectors_tools.parallel` has
-`process_pool_executor(n)` and `dask_executor(n)`; pass either as `executor=`
-to an ingest or to `build_pyramid("cells.zv", factors=[(2, 2)], executor=ex)`.
+`process_pool_executor(n)` and `dask_executor(n)`, context managers that
+yield an executor; pass it as `executor=` to an ingest or to
+`build_pyramid("cells.zv", factors=[(2, 2)], executor=ex)` (from
+`zarr_vectors_tools.multiresolution.coarsen`).
 
 ## Writing to the cloud
 
@@ -85,9 +90,9 @@ zvtools shard tracts.zv --shape 8        # or convert ... --shard 8
 gsutil -m rsync -r tracts.zv gs://my-bucket/tracts.zv
 ```
 
-Sharding packs neighbouring chunks into one file per array: the 2.4 M-vertex
-store above went from 2,343 files to 242 ([Store layout](store_layout.md#sharding);
-serving it: [Visualise](visualise.md)).
+Sharding packs neighbouring chunks into one file per array, so far fewer files
+go up; `zvtools shard STORE --unshard` reverses it
+([Store layout](store_layout.md#sharding); serving it: [Visualise](visualise.md)).
 
 ## Recipes: zvtools run
 
@@ -114,11 +119,13 @@ zvtools run tracts.yaml --force     # rerun every step
 ```
 
 - Each step is a subcommand (`convert`, `pyramid`, `attach`, `merge`, `split`,
-  `validate`, `info`, `shard`, `bundles`, `synapses`). Keys are its long
-  options with underscores for dashes, plus its positional arguments by name
-  (`input`, `output`, `store`, `target`, `sources`); an unknown key is an error.
+  `validate`, `info`, `shard`, `index-faces`, `bundles`, `synapses`). Keys are
+  its long options with underscores for dashes, plus its positional arguments
+  by name (`input`, `output`, `store`, `target`, `sources`; for `synapses`,
+  `table`, `skeletons`, `output`); an unknown key is an error.
 - Lists become comma-separated values (`coarsen: [1, 1]` is `--coarsen 1,1`) or
-  repeated flags; `true` turns a switch on. Relative paths resolve against the
+  repeated flags; `true` turns a switch on. Relative paths in positional arguments
+  and in `nodes`, `lut`, `transform` and `scratch_dir` resolve against the
   recipe's directory (or `workdir:`).
 - Progress is kept in `tracts.run.json` beside the recipe. A finished step is
   skipped if its options are unchanged and its outputs exist; after a step

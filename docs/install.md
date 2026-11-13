@@ -2,7 +2,7 @@
 
 ```bash
 pip install zarr-vectors-tools
-zvtools --version          # prints e.g. zvtools (zarr-vectors-tools 0.3.0)
+zvtools --version          # zvtools (zarr-vectors-tools 0.3.0)
 ```
 
 This needs Python 3.11 or newer. It installs the `zvtools` command and the core
@@ -31,30 +31,29 @@ pip install "zarr-vectors-tools[all]"         # every extra except gpu
 | `h5ad` | AnnData `.h5ad` ingest and export | anndata |
 | `graph` | GraphML ingest; per-node metrics in Python `ingest_edgelist` | networkx |
 | `points-enrichment` | `--knn-distance-k` on point ingest | scipy |
-| `mesh` | mesh decimation for mesh pyramids | pyfqmr, scipy |
-| `precomputed` | Neuroglancer precomputed skeleton and mesh ingest; precomputed export | cloud-volume, mapbuffer, cloud-files |
+| `mesh` | per-vertex attributes on `mesh_decimate` pyramid levels; quadric decimation in `coarsen_mesh_quadric` | pyfqmr, scipy |
+| `precomputed` | Neuroglancer precomputed skeleton and mesh ingest (multi-resolution mesh layers also need DracoPy); precomputed export | cloud-volume, mapbuffer, cloud-files |
 | `parallel` | `--workers-backend dask` | dask[distributed] |
 | `recipes` | YAML recipes for `zvtools run` | pyyaml |
 | `gpu` | GPU CSV reading in Python `ingest_edgelist(..., use_cudf=True)`. Install RAPIDS first | cudf |
 | `all` | every extra above except `gpu` | |
 
-If an extra is missing, the command stops with an error that names it, e.g.
-`laspy is required for LAS/LAZ ingest. Install with: pip install
+If an extra is missing, the command stops with an error that names it, for
+example `laspy is required for LAS/LAZ ingest. Install with: pip install
 'zarr-vectors-tools[las]'`.
 
 ## The core package
 
 This package builds on [zarr-vectors](https://github.com/AllenInstitute/zarr-vectors-py),
-which defines the Zarr Vectors format and reads and writes stores. It needs a
-core that writes Zarr Vectors format 0.9 and has the `zarr_vectors.building`
-API; `zarr-vectors` 0.9.2 on PyPI has both, and pip installs it for you. If an
-older `zarr-vectors` is already installed, run `pip install -U zarr-vectors`.
+which defines the Zarr Vectors format and reads and writes stores; pip installs
+it as a dependency. The core must write Zarr Vectors format 0.9 and provide the
+`zarr_vectors.building` API, or `import zarr_vectors_tools` fails. If an
+installed core lacks either, install the latest one from GitHub (below).
 
 ## Install from GitHub
 
 ```bash
-# unreleased changes
 pip install "git+https://github.com/AllenInstitute/zarr-vectors-tools"
 pip install "zarr-vectors-tools[trk] @ git+https://github.com/AllenInstitute/zarr-vectors-tools"
-pip install "git+https://github.com/AllenInstitute/zarr-vectors-py"   # core, if you need its latest changes
+pip install "git+https://github.com/AllenInstitute/zarr-vectors-py"   # the core package
 ```

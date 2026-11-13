@@ -1,8 +1,11 @@
 # Store layout
 
 Four settings decide how a store is laid out on disk: the chunk shape, the bin
-shape, the compressor and sharding. This page is the one place that recommends
-values for them. Pyramid settings are on [Pyramids](pyramids.md).
+shape, the compressor and sharding. This page recommends values for them;
+pyramid settings are on [Pyramids](pyramids.md). What chunks, bins and shards
+are in the format is defined by the core package's
+{zvpy}`chunks and bins <spec/chunking/chunk_vs_bin.html>` and
+{zvpy}`sharding <spec/chunking/sharding.html>` pages.
 
 | Setting | Flag | Default | Recommendation |
 |---|---|---|---|
@@ -67,8 +70,8 @@ any store you want to view. The [Neuroglancer viewer](visualise.md) reads
 per-chunk arrays raw, so it cannot display a compressed store.
 
 `zstd` (zarr's default level) and `blosc` (Blosc with zstd and bit-shuffle,
-level 5) make a streamline store about 2.4x smaller, which suits archives and
-transfer. Two commands take `--compressor`:
+level 5) make a store smaller, which suits archives and transfer. Two commands
+take `--compressor`:
 
 - `zvtools convert` for TRK input. Other formats refuse the flag.
 - `zvtools pyramid`, for the coarse levels it adds. Use the value level 0 was

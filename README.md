@@ -1,5 +1,5 @@
 > [!NOTE]
-> This package is under development and will change. It will also be migrated to another location once completed.
+> This package is under development; its API can change.
 
 <img src="assets/zarr-vectors-tools.png" alt="Zarr Vectors Tools" width="60%" />
 
@@ -14,7 +14,7 @@ large to load at once.
 It extends [zarr-vectors-py](https://github.com/AllenInstitute/zarr-vectors-py),
 which owns the format and its core Python API
 ([docs](https://zarr-vectors-py.readthedocs.io/en/latest)). Zarr Vectors was
-originally specified by Forrest Collman at the Allen Institute for Brain Science.
+specified by Forrest Collman at the Allen Institute for Brain Science.
 
 **Documentation:** <https://zarr-vectors-tools.readthedocs.io/en/latest>
 
@@ -67,19 +67,16 @@ To view a store, see
 | `compose` | merging stores and files into a store, and splitting one apart |
 | `algorithms` | graph search, components and clustering; mesh summaries and queries; streamline, skeleton and parcel summaries |
 | `headers` | format headers kept for round-trip export |
-| `virtual` | tractograms, meshes, SWC neurons and point tables read as zarr-vectors stores without converting them, and served over HTTP (`zvtools virtual serve`) |
+| `virtual` | tractograms, meshes, SWC neurons and point tables read as Zarr Vectors stores without converting them (below) |
 | `cli` | the `zvtools` command line |
 
 ## Virtual stores
 
-`zarr_vectors_tools.virtual` reads a tractogram (TrackVis `.trk`, MRtrix
-`.tck`, `.trx`), a mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces),
-SWC neurons (skeletons, one object per tree; `folder/@all.swc` for every SWC file in a folder as one store,
-each neuron's file a property) or a point table (`.csv`, `.tsv`, `.xyz`) as a zarr-vectors store
-without converting it: the file is
-read once and binned into cells, and every key is made when asked. The
-stores are valid 0.9.2 stores, and the same, chunk for chunk, as the ones
-ngplatform makes in the browser from local files.
+`zarr_vectors_tools.virtual` reads a tractogram (`.trk`, `.tck`, `.trx`), a
+mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces), SWC neurons
+(`folder/@all.swc` reads every SWC file in a folder as one store) or a point
+table (`.csv`, `.tsv`, `.xyz`) as a Zarr Vectors store without converting it.
+The file is read once; every key of the store is made when it is requested.
 
 ```bash
 zvtools virtual serve tracts.trk    # http://127.0.0.1:8000/tracts.trk/|zarr-vectors:
@@ -87,8 +84,10 @@ zvtools virtual serve tracts.trk    # http://127.0.0.1:8000/tracts.trk/|zarr-vec
 
 ```python
 from zarr_vectors_tools.virtual import open_virtual
+
 store = open_virtual("tracts.trk")
-store.get("zarr.json"); store.list("0/object_attributes/")
+store.get("zarr.json")
+store.list("0/object_attributes/")
 ```
 
 ## Development

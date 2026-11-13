@@ -1,5 +1,8 @@
 # Headers and attributes
 
+This page lists the format headers each ingest keeps in a store and the
+attributes each ingest writes.
+
 ## Format headers
 
 An ingest keeps metadata from the source file that the geometry cannot hold,
@@ -12,7 +15,7 @@ from zarr_vectors_tools.headers import HeaderRegistry
 reg = HeaderRegistry("tracts.zv")
 reg.available_formats      # ['trk']
 trk = reg.get("trk")       # TRKHeader
-trk.space, trk.voxel_size  # ('voxmm', (1.0, 1.0, 1.0))
+trk.space, trk.voxel_size  # ('voxmm', (2.0, 2.0, 2.0)) for a 2 mm reference
 trk.affine                 # 4 x 4 voxel-to-RAS array
 ```
 
@@ -20,11 +23,11 @@ trk.affine                 # 4 x 4 voxel-to-RAS array
 |---|---|---|---|
 | `trk` | trk; Python `ingest_trk`, `ingest_linc_trk` | `voxel_size`, `dimensions`, `vox_to_ras`, `voxel_order`, `scalar_names`, `property_names`, `n_count`, `origin`, `version`, `space` of the stored positions (`voxmm` or `rasmm`) | trk export (header fields; voxmm positions written back unchanged); trx export (voxmm to RAS, and the reference when there is no `trx` header) |
 | `trx` | trx | `voxel_to_rasmm`, `dimensions`, `dpv_names`, `dps_names`, `dpg_names` | trx export (reference image); trk export of a TRX-ingested store |
-| `h5ad` | h5ad, table; extended by `zvtools attach` | `spatial_key`, `spatial_columns`, `n_obs`, `n_vars`, original obs/gene names and their attribute names, `categories`, source `dtypes`, `row_attr`, `obs_index` (identifiers, up to 200,000 rows), `object_id_column`, `layer`, `position_names` (a table's position columns) | h5ad export: names, categoricals, row order, `obs_names`; csv export: position column names |
-| `surface` | gifti, freesurfer; extended by `zvtools attach` (CIFTI) | `source`, `space`, `geometry`, per hemisphere `object_id`, CIFTI `structure`, `n_vertices`, `n_faces`; `alternates` (`coords_<surface>`), `scalars`, parcellation `label_tables`, `key_attribute`, `c_ras`; GIFTI `applied_transforms` (the file matrices applied) | gifti export (required); precomputed export (unit millimetre, hemisphere as segment label) |
-| `swc` | swc | `comment_lines`: the file's `#` lines | swc export writes them back, then its own `# SWC exported by zarr-vectors` line |
-| `obj` | obj with `--split-objects` | `object_names` from `o`/`g` lines | precomputed export (segment labels); obj export does not restore them |
-| `csv` | csv | columns, delimiter, header row or not, `position_columns`; with Python `normalise=True`, `normalise_offset` and `normalise_scale` | csv export: position column names. It writes normalised coordinates as stored |
+| `h5ad` | h5ad, table; extended by `zvtools attach` | `spatial_key`, `spatial_ndim`, `spatial_columns`, `n_obs`, `n_vars`, `obs_names` and `gene_names` (source names) with `obs_attrs` and `gene_attrs` (their attribute names), `categories`, source `dtypes`, `row_attr`, `obs_index` (identifiers, up to 200,000 rows), `object_id_column`, `object_id_categories`, `layer`, `position_names` (a table's position columns) | h5ad export: names, categoricals, row order, `obs_names`; csv export: position column names |
+| `surface` | gifti, freesurfer; extended by `zvtools attach` (CIFTI) | `source`, `space`, `geometry`, per hemisphere `object_id`, CIFTI `structure`, `n_vertices`, `n_faces`; `alternates` (`coords_<surface>`), `scalars`, parcellation `label_tables`, `key_attribute`, `c_ras`; GIFTI `applied_transforms` (the file matrices applied); CIFTI time-series timing under `series` | gifti export (required); precomputed export (unit millimetre, hemisphere as segment label) |
+| `swc` | swc | `comment_lines`: the file's `#` lines; `coordinate_space`, `scaling` | swc export writes them back, then its own `# SWC exported by zarr-vectors` line |
+| `obj` | obj with `--split-objects` | `object_names` and `group_names` from `o`/`g` lines, `mtllib` | precomputed export (segment labels); obj export does not restore them |
+| `csv` | csv | `column_names`, `delimiter`, `has_header_row`, `position_columns`, `attribute_columns`; with Python `normalise=True`, `normalise_offset` and `normalise_scale` | csv export: position column names. It writes normalised coordinates as stored |
 | `graph` | Python `ingest_edgelist` / `ingest_graphml` with `compute_summary=True` | `node_count`, `edge_count`, `is_directed`, `mean_degree`, `n_components`, `largest_component_size` | nothing |
 
 tck, ply, las, stl, lines, precomputed layers and `zvtools synapses` write no
@@ -36,9 +39,8 @@ file or store name, e.g. `trk@subject_b` ([Merge](../compose.md)).
 
 Paths are per level: `<level>/vertex_attributes/<name>` and
 `<level>/object_attributes/<name>`. An attribute marked ×3 has three columns
-per row (row shape `(3,)` in its metadata); all others hold one value per row.
-The viewer colours by single-column attributes only
-([Visualise](../visualise.md)). "Python" marks options that only the Python
+per row (`row_shape` `[3]` in a vertex attribute's array attributes, a last
+`shape` entry of 3 in an object attribute's); all others hold one value per row. "Python" marks options that only the Python
 function has.
 
 | Input | Vertex attributes | Object attributes |
@@ -60,7 +62,7 @@ function has.
 | obj | `normal` (float32 ×3) when the file has one `vn` per `v` | none |
 | stl | none (facet normals are not kept) | none |
 | gifti, freesurfer | each map (float32), each parcellation (int32 codes; names in the `surface` header), `coords_<surface>` (float32 ×3), `zv_join_key` (int64) | none; one object per hemisphere, in a group named `left` or `right` |
-| `zvtools synapses` | `pre_segment_id` or `post_segment_id` (int64), each `--column` (float32), `zv_join_key` (int64) | `segment_id` (uint64); the precomputed skeleton store gains `synapse_pre_count` and `synapse_post_count` (int64) |
+| `zvtools synapses` | `pre_segment_id` or `post_segment_id` (int64), each `--column` (float32), `zv_join_key` (int64) | `segment_id` (uint64); the skeleton store gains `synapse_pre_count` and `synapse_post_count` (int64) |
 
 `zvtools attach` adds vertex attributes encoded as for table and h5ad, or CIFTI
 maps as for gifti ([Single-cell and spatial tables](../convert/single_cell.md),

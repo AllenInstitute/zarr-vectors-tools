@@ -50,11 +50,11 @@ one); a missing one stops the command with an error naming the extra to install.
 | Option | Effect |
 |---|---|
 | `--chunk-shape X,Y,Z` | Level-0 chunk edge per axis, in the input's coordinate units. Required except for trk (`--num-chunks`) and a precomputed skeleton layer with a spatial index. See [Store layout](../store_layout.md#chunk-shape). |
-| `--bin-shape X,Y,Z` | Bin edge inside a chunk. The chunk must be a whole multiple of it. Default: the chunk shape. See [](../store_layout.md#bin-shape). |
-| `--dtype` | Stored position dtype. Default `float32`, the only one the viewer reads. See [](../store_layout.md#position-dtype). |
+| `--bin-shape X,Y,Z` | Bin edge inside a chunk. The chunk must be a whole multiple of it. Default: the chunk shape. See [Bin shape](../store_layout.md#bin-shape). |
+| `--dtype` | Stored position dtype. Default `float32`, the only one the viewer reads. See [Position dtype](../store_layout.md#position-dtype). |
 | `--overwrite` | Delete the store at OUTPUT first; refuses a directory that is not a store. Without it, give OUTPUT a new path. |
 | `--coarsen`, `--sparsity`, `--chunk-scale`, … | Build coarser levels right after the ingest. See [Pyramids](../pyramids.md). |
-| `--shard N` | Pack chunks into shard files after writing. See [](../store_layout.md#sharding). |
+| `--shard N` | Pack chunks into shard files after writing. See [Sharding](../store_layout.md#sharding). |
 | `--workers N` | Parallel processes for trk and precomputed ingest and for the pyramid build. See [Large data](../large_data.md). |
 
 An option that does not apply to the input format is refused, not ignored:
@@ -69,7 +69,7 @@ error: --compressor applies to trk input — not 'csv'
 | Option | Effect | Formats |
 |---|---|---|
 | `--level N` | Pyramid level to export. Default 0, the finest. | all |
-| `--object-id ID` | Only these objects (repeatable). | all but `gifti` |
+| `--object-id ID` | Only these objects (repeatable). | all but `gifti` and `obj` |
 | `--bbox X0,Y0,Z0,X1,Y1,Z1` | Only what falls in the box: min corner, then max corner. | `csv`, `ply`, `h5ad`, `obj` |
 | `--attribute NAME` | Per-vertex attributes to write (repeatable). `csv` and `ply` write none unless named; `h5ad`, `trk` and `trx` write every one. A name the level lacks is an error. | all but `obj`, `swc` |
 | `--group-id ID`, `--object-attribute NAME` | Only these streamline groups; per-object attributes to write (both repeatable). | `trk`, `trx`; `--object-attribute` also `precomputed` |
@@ -77,8 +77,10 @@ error: --compressor applies to trk input — not 'csv'
 | `--hemisphere`, `--surface`, `--prefix` | Which surfaces to write, and a file-name prefix. | `gifti` |
 | `--segment-id ID`, `--unit UNIT` | Segments to write; coordinate unit when the store records none. | `precomputed` |
 
-Any other option is refused. Export replaces an existing OUTPUT file; `gifti` and
-`precomputed` write a directory, so pass `--format` (or a URL for `precomputed`).
+Any other option is refused. Export replaces an existing OUTPUT file. `gifti`
+and `precomputed` write a directory, so pass `--format` (or a URL for
+`precomputed`); a store with a surface header and an OUTPUT without an
+extension exports as `gifti`.
 Every flag is listed in the [CLI reference](../reference/cli.md).
 
 ## Python entry points

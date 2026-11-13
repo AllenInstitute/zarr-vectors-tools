@@ -149,3 +149,35 @@ Constants
    :members:
    :undoc-members:
    :show-inheritance:
+
+Additive pyramids
+~~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.additive
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Face groups
+~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.face_groups
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Groups across levels
+~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.groupings
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Skeleton layouts
+~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.multiresolution.skeleton_layout
+   :members:
+   :undoc-members:
+   :show-inheritance:

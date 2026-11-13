@@ -1,12 +1,16 @@
 # Streamlines
 
+This page shows how to convert TRK, TCK and TRX tractograms to streamline
+stores and back. Each streamline becomes one object, its points the object's
+vertices.
+
 ```bash
 zvtools convert tracts.trk tracts.zv
 ```
 
-TRK, TCK and TRX files become streamline stores: one object per streamline,
-its points as vertices. TRK and TCK need the `[trk]` extra (nibabel), TRX the
-`[trx]` extra (trx-python); see [Install](../install.md).
+TRK and TCK need the `[trk]` extra (nibabel), TRX the `[trx]` extra
+(trx-python); see [Install](../install.md). The options every converter
+shares are in [Converting files](index.md).
 
 ## TRK
 
@@ -49,8 +53,7 @@ Per streamline: `length`, `endpoints`, `orientation` (start-to-end unit
 vector, 3 columns), `tortuosity` (length ÷ endpoint distance). Each
 streamline's `vertex_count` is stored without asking, as for every store with
 objects ([attributes](../reference/headers_attributes.md)). Per vertex: `arc_length` (0 to 1 along the streamline), `x`,
-`y`, `z`, `index`, `random` (seeded by `--attr-seed`), `tangent` (3 columns;
-the viewer colours by single-column attributes, see [Visualise](../visualise.md)).
+`y`, `z`, `index`, `random` (seeded by `--attr-seed`), `tangent` (3 columns).
 
 From Python, `zarr_vectors_tools.convert.ingest.trk_parallel.ingest_trk_parallel`
 adds `max_streamlines` (ingest the first N only, for a trial run). It runs
@@ -72,9 +75,10 @@ zvtools convert tracts.trk tracts.zv \
 
 A TRK file stores points in **voxmm**: voxel index × voxel size, in mm along
 the reference image's voxel axes. The header's vox-to-RAS affine maps them to
-scanner **RAS mm**. TCK and TRX files store RAS mm. Every streamline store
-records millimetres as its axis unit, which the viewer's scale bar and a
-precomputed export read.
+scanner **RAS mm**. TCK and TRX files store RAS mm. Stores written by
+`zvtools convert`, `ingest_tck` and `ingest_trx` record millimetres as the
+axis unit, which the viewer's scale bar and a precomputed export read; the
+Python `ingest_trk` and `ingest_linc_trk` record no unit.
 
 | Input | Stored positions | Affine kept in |
 | --- | --- | --- |
@@ -101,8 +105,8 @@ Both readers load the whole file into memory, in one process, and need
 `--chunk-shape` in mm. TCK carries positions only. TRX `dpv` become vertex
 attributes, `dps` object attributes (one value per streamline when the array
 has one column), `dpg` group attributes, and `groups` named groups, kept on
-every pyramid level (`zv.open("bundles.zv").level(0).groups.names()` gives
-`('CST_L', 'AF_R')`). `dpv` and `dps` keep the file's dtype, so a `uint32`
+every pyramid level (`zv.open("bundles.zv").level(0).groups.names()` lists
+them). `dpv` and `dps` keep the file's dtype, so a `uint32`
 count exports as the same integers; `float16` is stored as float32.
 The pyramid flags are the same as for TRK; the levels are built after the
 ingest. From Python, `ingest_tck` and `ingest_trx` also take `length_range`,
@@ -117,7 +121,7 @@ summary = ingest_trx(
     length_range=(25.0, 250.0),   # drop shorter and longer streamlines, mm
     mean_scalar="fa",             # object_attributes/mean_fa from dpv "fa"
 )
-summary["dropped_by_length"]      # 64
+print(summary["dropped_by_length"])
 ```
 
 ## LINC TRK
@@ -167,8 +171,8 @@ the identity (Python `export_trk(..., affine=...)` supplies one).
   `--object-attribute` choose. Text attributes are skipped and listed as
   `attributes_skipped`. TRK holds at most 10 scalars and 10 properties, with
   names of up to 20 characters.
-- `--group-id` takes group ids, in the order of `groups.names()`; TRX export
-  then writes only those groups. `--level N` exports a pyramid level.
+- `--group-id` takes group ids, in the order of `groups.names()`, and needs a
+  store with groups; TRX export then writes only those groups. `--level N` exports a pyramid level.
 - Positions are converted from the stored space, so a TRK exported from a
   voxmm or a RAS mm store of the same file matches the original.
 

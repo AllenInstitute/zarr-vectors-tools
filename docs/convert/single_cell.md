@@ -1,5 +1,9 @@
 # Single-cell and spatial tables: h5ad, table, attach
 
+This page shows how to convert AnnData files and keyed tables to point stores,
+add columns to a store with `zvtools attach`, and export back to h5ad or CSV.
+The options every converter shares are in [Converting files](index.md).
+
 ```bash
 zvtools convert cells.h5ad cells.zv --chunk-shape 500,500,500 --gene Gad1 --gene Pvalb
 ```
@@ -70,7 +74,8 @@ zvtools convert coords.csv atlas.zv --format table \
 | `--delimiter D` | Column separator: `,` (default), `tab`, `';'`, or `whitespace` for runs of spaces and tabs. |
 | `--object-id-column NAME` | Group rows into objects. |
 
-Rows with NaN coordinates are always dropped (`dropped_na` in the summary).
+Rows with NaN coordinates are dropped (`dropped_na` in the summary;
+`ingest_table(..., drop_na=False)` keeps them).
 Columns are encoded as for h5ad `obs`, and each point gets `table_row`, its row
 after that drop. Python-only `ingest_table` options: `preserve_index`
 inlines the key values in the header so h5ad export restores them as
@@ -96,6 +101,8 @@ with `--key-column`.
 |---|---|
 | `--key-column NAME` | The file's identifier column. Required for a table; h5ad defaults to the `obs` index. |
 | `--key-attribute NAME` | The store attribute holding the key. Default `zv_join_key`. |
+| `--format auto\|h5ad\|table` | The file's format. Default: from its extension, a table otherwise. |
+| `--delimiter D` | A table's column separator. Default `,`. |
 | `--column NAME` | Columns to add (repeatable): any column of a table (default all but the key), `obs` columns of an h5ad. |
 | `--gene NAME` | h5ad expression to add as `gene_NAME`, matched on `var_names`, then `gene_symbol`. `--gene-by COL` picks the `var` column; `--layer` reads a layer. |
 | `--missing fill\|error` | What to do with points that have no row. |

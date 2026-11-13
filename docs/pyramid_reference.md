@@ -1,8 +1,8 @@
 # Pyramid reference
 
-The Python side of [Pyramids](pyramids.md): which coarsener handles each
-geometry, the options `build_pyramid` takes beyond the CLI's, and the builders
-that only exist in Python. Exact signatures are in the
+Which coarsener handles each geometry, the options `build_pyramid` takes
+beyond the CLI's, and the builders that exist only in Python. How to choose
+pyramid values is on [Pyramids](pyramids.md). Exact signatures are in the
 [API reference](api/multiresolution.rst).
 
 ## Coarseners
@@ -30,13 +30,14 @@ chunk, method, and the RDP tolerance or skeleton stride), which is what
 |---|---|
 | `method` | coarsener key from the table above |
 | `sparsity_seed` | seed for random selection, so a rebuild keeps the same objects |
-| `executor` | run chunks in parallel: `zarr_vectors_tools.parallel.process_pool_executor(n)` or `dask_executor(n)`, as a context manager (see [Large data](large_data.md)) |
-| `refinement` | `"replace"` (default) or `"add"` (CLI `--refinement`): convert the finished pyramid so each object is stored once -- see [Storing each object once](pyramids.md#storing-each-object-once-additive-pyramids). Warnings are `zarr_vectors_tools.multiresolution.additive.AdditiveRefinementWarning`; the summary gains `refinement` and an `additive` report per level |
+| `executor` | run chunks in parallel in the skeleton and streamline coarseners (the others ignore it): `zarr_vectors_tools.parallel.process_pool_executor(n)` or `dask_executor(n)`, as a context manager (see [Large data](large_data.md)) |
+| `refinement` | `"replace"` (default) or `"add"` (CLI `--refinement`): convert the finished pyramid so each object is stored once; see [Storing each object once](pyramids.md#storing-each-object-once-additive-pyramids). `"add"` raises `ValueError` unless `multiresolution.additive.supports_additive()` is `True`. Warnings are `multiresolution.additive.AdditiveRefinementWarning`. The summary always has `refinement`, and with `"add"` an `additive` report per level |
 
-`build_pyramid` returns a summary with one entry per level in `level_specs`.
-Its `cross_level_storage` and `cross_level_depth` describe the links between
-levels that were actually written, as the store's root metadata records them:
-`"none"` and 0 for geometries whose coarsener writes none.
+`build_pyramid` returns a summary with `levels_created`, one entry per level
+in `level_specs` (each naming the coarsener that ran, such as `polyline_rdp`),
+and `refinement`. Its `cross_level_storage` and `cross_level_depth` describe
+the links between levels that were written, as the store's root attributes
+record them: `"none"` and 0 for geometries whose coarsener writes none.
 
 ## Builders outside `build_pyramid`
 
@@ -46,7 +47,7 @@ levels that were actually written, as the store's root metadata records them:
 | `multiresolution.additive.make_pyramid_additive(store)` | converting a finished replacement pyramid to an additive one in place, with the same warnings; `build_pyramid(refinement="add")` calls it |
 | `multiresolution.strategies.skeletons.build_skeleton_pyramid(store, strides=[8, 8], chunk_scale_factors=[2, 2])` | skeletons, with skeleton-only options: `attr_agg`, `drop_interior_below` |
 | `multiresolution.strategies.mesh_decimate_level.build_mesh_pyramid_to_floor(store, 4.0)` | meshes: adds 4x-smaller levels until the surface cannot shrink further or `min_faces` (default 256) is reached |
-| `multiresolution.refresh.rebuild_pyramid_from_level(root, 0)` | rebuilding every level above a level that changed, with the parameters each level was built with; takes an open root group |
+| `multiresolution.refresh.rebuild_pyramid_from_level(root, 0)` | rebuilding every level above a level that changed, with the parameters each level was built with; takes an open root group. Refuses levels that no registered coarsener wrote, such as those of `build_point_subset_pyramid` |
 
 All paths are under `zarr_vectors_tools.`. For example:
 
@@ -60,8 +61,8 @@ from zarr_vectors_tools.multiresolution.strategies.mesh_decimate_level import (
 # Re-run every coarse level after editing level 0 in place.
 rebuild_pyramid_from_level(open_store("cells.zv", mode="r+"), 0)
 
-# A 10,242-vertex sphere reached 5120, 1280 and 320 faces before min_faces stopped it.
-build_mesh_pyramid_to_floor("sphere.zv", 4.0, verbose=False)
+# Add 4x-smaller levels to a mesh store until the surface cannot shrink further.
+build_mesh_pyramid_to_floor("brain.zv", 4.0, verbose=False)
 ```
 
 ## Helpers that `build_pyramid` does not use

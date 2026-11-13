@@ -37,7 +37,7 @@ zvtools merge cells.zv cells_b.zv --source-attr source
 ```
 
 `--source-attr NAME` stores each new object's source index (float32, 0 for this
-merge's first source; NaN for older objects). `--create` makes a missing target
+merge's first source; NaN for objects already in the target). `--create` makes a missing target
 with chunks of `--cell-size X,Y,Z` (default: the first store source's, else 1/64
 of the sources' extent per axis). A created target is stored like the first store
 source (compression, bins per chunk), else uncompressed with one bin per chunk,
@@ -73,13 +73,14 @@ refused for stores and other formats.
 
 `--pyramid rebuild` (default) rebuilds each coarser level with the settings it
 records (coarsening, chunk scale, tolerance, sparsity) and `--sparsity-strategy`,
-which is not recorded: pass the original (default `random`; `group` keeps every
-named group). `length` needs the target to have it (convert with
+which is not recorded: pass the one the levels were built with (default
+`random`; `group` keeps every named group). `length` needs the target to have it (convert with
 `--compute-length`); incoming streamlines get theirs computed.
-`--pyramid-coarsen` with `--pyramid-sparsity` (and
-`--coarsen-mode`) build a different pyramid, and are refused with `drop` or
-`keep`. `drop` removes the levels, `keep` leaves them marked stale. For any other change, merge with `--pyramid drop` and
-run `zvtools pyramid` with the new flags ([Pyramids](pyramids.md)).
+`--pyramid-coarsen` with `--pyramid-sparsity` (and `--coarsen-mode`) build a
+different pyramid, and are refused with `drop` or `keep`. `drop` removes the
+levels; `keep` leaves them in place, out of date. For any other change, merge
+with `--pyramid drop` and run `zvtools pyramid` with the new flags
+([Pyramids](pyramids.md)).
 
 ## Split
 

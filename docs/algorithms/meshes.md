@@ -34,7 +34,7 @@ summary = compute_mesh_summary("sphere.zv", per_object=True)
 | `vertex_count` | `642` | vertices at the level |
 | `edge_count` | `1920` | distinct face edges; a quad has 4 |
 | `euler_characteristic` | `2` | V − E + F; 2 for a closed surface without holes |
-| `excluded_cross_face_edges` | `0` | always 0; kept for compatibility |
+| `excluded_cross_face_edges` | `0` | always 0 |
 | `per_object` | `[{'object_id': 0, 'surface_area': 1250.65, ...}]` | `object_id`, `surface_area`, `volume`, `face_count` and `vertex_count` per object; only with `per_object=True` |
 
 ## Normals and curvature
@@ -47,7 +47,7 @@ normals = compute_vertex_normals("sphere.zv", write_back=True)
 normals["normals"].shape                    # (642, 3), float32 unit vectors
 
 curvature = compute_mean_curvature("sphere.zv", write_back=True)
-np.median(curvature["mean_curvature"])      # 0.09976691: 1 / radius
+np.median(curvature["mean_curvature"])      # about 0.0998: 1 / radius
 ```
 
 | Function | Result key | Written as (with `write_back=True`) | Option |
@@ -56,16 +56,11 @@ np.median(curvature["mean_curvature"])      # 0.09976691: 1 / radius
 | `compute_mean_curvature` | `mean_curvature`, `(V,)` float32 | `vertex_attributes/mean_curvature` | none |
 
 `write_back` defaults to `False`. Rows are in store order, the order in which
-core's `read_mesh` returns vertices. Mean curvature uses the cotangent
+`read_mesh` (from the parent package's {zvpy}`mesh type <api/types.html>`)
+returns vertices. Mean curvature uses the cotangent
 Laplace–Beltrami operator (Meyer et al. 2003). It is unsigned: a sphere of
 radius *r* gives 1/*r* everywhere. Both functions also return
-`incomplete_boundary_vertices`, always 0, kept for compatibility.
-
-:::{warning}
-`vertex_normal` has three columns. The viewer currently stops drawing chunks
-that carry a multi-column vertex attribute (see [Visualise](../visualise.md)),
-so keep `write_back=False` for normals on a store you plan to view.
-:::
+`incomplete_boundary_vertices`, always 0.
 
 ## Spatial queries
 
@@ -79,7 +74,7 @@ near["face_index"], near["corners"]   # None, (((1, 1, 1), 8), ((1, 0, 0), 63), 
 
 hit = cast_ray("sphere.zv", origin=np.array([0.0, 21.0, 22.0]),
                direction=np.array([1.0, 0.0, 0.0]), max_distance=100.0)
-hit["hit"], hit["t"], hit["position"]   # True, 10.277057420924843, [10.27705742 21. 22.]
+hit["hit"], round(hit["t"], 3), hit["position"].round(3)   # True, 10.277, [10.277 21. 22.]
 ```
 
 | Function | Options (defaults) | Returns |
@@ -88,8 +83,8 @@ hit["hit"], hit["t"], hit["position"]   # True, 10.277057420924843, [10.27705742
 | `cast_ray(store, origin, direction, ...)` | `max_distance=None`, `level=0` | `hit`, `t` (distance along the ray), `position`, `chunk_key`, `face_index`, `corners` |
 
 - `closest_point` searches the chunks around the query, one ring of chunks at a
-  time, up to `max_expansion_rings` rings. If nothing lies within
-  `max_distance`, it returns `found=False` and `distance=inf`.
+  time, up to `max_expansion_rings` rings. If nothing lies within `max_distance` or
+  within those rings, it returns `found=False` and `distance=inf`.
 - `cast_ray` normalises `direction` and raises `ValueError` if it is zero. It
   walks the chunks along the ray and stops at the first hit. A miss returns
   `hit=False` and `t=inf`.

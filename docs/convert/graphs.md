@@ -1,5 +1,8 @@
 # Graphs and line segments: GraphML, edge lists, lines
 
+This page shows how to convert GraphML files, edge lists and line-segment
+tables to graph and lines stores, and what a graph store exports to.
+
 ```bash
 zvtools convert network.graphml network.zv --chunk-shape 250,250,250
 zvtools convert edges.csv connectome.zv --format edgelist --nodes nodes.csv --chunk-shape 250,250,250
@@ -78,9 +81,11 @@ For chains of connected points, use a streamline or skeleton format:
 
 Graphs and lines coarsen by binning, like points; see [Pyramids](../pyramids.md).
 
-No GraphML, edge-list or lines writer exists. A graph store exports as a
-Neuroglancer precomputed skeleton layer ([Skeletons](skeletons.md)); `--unit`
-names the coordinate unit when the store records none:
+No GraphML, edge-list or lines writer exists. CSV export writes a graph
+store's nodes as points ([Points](points.md#export-to-csv-or-ply)). A graph
+store exports as a Neuroglancer precomputed skeleton layer
+([Skeletons](skeletons.md)); `--unit` names the coordinate unit when the store
+records none:
 
 ```bash
 zvtools convert connectome.zv connectome_skeletons --format precomputed --unit micrometer

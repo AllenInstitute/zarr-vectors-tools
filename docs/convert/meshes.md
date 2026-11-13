@@ -1,13 +1,16 @@
 # Meshes
 
+This page shows how to convert OBJ and STL files and Neuroglancer precomputed
+mesh layers to mesh stores, export them back, and build mesh pyramids.
+
 ```bash
 zvtools convert model.obj model.zv --chunk-shape 50,50,50
 zvtools convert part.stl part.zv --chunk-shape 50,50,50
 ```
 
 `--chunk-shape` is in the mesh's own coordinate units: for a model in micrometres,
-`50,50,50` gives 50 µm chunks ([choosing it](../store_layout.md); shared options:
-[Convert](index.md)). OBJ and STL need no extra.
+`50,50,50` gives 50 µm chunks ([choosing it](../store_layout.md#chunk-shape); shared
+options: [Converting files](index.md)). OBJ and STL need no extra.
 
 ## OBJ
 
@@ -15,9 +18,7 @@ Triangles and quads are stored as they are; larger faces are fan-triangulated, a
 file mixing triangles and quads is stored as triangles. Only the vertex index of a
 `v/vt/vn` corner is read (negative indices work); texture coordinates and materials
 are dropped. Vertex normals become the vertex attribute `normal` when there is one
-`vn` per `v`. That attribute currently stops chunks rendering in the viewer
-([Visualise](../visualise.md)): for a model meant for viewing, drop the normals first
-with `grep -v '^vn ' model.obj > model_plain.obj`.
+`vn` per `v`. To leave normals out of the store, drop them first with `grep -v '^vn ' model.obj > model_plain.obj`.
 
 By default the whole file is one [object](../concepts.md). `--split-objects` gives one
 object per `o` or `g` name (each vertex takes the id of the last such line above it) and
@@ -53,7 +54,7 @@ zvtools convert seg/mesh two_cells.zv --chunk-shape 32000,32000,32000 --segment-
 ```
 
 INPUT is the mesh directory (local, or `gs://`, `s3://`, `https://`, `file://`, with or
-without `precomputed://`), not the segmentation layer above it. Legacy and
+without `precomputed://`), not the segmentation layer above it. Neuroglancer's legacy (single-resolution) and
 multi-resolution Draco layouts, plain or sharded, are read. Needs `[precomputed]`.
 
 | Option | Meaning |
@@ -65,7 +66,7 @@ multi-resolution Draco layouts, plain or sharded, are read. Needs `[precomputed]
 Each segment becomes one object, in ascending segment id, kept as the object attribute
 `segment_id`; inline segment properties become object attributes too. Fragment seams
 are welded, so a closed mesh stays closed. Memory holds the selected segments until
-written (about 20 bytes per vertex, 24 per triangle): `--segment-id` bounds it.
+they are written, so `--segment-id` bounds it.
 
 ## Export
 
@@ -106,7 +107,7 @@ In Python: `build_pyramid(..., factors=[(4, 1), (4, 1)], chunk_scale_factors=[2,
 method="mesh_decimate")`.
 
 Without `--method`, levels are built by vertex clustering, the one mesh method that
-also drops objects (`--sparsity`). On the same model `--coarsen 2,2` left 16 open and
-40 non-manifold edges and stray triangles. Keep `--chunk-scale 2,...` with either
+also drops objects (`--sparsity`). It can leave non-manifold edges: on the same model,
+`--coarsen 2,2` did. Keep `--chunk-scale 2,...` with either
 method: the viewer never refines a level that keeps every object and the chunk size of
 the level below ([Visualise](../visualise.md)). Choosing values: [Pyramids](../pyramids.md).

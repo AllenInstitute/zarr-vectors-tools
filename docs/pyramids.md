@@ -1,8 +1,9 @@
 # Pyramids
 
 A pyramid adds coarser copies of level 0, so a viewer can draw a whole dataset
-from a small level and load detail only where you zoom in. This page is the one
-place that recommends pyramid values.
+from a small level and load detail only where you zoom in. This page shows how
+to choose pyramid values; the [Pyramid reference](pyramid_reference.md) lists
+the coarseners and the Python-only builders and options.
 
 Build the pyramid while converting, or later on an existing store:
 
@@ -25,28 +26,25 @@ level below, so the values compound:
 |---|---|---|
 | `--coarsen` | simplify each object's geometry by this factor (meaning varies by geometry, below) | 2×, 4×, 8× coarser |
 | `--sparsity` | keep 1/value of the objects kept at the level below | 1/2, 1/4, 1/8 of the objects |
-| `--chunk-scale` | multiply the chunk edge by this | chunks 2×, 4×, 8× wider |
+| `--chunk-scale` | multiply the chunk edge by this (whole numbers) | chunks 2×, 4×, 8× wider |
 
-`--coarsen` and `--sparsity` must have the same number of entries, and every
-value must be at least 1. Use `1` for "no change at this level". Prefer `2,2,2`
-over `2,4,8`, which compounds to 1/64 of the objects and 64× wider chunks at
-the last level.
+Give `--coarsen`, `--sparsity` or both. When you give only one, the other is
+`1` at every level; when you give both, they must have the same number of
+entries. Every value must be at least 1, and `1` means "no change at this
+level". Prefer `2,2,2` over `2,4,8`, which compounds to 1/64 of the objects and
+64× wider chunks at the last level.
 
 ## Recommended recipes
 
-Measured on synthetic data with the command shown; the counts are each level's
-`vertex_count`, as `zvtools info` and the viewer see it. Your counts will
-differ, but the shape of each pyramid should not.
-
-| Geometry | Command options | `vertex_count` per level (measured) |
-|---|---|---|
-| Points | `--bin-shape B,B,B --coarsen 2,2,2 --sparsity 2,2,2 --cross-level-storage none`, with B near the point spacing | 50,000 → 18,912 → 4,365 → 751 |
-| Points without object ids | Python `build_point_subset_pyramid` (below) | 50,000 → 6,250 → 781 → 97 |
-| Lines | `--bin-shape B,B,B --coarsen 2,2,2 --sparsity 2,2,2 --cross-level-storage none` | 10,000 → 4,304 → 1,592 → 424 (5,000 segments, median 23 units long, B = 10) |
-| Graphs | `--bin-shape B,B,B --coarsen 2,2,2 --sparsity 1,1,1 --chunk-scale 2,2,2 --cross-level-storage none` | 4,000 → 3,138 → 1,000 → 143 (a 4,000-node graph, 3,974 of them in one component, B = 10) |
-| Streamlines | `--coarsen 1,1,1 --sparsity 2,2,2 --rdp-tolerance 0.5,1,2 --chunk-scale 2,2,2` (tolerances in mm) | 240,000 → 24,602 → 7,638 → 2,268 |
-| Skeletons | `--coarsen 4,4 --sparsity 2,2 --chunk-scale 2,2 --sparsity-strategy length` | 1,866,688 → 408,176 → 130,985 (one FlyWire chunk); 120,000 → 16,140 → 2,552 (40 SWC trees) |
-| Meshes | `--coarsen 4,4 --sparsity 1,1 --chunk-scale 2,2 --method mesh_decimate` | 61,452 → 15,372 → 3,852 |
+| Geometry | Command options |
+|---|---|
+| Points | `--bin-shape B,B,B --coarsen 2,2,2 --sparsity 2,2,2 --cross-level-storage none`, with B near the point spacing |
+| Points without object ids | Python `build_point_subset_pyramid` ([below](#point-clouds-without-object-ids)) |
+| Lines | `--bin-shape B,B,B --coarsen 2,2,2 --sparsity 2,2,2 --cross-level-storage none` |
+| Graphs | `--bin-shape B,B,B --coarsen 2,2,2 --sparsity 1,1,1 --chunk-scale 2,2,2 --cross-level-storage none` |
+| Streamlines | `--coarsen 1,1,1 --sparsity 2,2,2 --rdp-tolerance 0.5,1,2 --chunk-scale 2,2,2` (tolerances in mm) |
+| Skeletons | `--coarsen 4,4 --sparsity 2,2 --chunk-scale 2,2 --sparsity-strategy length` |
+| Meshes | `--coarsen 4,4 --sparsity 1,1 --chunk-scale 2,2 --method mesh_decimate` |
 
 Graph and mesh pyramids usually keep every object, so give them growing
 chunks. Levels with the same objects and the same chunk size look alike to the
@@ -60,131 +58,119 @@ its GPU budget. See [Visualise](visualise.md#sizing-the-pyramid-for-the-gpu-budg
 **Points, graphs and lines** snap each object's vertices to a grid of bins and
 merge the vertices that share a bin into one at their mean position; each
 object keeps its own vertex in a bin it shares with others. The bin edge at
-level *n* is `--bin-shape` multiplied by the coarsen factors up to *n*. The base
-bin defaults to the chunk shape, so without `--bin-shape` the first coarse level
-already merges each chunk into a few vertices. On 50,000 points in 500 objects
-and 100-unit chunks, `--coarsen 8,8` gave 50,000 → 909 → 615 vertices. With
-`--bin-shape 10,10,10 --coarsen 2,2,2`, the same points gave
-50,000 → 38,287 → 17,712 → 6,373. Per-vertex attributes come along: a float
-column takes the bin's mean, any other column (codes, labels) the value of one
-of the merged vertices. Each merged vertex is stored in the chunk that contains
-it, even where a bin does not divide the chunk (an 80-unit bin in a 100-unit
-chunk).
+level *n* is the level-0 bin shape multiplied by the coarsen factors up to *n*,
+so set `--bin-shape` as [Store layout](store_layout.md#bin-shape) describes.
+Per-vertex attributes come along: a float column takes the bin's mean, any
+other column (codes, labels) the value of one of the merged vertices. Each
+merged vertex is stored in the chunk that contains it, even where a bin does
+not divide the chunk.
 
 **Lines** keep each segment's direction. A segment whose two ends fall in the
-same bin is dropped from that level, and so from every coarser one, rather than
-kept as a single vertex. The level's coarsening record counts them:
+same bin is dropped from that level, and so from every coarser one, rather
+than kept as a single vertex. Each level's coarsening record counts the
+segments it dropped:
 `read_coarsening_record(root, level)["collapsed_objects"]` (from
-`zarr_vectors_tools.multiresolution.coarsen`). On 5,000 segments of median length
-23 units with `--bin-shape 10,10,10 --coarsen 2,2,2 --sparsity 1,1,1`, levels
-1 to 3 dropped 652, 1,208 and 1,435 segments (bins of 20, 40 and 80 units).
+`zarr_vectors_tools.multiresolution.coarsen`).
 
-**Graphs** merge vertices only within one connected component, so no level joins
-two components that the level below keeps apart. A coarse level's edges are
-exactly the edges of the level below, carried onto the merged vertices: an edge
+**Graphs** merge vertices only within one connected component, so no level
+joins two components that the level below keeps apart. A coarse level's edges
+are the edges of the level below, carried onto the merged vertices: an edge
 inside one merged vertex disappears, and parallel edges become one. Edges that
-cross a chunk face stay linked across it. Edge attributes come along like vertex
-attributes: a float column takes the mean of the merged edges, any other column
-the value of one of them. A graph made of many small components cannot shrink
-below one vertex per component: a 4,000-node graph in 1,714 components gave
-4,000 → 3,251 → 2,494 → 2,052 (still 1,714 components at level 3), against
-4,000 → 3,138 → 1,000 → 143 for a 4,000-node graph in 17 components. A graph
-converted from an edge list is one object, so `--sparsity` has nothing to drop.
+cross a chunk face stay linked across it. Edge attributes come along like
+vertex attributes. A graph made of many small components cannot shrink below
+one vertex per component. A graph converted from an edge list is one object,
+so `--sparsity` has nothing to drop.
 
-**Streamlines** are simplified with Douglas–Peucker, one chunk at a time. Set the
-tolerance per level with `--rdp-tolerance`, in store units (mm for
+**Streamlines** are simplified with Douglas–Peucker, one chunk at a time. Set
+the tolerance per level with `--rdp-tolerance`, in store units (mm for
 tractography): the furthest a simplified streamline may stray from the level
-below. Without it, the tolerance is half the smallest bin edge times the coarsen
-factor, which is usually far too large. `--coarsen 8,8` on 2,000 streamlines
-gave 240,000 → 43,542 → 43,542 vertices: level 2 could not simplify further,
-because every chunk's run was already down to its two end points. Growing the
-chunks with `--chunk-scale 2,2,2` is what lets each level keep simplifying. With
+below. Without it, the tolerance is half the smallest edge of the level's bin
+(the level below's bin times the coarsen factor); a TRK store has no
+`--bin-shape`, so its bin is the whole chunk. A run of a streamline inside one
+chunk never simplifies below its two end points, so growing the chunks with
+`--chunk-scale` is what lets each level keep simplifying. With
 `--rdp-tolerance` given, `--coarsen` no longer decides how much is simplified,
-so `1`s are fine. Each level's scale in the store's OME `multiscales` metadata
-then grows by `--coarsen` or `--chunk-scale`, whichever is larger: the
-streamline recipe above gives scales 1, 2, 4 and 8. `--coarsen-mode decimate`
-keeps every *n*-th vertex instead.
+so `1`s are fine; each level's scale in the store's OME `multiscales` metadata
+then grows by `--coarsen` or `--chunk-scale`, whichever is larger (the
+streamline recipe above gives scales 1, 2, 4 and 8). `--coarsen-mode decimate`
+keeps every *n*-th vertex instead, and takes no `--rdp-tolerance`.
 
-**Skeletons** keep every *n*-th vertex along each branch (n = the coarsen value,
-rounded), and always keep roots, branch points, end points and the vertices
-where a branch crosses a chunk boundary, so every tree stays one tree at every
-level. On 40 SWC trees of 3,000 nodes in 200-unit chunks, `--coarsen 4,4
---sparsity 1,1 --chunk-scale 2,2` gave 120,000 → 32,010 → 9,525 vertices, still
-40 trees. A [precomputed ingest](convert/skeletons.md#neuroglancer-precomputed-skeleton-layers)
+**Skeletons** keep every *n*-th vertex along each branch (n = the coarsen
+value, rounded), and always keep roots, branch points, end points and the
+vertices where a branch crosses a chunk boundary, so every tree stays one tree
+at every level. A
+[precomputed ingest](convert/skeletons.md#neuroglancer-precomputed-skeleton-layers)
 builds its pyramid inside the ingest; pass `--chunk-scale` explicitly there, as
 it defaults to 2 (elsewhere, 1).
 
 **Meshes** are coarsened best by edge collapse, `--method mesh_decimate`: each
 `--coarsen` value is the on-disk size reduction for that level (more than 1),
-the surface stays a closed manifold, and per-vertex attributes are carried. It
-keeps every object, so `--sparsity` must be 1, and needs scipy (in the `[mesh]`
-extra):
+and the surface stays a closed manifold. It keeps every object, so
+`--sparsity` must be 1. Per-vertex attributes are carried when scipy (in the
+`[mesh]` extra) is installed; without it the coarse levels have none, with a
+warning.
 
 ```bash
 zvtools convert brain.obj brain.zv --chunk-shape 100,100,100 --split-objects \
     --coarsen 4,4 --sparsity 1,1 --chunk-scale 2,2 --method mesh_decimate
 ```
 
-On 61,452 vertices that gave 61,452 → 15,372 → 3,852 vertices in chunks of 100,
-200 and 400 units. Without `--method`, meshes use vertex clustering (vertices
-closer than the median edge length times the factor merge): 61,452 → 19,376 →
-4,814 with `--coarsen 2,2`, but clustered levels have holes and non-manifold
-edges. In Python, pass `method="mesh_decimate"` to `build_pyramid`.
+Without `--method`, meshes use vertex clustering (vertices closer than the
+median edge length times the factor merge), which can leave holes and
+non-manifold edges. In Python, pass `method="mesh_decimate"` to
+`build_pyramid`. Thin structures such as neurites collapse into long sliver
+triangles when a level is cut too hard; prefer `--coarsen 2` steps for them.
 
-Thin structures such as neurites collapse into long sliver triangles when a
-level is cut too hard. On MICrONS cells already at a coarse source resolution,
-`--coarsen 4,4,4` left edges up to 138 µm at level 2 against a 3 µm median;
-`--coarsen 2,2,2` kept the longest at 34 µm and the cells whole.
+`--method` picks the coarsener for any store (`auto`, the default, chooses by
+geometry); the methods are listed in the [Pyramid reference](pyramid_reference.md).
 
-Each mesh level is written with one face group per object (per vertex
-fragment) in every chunk, and zarr-vectors-py checks that and stamps the level
-`fragment_link_groups`, so a viewer drawing one object can read just its faces
-instead of every object's in the chunk. Level 0 is stamped by zarr-vectors-py's
-`write_mesh`; to stamp a store written some other way, or before this, run
+### Face groups for per-object reads
+
+Each mesh level is written with one face group per object in every chunk, so
+a viewer drawing one object can read just its faces. zarr-vectors-py checks
+the grouping and stamps the level `fragment_link_groups`. To group and stamp a
+store written some other way, run:
 
 ```bash
 zvtools index-faces brain.zv            # all levels; --levels 0 for one
 ```
 
-Usually only the small `link_fragments` index is rewritten; the faces
-themselves are reordered only where a chunk did not keep each object's faces
-together, and a level where a face joins two objects is left unstamped. The
-face data is unchanged, so other readers see no difference. A level is also
-left unstamped where its objects' vertex fragments overlap, or where its face
-groups do not hold every face of a chunk exactly once.
+Usually only the small `link_fragments` index is rewritten; the faces are
+reordered only where a chunk did not keep each object's faces together, and
+the face data is unchanged. A level is left unstamped where a face joins two
+objects, where its objects' vertex fragments overlap, or where its face groups
+do not hold every face of a chunk exactly once. `--dry-run` reports what would
+change without writing.
 
-Any later write to a level's faces or fragments withdraws the stamp: an edit,
-a `zvtools merge` (which edits level 0), a rechunk. Run `zvtools index-faces`
-again afterwards. `zvtools shard`, and the `--shard` pass of `zvtools
-convert`, rewrite the same bytes into shards (or back out of them); a
-zarr-vectors-py that restores the stamp after repacking keeps it, and with an
-older one rerun `zvtools index-faces` after sharding. `--verify` re-checks
-levels that are already stamped, repairs them where it can, and withdraws the
-stamp from a level it cannot repair. Stamping needs a zarr-vectors-py with
-`fragment_link_groups`; with an older one the groups are still written, just
-not stamped, and `index-faces` stops with an error.
-
-`--method` picks the coarsener for any store (`auto`, the default, chooses by
-geometry); the methods are listed in the [Pyramid reference](pyramid_reference.md).
+Any later write to a level's faces or fragments (an edit, a `zvtools merge`,
+a rechunk) withdraws the stamp; run `zvtools index-faces` again afterwards.
+`--verify` re-checks levels that are already stamped, repairs them where it
+can, and withdraws the stamp where it cannot; run it after `zvtools shard`.
+Stamping needs a zarr-vectors-py that provides `fragment_link_groups`. With one
+that does not, pyramid levels are grouped but not stamped, and
+`zvtools index-faces` stops with an error.
 
 ## Choosing which objects survive
 
 `--sparsity-strategy` decides which objects a level keeps:
 
-| Strategy | Keeps | Works for |
-|---|---|---|
-| `random` (default) | a uniform random subset | points, graphs, lines, streamlines, meshes |
-| `length` | the longest objects (vertex count for points) | points, graphs, lines, streamlines, skeletons |
-| `spatial_coverage` | at least one object per occupied bin, the rest in proportion to density | points, graphs, lines |
-| `point_thinning` | at most one object per bin (the bin size sets the count, not `--sparsity`) | points, graphs, lines |
-| `group` | the same fraction of every named group, never fewer than one per group | points, graphs, lines, streamlines |
-| `attribute` | the highest values of the object attribute `--sparsity-attribute NAME` names (read from level 0) | points, graphs, lines, streamlines, skeletons, meshes |
+| Strategy | Keeps |
+|---|---|
+| `random` (default) | a uniform random subset |
+| `length` | the longest objects (vertex count for points) |
+| `spatial_coverage` | at least one object per occupied bin, the rest in proportion to density |
+| `point_thinning` | at most one object per bin (the bin size sets the count, not `--sparsity`) |
+| `group` | the same fraction of every named group, never fewer than one per group; needs groups on the level |
+| `attribute` | the highest values of the object attribute `--sparsity-attribute NAME` names (read from level 0) |
 
-Skeletons have no random selection: `random` is replaced by `length`.
-Edge-collapse mesh decimation (`mesh_decimate`) keeps every object.
+Which strategies each geometry supports is in the
+[Pyramid reference](pyramid_reference.md#coarseners). Skeletons have no random
+selection: `random` is replaced by `length`. An unsupported strategy stops the
+build with an error; with `--replace`, the old coarse levels are already
+removed by then.
 
 `length` on streamlines ranks by a stored per-streamline length. `zvtools convert`
-computes it automatically when you choose `length`. If you will run
+computes it when you choose `length`. If you will run
 `zvtools pyramid --sparsity-strategy length` later, convert with
 `--compute-length`.
 
@@ -195,7 +181,8 @@ zvtools pyramid tracts.zv --coarsen 1,1 --sparsity 2,2 --rdp-tolerance 0.5,1 \
     --sparsity-strategy attribute --sparsity-attribute weight
 ```
 
-Random selection has no seed flag, so two runs keep different objects.
+The CLI has no seed flag for random selection, so two runs keep different
+objects; in Python, pass `sparsity_seed` to `build_pyramid`.
 
 ## Point clouds without object ids
 
@@ -216,23 +203,34 @@ build_point_subset_pyramid("cells.zv", levels=3, divisor=8.0, seed=0)
 A sparsity pyramid stores the objects a coarse level keeps again at every
 finer level. `--refinement add` stores each object (or point) only at the
 coarsest level that keeps it: every level but the coarsest then holds only
-what the next coarser level lacks, and readers show a level's complete
-content as the union of it and every coarser level. The pyramid costs about
-what level 0 alone did, rather than 1.14-1.33x of it, and a viewer zooming in
-fetches only what it has not drawn yet.
+what the next coarser level lacks, and a level's complete content is the union
+of it and every coarser level. The pyramid then costs about what level 0 alone
+did, and a viewer zooming in fetches only what it has not drawn yet.
 
 ```bash
 zvtools pyramid tracts.zv --sparsity 2,2,2 --refinement add
 ```
 
+This needs a zarr-vectors-py that writes additive levels
+(`zarr_vectors_tools.multiresolution.additive.supports_additive()` returns
+`True`). With one that does not:
+
+| Command | Result |
+|---|---|
+| `zvtools pyramid --refinement add` | stops with `error: refinement='add' needs a zarr-vectors-py that writes additive levels; the installed one does not`, before writing anything |
+| `zvtools convert --refinement add` | writes level 0, then stops with the same error, leaving a store with no pyramid |
+| `zvtools convert --refinement add` for TRK and precomputed skeleton input | writes level 0 and an ordinary pyramid, then stops with `RuntimeError: the installed zarr-vectors-py cannot write additive levels` |
+| `build_pyramid(..., refinement="add")` | raises `ValueError` before writing anything |
+| `build_point_subset_pyramid(..., refinement="add")` | raises `CoarseningError` before writing anything |
+
 The pyramid is built as usual and then converted, finest level first.
-**Level 0 is rewritten in place**: afterwards it holds only the streamlines no
+**Level 0 is rewritten in place**: afterwards it holds only the objects no
 coarser level kept, so level 0 alone is no longer the whole dataset. The
 command says so on stderr. The store lists `additive_levels` in its root's
-`required_capabilities`: zarr-vectors-py from this version reads every level
-complete (`own_level_only=True` reads one level's stored data), and a reader
-that checks the list but lacks the capability refuses the store. Older
-readers do not check it and would show level 0 incomplete.
+`required_capabilities`; a zarr-vectors-py reader that implements it returns
+each level's complete content (`own_level_only=True` reads one level's stored
+data), and a reader that checks the list but lacks the capability refuses the
+store. A reader that does not check the list shows level 0 incomplete.
 
 It is exact when the levels differ only in which objects they keep:
 streamline and polyline sparsity with `--coarsen 1` (each kept streamline is
@@ -240,16 +238,16 @@ byte-identical at every level, also with `--chunk-scale`), and
 `build_point_subset_pyramid(..., refinement="add")`. It warns, with a banner
 on stderr, and builds anyway when:
 
-- the store is a mesh -- every mesh coarsener re-tessellates, so coarse and
+- the store is a mesh: every mesh coarsener re-tessellates, so coarse and
   fine surfaces mix in the finest view;
 - a level coarsens geometry (`--coarsen` above 1, an explicit
   `--rdp-tolerance`, or a coarsener that bins vertices even at factor 1:
-  points, graphs, lines, skeletons) -- the objects kept there exist only in
+  points, graphs, lines, skeletons): the objects kept there exist only in
   coarse form, so the finest view shows them coarse;
 - a level keeps every object of the level below (`--sparsity 1`), which
   leaves the additive level empty;
-- a point subset pyramid does not carry every attribute -- a level's
-  complete content keeps only the attributes all its levels have.
+- a point subset pyramid does not carry every attribute: a level's complete
+  content keeps only the attributes all its levels have.
 
 Cross-level links are removed: they join one object at two levels, and an
 object of an additive pyramid is at one. An additive store cannot be
@@ -264,17 +262,15 @@ Sharding (`zvtools shard`, `--shard`) keeps it as it is.
 `--cross-level-storage` links every vertex of a surviving object to the coarse
 vertex of the same object that it was merged into. `implicit` writes these
 links at the finer level (`links/+1`); `explicit`, the default, also writes the
-reverse at the coarser level (`links/-1`), and the two are exact mirrors.
-`--cross-level-depth N` links levels up to N apart (default 1).
+reverse at the coarser level (`links/-1`). `--cross-level-depth N` links levels
+up to N apart (default 1; `-1` links every pair of levels).
 
-Only point, graph and line pyramids write them. The store's root metadata
-records what was written, so a streamline, skeleton or mesh pyramid reads
+Only point, graph and line pyramids write them. The store's root attributes
+record what was written, so a streamline, skeleton or mesh pyramid reads
 `cross_level_storage: none` whatever you passed.
 
-The viewer does not read them, and they nearly double the time to build a
-pyramid: `zvtools pyramid --coarsen 2,2,2 --sparsity 2,2,2` on 50,000 points
-took 2.3 s with them and 1.3 s without. Pass `--cross-level-storage none`
-unless your own code follows those links.
+The viewer does not read them, and they add to the time to build a pyramid.
+Pass `--cross-level-storage none` unless your own code follows those links.
 
 ## Building in Python
 
@@ -293,4 +289,4 @@ build_pyramid(
 )
 ```
 
-See [Pyramid reference](pyramid_reference.md) for every builder and option.
+See the [Pyramid reference](pyramid_reference.md) for every builder and option.

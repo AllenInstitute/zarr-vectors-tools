@@ -32,7 +32,8 @@ zvtools convert cells.csv cells.zv --format table \
 
 - `--format table --object-id-column group` reads named columns and makes each
   cluster one object (a plain `.csv` gets no object ids). Each non-position
-  column, here `group` and `intensity`, becomes a vertex attribute.
+  column, here `group` and `intensity`, becomes a vertex attribute, and
+  `table_row` records each point's row in the table.
 - Chunk and bin shapes are in the table's units: 250 µm chunks, 10 µm bins. To
   choose your own, see [Store layout](store_layout.md).
 - `--coarsen 2,2 --sparsity 2,2` adds two coarser levels, each keeping half the
@@ -47,10 +48,14 @@ zvtools validate cells.zv --level 5
 
 ```text
 store: cells.zv
-  zv_version:        0.9.2
+  zv_version:        0.9.4
   geometry_types:    ['point_cloud']
+  links_convention:  implicit_sequential
   chunk_shape:       (250.0, 250.0, 250.0)
+  bounds:            ([28.335994720458984, 25.720922470092773, 16.19550323486328], [973.001220703125, 910.1737060546875, 970.2081298828125])
   resolution levels: [0, 1, 2]
+  cross_level:       depth=0 storage=none
+  capabilities:      ['preserved_object_ids']
 validation (level 5): OK
 ```
 
@@ -64,7 +69,7 @@ zvtools convert cells.zv cells_out.csv --attribute group --attribute intensity
 ```
 
 ```text
-dim0,dim1,dim2,group,intensity
+x,y,z,group,intensity
 246.525040,446.130249,100.982887,6.000000,0.454368
 ```
 
@@ -74,13 +79,17 @@ extension names. Rows come out in chunk order; `--level 1` exports a coarser lev
 ## 5. Read it in Python
 
 ```python
-from zarr_vectors.types.points import read_points
+import zarr_vectors as zv
 
-pts = read_points("cells.zv", level=0, object_ids=[3], attribute_names=["intensity"])
-print(pts["vertex_count"])                        # 500
-print(pts["positions"][:2])                       # (N, 3) float32 array
-print(pts["vertex_attributes"]["intensity"][:2])  # [0.44001247 0.59332326]
+ds = zv.open("cells.zv")
+r = ds.read(objects=[3], attributes=["intensity"])
+print(r.vertex_count)                   # 500
+print(r.positions[:2])                  # (N, 3) float32 array
+print(r.attributes["intensity"][:2])    # [0.44001247 0.59332326]
 ```
+
+`ds.read(level=1, ...)` reads a coarser level. The read API belongs to the core
+package: see its {zvpy}`quickstart <getting_started/quickstart.html>`.
 
 ## Next steps
 

@@ -1,5 +1,9 @@
 # Point clouds: CSV, PLY, LAS
 
+This page shows how to convert CSV, PLY and LAS point clouds to point stores
+and export them back to CSV or PLY. The options every converter shares are in
+[Converting files](index.md).
+
 ```bash
 zvtools convert points.csv points.zv --chunk-shape 250,250,250
 zvtools convert cloud.ply cloud.zv --chunk-shape 250,250,250
@@ -27,8 +31,7 @@ Every name and dtype is listed on [Headers and attributes](../reference/headers_
 - **ply**: only the `vertex` element is read. A mesh PLY's faces are dropped.
 - **las**: other point fields (return number, scan angle, …) are not kept.
   `gps_time` keeps the file's full precision. `color` is one 3-column
-  attribute, which the viewer cannot colour by yet; see
-  [Visualise](../visualise.md). Positions are float32 by default, which steps
+  attribute. Positions are float32 by default, which steps
   by 0.25 m at georeferenced coordinates near 4×10⁶ m; the summary then lists
   a warning, and `--dtype float64` keeps the file's resolution (the viewer
   reads float32 only).

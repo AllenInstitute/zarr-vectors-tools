@@ -1,5 +1,9 @@
 # Cortical surfaces
 
+This page shows how to convert FreeSurfer subjects and GIFTI files to surface
+stores, attach CIFTI maps to them, and export back to GIFTI. The options every
+converter shares are in [Converting files](index.md).
+
 ```bash
 zvtools convert subjects/bert bert.zv --chunk-shape 20,20,20
 zvtools convert sub-01/anat sub-01.zv --chunk-shape 20,20,20
@@ -8,7 +12,7 @@ zvtools convert bert.zv bert_gifti --format gifti
 ```
 
 A FreeSurfer subject and a directory of GIFTI files are recognised by what they hold.
-`--chunk-shape` is in millimetres ([choosing it](../store_layout.md)). CIFTI files carry
+`--chunk-shape` is in millimetres ([choosing it](../store_layout.md#chunk-shape)). CIFTI files carry
 no geometry, so they are attached to a surface store, not converted. Everything here
 needs the `[surfaces]` extra (nibabel).
 
@@ -27,7 +31,7 @@ needs the `[surfaces]` extra (nibabel).
 
 The header also records the geometry, space, per-hemisphere vertex counts and `c_ras`
 ([Headers and attributes](../reference/headers_attributes.md)). `coords_<name>` and time
-series are multi-column attributes: read [Visualise](../visualise.md) before viewing.
+series are multi-column attributes.
 
 ## FreeSurfer subject
 
@@ -151,7 +155,7 @@ in scanner RAS exports in scanner RAS.
 Surface stores are mesh stores. Build their pyramid by edge-collapse decimation, which
 carries maps, parcellation codes and `coords_<name>` to every level
 ([Meshes → Pyramids](meshes.md#pyramids)). Reading a hemisphere back in source vertex
-order, and per-parcel summaries: [algorithms](../algorithms/streamlines_skeletons.md).
+order, and per-parcel summaries: [Cortical surfaces](../algorithms/streamlines_skeletons.md#cortical-surfaces).
 Python entry points: `zarr_vectors_tools.convert.ingest.freesurfer.ingest_freesurfer`,
 `zarr_vectors_tools.convert.ingest.gifti.ingest_gifti`,
 `zarr_vectors_tools.convert.ingest.cifti.attach_cifti` and

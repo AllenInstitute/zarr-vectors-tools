@@ -1,11 +1,15 @@
 # Skeletons
 
+This page shows how to convert SWC files and Neuroglancer precomputed skeleton
+layers to skeleton stores, join synapse tables to them, and export back. A
+skeleton store holds trees: vertices joined by parent edges, one object per
+tree. The options every converter shares are in [Converting files](index.md).
+
 ```bash
 zvtools convert neuron.swc neuron.zv --chunk-shape 50,50,50
 ```
 
-A skeleton store holds trees: vertices joined by parent edges, one object per
-tree. SWC needs no extra; precomputed layers need the `[precomputed]` extra
+SWC needs no extra; precomputed layers need the `[precomputed]` extra
 (cloud-volume, cloud-files, mapbuffer); see [Install](../install.md).
 
 ## SWC
