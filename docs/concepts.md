@@ -1,15 +1,13 @@
 # Concepts
 
-This page shows how a store written by zarr-vectors-tools is laid out and
-defines the terms the tools add. The format itself (levels, chunks, bins,
-objects, fragments, manifests, links and attributes) belongs to the core
-package, zarr-vectors-py: see its {zvpy}`core concepts <explanation/concepts.html>`
-and the {zvpy}`specification <spec/index.html>`.
+What zarr-vectors-tools adds to a store, and the terms these docs use. The
+format itself belongs to the core package: see its
+{zvpy}`concepts <explanation/concepts.html>` and
+{zvpy}`specification <spec/index.html>`.
 
 ## A store on disk
 
-This is the [quickstart](quickstart.md)'s `cells.zv`, with levels 1 and 2
-collapsed:
+The [quickstart](quickstart.md)'s `cells.zv`, with levels 1 and 2 collapsed:
 
 ```text
 cells.zv
@@ -25,36 +23,22 @@ cells.zv
 └── headers
 ```
 
-Each numbered directory is a level: `0/` holds the full-resolution data, and
-`1/` and `2/` are the coarser levels of the pyramid. The
+`0/` is full resolution; `1/` and `2/` are coarser levels of the pyramid. The
 {zvpy}`directory structure <spec/layout/directory_structure.html>` page
 describes every array.
 
-## What this package adds
-
-The core package reads and writes stores. zarr-vectors-tools adds:
-
-- readers and writers for file formats ([Convert](convert/index.md));
-- pyramid builders for each geometry ([Pyramids](pyramids.md));
-- algorithms that run over a store ([Algorithms](algorithms/index.md));
-- [merge and split](compose.md) of stores.
-
-Every ingest also writes what a viewer and a later export need:
-
-- `object_attributes/vertex_count` (vertices per object) and
-  `fragment_attributes/segment_id` (the ID each fragment is coloured and picked
-  by), in every level of a store with objects;
-- the source file's own metadata, such as a TRK affine, under
-  `headers/<format>/`.
-
-[Headers and attributes](reference/headers_attributes.md) lists what each
-ingest writes.
+The core package reads and writes stores. zarr-vectors-tools adds file
+[conversion](convert/index.md), [pyramids](pyramids.md),
+[algorithms](algorithms/index.md), and [merge and split](compose.md). Every
+ingest writes `object_attributes/vertex_count` and
+`fragment_attributes/segment_id` in every level of a store with objects, and
+the source file's metadata under `headers/<format>/`; [Headers and attributes](reference/headers_attributes.md)
+lists them.
 
 ## Glossary
 
-Terms of the format (store, level, chunk, bin, object, fragment, manifest,
-link, group, vertex and object attribute) are defined in the core package's
-{zvpy}`core concepts <explanation/concepts.html>`. These docs name stores
+Format terms (level, chunk, bin, object, fragment, link) are defined in the
+core {zvpy}`concepts <explanation/concepts.html>`. These docs name stores
 `*.zv`.
 
 Segment ID
@@ -64,7 +48,7 @@ Sparsity
 : Per coarser level, the divisor of the object count: `--sparsity 2,2` keeps 1/2, then 1/4, of the objects.
 
 Coarsen factor
-: Per coarser level, how much each object's geometry is simplified (`--coarsen`). See [Pyramids](pyramids.md).
+: Per coarser level, how much each object's geometry is simplified (`--coarsen`).
 
 Chunk scale
 : Per coarser level, the chunk-edge multiplier: `--chunk-scale 2,2` gives 2×, then 4×, the level-0 edge.
@@ -73,10 +57,7 @@ voxmm
 : TRK's native coordinates (voxel position × voxel size, in mm), kept unless you pass `--apply-affine`.
 
 RAS
-: Right-anterior-superior: the neuroimaging world convention, in mm (+x right, +y anterior, +z superior).
-
-LOD
-: Level of detail: a viewer draws coarse levels zoomed out, finer ones zoomed in. See [Visualise](visualise.md).
+: Right-anterior-superior: the neuroimaging world convention, in mm.
 
 Shard
-: One file holding many chunks of an array (`--shard 8`: 8×8×8 chunks). See [Store layout](store_layout.md#sharding).
+: One file holding many chunks of an array. See [Store layout](store_layout.md#sharding).

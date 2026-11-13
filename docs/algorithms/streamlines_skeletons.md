@@ -1,181 +1,98 @@
 # Streamlines, skeletons and surfaces
 
-`tracts.trx` holds two groups, `AF_L` (40 streamlines along x) and `CST_L`
-(20 along z); `roi.nii.gz` is a 10 mm cube only `CST_L` crosses. The second
-line adds a coarser level (see [Pyramids](../pyramids.md)):
+Region selection, filter trees and bundle summaries on streamline stores;
+metrics on skeleton stores; segment lookup across stores; and parcel
+summaries on cortical surfaces.
 
-```bash
-zvtools convert tracts.trx tracts.zv --chunk-shape 20,20,20 --compute-length --compute-endpoints \
-    --coarsen 1 --sparsity 2 --rdp-tolerance 0.5 --chunk-scale 2 --cross-level-storage none
-```
+## Streamlines
 
-## Select streamlines by region
+| Function | What it does | Returns |
+| --- | --- | --- |
+| `select_streamlines(store, *, mask=None, mask_affine=None, box=None, mode="path", level=0, sample_spacing=None, reach=None)` | Streamlines through a region, reading only the chunks near it. | sorted object ids |
+| `bundle_summary(store, *, level=None, write=True, orient_endpoints=True)` | Per group: streamline count, length statistics, mean tortuosity, start and end centroids. | DataFrame, one row per group |
+| `read_bundle_summary(store, *, level=0)` | The rows `bundle_summary` stored. | DataFrame |
+
+`select_streamlines` takes exactly one region: `mask` (a NIfTI path, a nibabel
+image, or an array with `mask_affine`; needs the `trk` extra) or
+`box=(min_corner, max_corner)` in RAS mm. `mode` is `"path"` (any part inside),
+`"endpoints"` (either end) or `"both_endpoints"`. `reach` is how far past the
+region chunks are read (default: one chunk). A segment longer than `reach` can
+jump over the region, so select at a fine level.
+
+`bundle_summary` needs groups: TRX groups, LINC TRK labels or
+`zvtools merge --group-by`. By default it computes from level 0 and writes
+`group_attributes/bundle_*` to every level; `level=N` summarises and writes
+level N only. Each bundle is flipped to agree along its main axis before
+endpoints are averaged; `orient_endpoints=False` keeps them as stored. The
+command `zvtools bundles STORE` does the same, with `--level`, `--no-write`,
+`--as-stored` and `--csv FILE`.
 
 ```python
-from zarr_vectors_tools.algorithms import select_streamlines
-from zarr_vectors_tools.convert.export.trk import export_trk
+from zarr_vectors_tools.algorithms import bundle_summary, select_streamlines
 
-through = select_streamlines("tracts.zv", mask="roi.nii.gz")        # 20 ids: CST_L
-ending = select_streamlines("tracts.zv", box=([0, 20, 20], [15, 40, 40]), mode="endpoints")  # 40 ids: AF_L
-export_trk("tracts.zv", "roi_tracts.trk", object_ids=through.tolist())
+ids = select_streamlines("tracts.zv", box=([15, 25, 40], [30, 40, 50]))
+bundle_summary("tracts.zv", write=False)[["streamline_count", "length_mean"]]
 ```
-
-| Argument | Meaning |
-| --- | --- |
-| `mask` / `box` | the region (pass exactly one): a NIfTI path, a nibabel image, or a 3-D array with `mask_affine`; or `(min_corner, max_corner)` in RAS mm |
-| `mode` | `"path"` (default): any part inside; `"endpoints"`: either end; `"both_endpoints"`: both ends |
-| `sample_spacing` | mm between points tested along each segment; default: half the smallest voxel edge or box side |
-| `reach` | how far past the region the chunks read extend, in store units; default: one chunk on every side |
-
-It returns sorted object ids, reading only the chunks near the region. A
-segment can cross the region with neither end inside it and one end in a
-chunk the region does not touch, so the neighbouring chunks are read too; if
-you know the store's step length, `reach=step` gives the same answer from
-fewer chunks. A TRK store kept in TrackVis voxel mm is mapped to RAS first. A
-segment longer than `reach` can jump over a region: at a heavily simplified
-`level`, select at a finer one. A mask needs nibabel (`[trk]` extra).
 
 ## Filter trees
 
 `zarr_vectors_tools.filtering` evaluates TrackVis-style filters: regions
-(sphere, box, slab, disk with an angle window, voxel mask), column
-comparisons and group membership, combined with AND, OR and NOT. A filter
-is a tree with a versioned JSON form, which is what other engines (such as
-a browser viewer's) are tested against.
+(`Sphere`, `Box`, `Slab`, `Disk`, `Mask`), column comparisons (`Column`) and
+group membership (`InGroup`), combined with `&` (and), `|` (or), `~` (not) and `-` (and not). A tree has a
+JSON form (`to_json`, `from_json`). `filtering.evaluate` tests every segment
+and defines the answer; `IndexedEngine` tests only segments near each region,
+gives the same answer, and caches every leaf. The subpackage needs only numpy.
 
 ```python
-from zarr_vectors_tools.filtering import (
-    Column, Disk, IndexedEngine, Passes, Sphere, load_tractogram, summarize, to_json,
-)
+from zarr_vectors_tools.filtering import IndexedEngine, Passes, Sphere, load_tractogram
 
-tracts = load_tractogram("tracts.zv")                  # level 0, RAS mm
-tree = (Passes(Sphere((10, 30, 20), 5)) & Column("length", ">", 40)) \
-    - Passes(Disk((0, 30, 20), (1, 0, 0), 8, angle=(0, 45)))
-engine = IndexedEngine(tracts)                         # grid index + cached leaves
-accepted = engine.evaluate(tree)                       # bool per streamline
-summarize(accepted, tracts, ["length"])                # count, mean, std, min, max
-to_json(tree)                                          # {"format": "zvf-predicate", ...}
+tracts = load_tractogram("tracts.zv")   # level 0, RAS mm
+tree = Passes(Sphere((20, 30, 45), 5)) - Passes(Sphere((45, 32, 32), 5))
+accepted = IndexedEngine(tracts).evaluate(tree)   # bool per streamline
 ```
-
-`filtering.evaluate` is the brute-force oracle: it tests every segment and
-defines the answer. `IndexedEngine` tests only the segments near each region
-and caches every leaf, so flipping an operator is only boolean algebra; it
-is tested to agree with the oracle exactly. The subpackage needs only numpy
-(the store is read only by `load_tractogram`), so it also runs under
-Pyodide. What each region means, exactly, is in the API reference.
-
-## Bundle summaries
-
-One row per object group: streamline count; length mean, standard deviation,
-minimum, median and maximum; mean tortuosity (path length over endpoint
-distance); and start and end centroids. The store needs groups: TRX groups,
-LINC TRK labels, or `zvtools merge --group-by`.
-
-```bash
-zvtools bundles tracts.zv --csv bundles.csv
-# prints the table, then: summarised 2 group(s) from level 0; written to level(s) [0, 1]
-```
-
-```python
-from zarr_vectors_tools.algorithms import bundle_summary, read_bundle_summary
-
-table = bundle_summary("tracts.zv")                    # write=True, level=None
-table.loc["CST_L", ["streamline_count", "length_mean", "start_z", "end_z"]].tolist()  # [20.0, 80.0, 5.0, 85.0]
-read_bundle_summary("tracts.zv", level=1)["streamline_count"].tolist()   # [40, 20]
-bundle_summary("tracts.zv", level=1, write=False)["streamline_count"].tolist()  # e.g. [21, 9]
-```
-
-By default (`level=None`) the rows come from level 0 and go to every level as
-`group_attributes/bundle_*`: a coarse level reports the whole bundle, not what
-sparsity kept. `--level N` (`level=N`) summarises level N's own members and
-writes there only; `--no-write` (`write=False`) stores nothing; `--csv FILE`
-adds a CSV. Each bundle is flipped to agree along its main axis before
-endpoints are averaged (`start_*` is the lower end); `--as-stored`
-(`orient_endpoints=False`) keeps directed streamlines as they are. TRX export
-carries the rows as `dpg`. After changing the groups, run it again.
 
 ## Skeleton metrics
 
-`compute_skeleton_metrics` measures every object at one level and, by default
-(`write=True`), stores each metric at that level as `object_attributes/<metric>`.
-
-Tree 0 in `neurons.swc` is a 100-unit trunk that forks into tips 10 and
-10√2 long:
-
-```bash
-zvtools convert neurons.swc neurons.zv --chunk-shape 32,32,32
-```
-
-```python
-from zarr_vectors_tools.algorithms import compute_skeleton_metrics
-
-metrics = compute_skeleton_metrics("neurons.zv")       # 2 trees; DataFrame indexed by object_id
-metrics.loc[0, ["cable_length", "leaf_count", "branch_count", "max_strahler"]].tolist()
-# [124.14213562373095, 3.0, 1.0, 2.0]
-```
+`compute_skeleton_metrics(store, *, level=0, metrics=None, write=True,
+object_ids=None, executor=None)` measures every object and returns a DataFrame
+indexed by `object_id`. With `write=True` it stores each metric as
+`object_attributes/<metric>`; `object_ids` needs `write=False`.
 
 | Metric | Meaning |
 | --- | --- |
-| `cable_length` | sum of edge lengths, including edges between chunks, in store units |
-| `node_count`, `component_count` | distinct vertices; connected pieces (1 for a single tree) |
-| `leaf_count`, `branch_count` | vertices with at most one neighbour (an unbranched root counts); with three or more |
-| `max_strahler` | Horton–Strahler order at the stored root (an SWC soma), else at the tip with the smallest (x, y, z) |
-| `extent` | bounding-box size per axis: one `(objects, 3)` attribute; `extent_x/y/z` in the table |
+| `cable_length` | sum of edge lengths, in store units |
+| `node_count`, `component_count` | distinct vertices; connected pieces |
+| `leaf_count`, `branch_count` | vertices with at most one neighbour; with three or more |
+| `max_strahler` | Strahler order at the root (an SWC soma), else at the tip with the smallest (x, y, z) |
+| `extent` | bounding-box size per axis; `extent_x/y/z` in the table |
 
-Options: `metrics=[...]`; `write=False`; `object_ids=[...]` (needs
-`write=False`); `executor=ex`, where `with process_pool_executor(4) as ex:`
-(from `zarr_vectors_tools.parallel`), to summarise chunks in parallel.
-
-## One segment across stores
-
-`SegmentLink` matches objects across stores by `object_attributes/segment_id`,
-which [skeleton stores](../convert/skeletons.md) (precomputed and SWC) and
-`zvtools synapses` stores have. Here `em.zv` holds three EM skeletons:
-
-```bash
-zvtools synapses synapses.csv em.zv synapses.zv
-```
+`SegmentLink(stores, *, level=0)` matches objects across stores by
+`object_attributes/segment_id`, which skeleton and `zvtools synapses` stores
+have. `resolve(segment_id)` gives the object id in each store,
+`link(store_name, object_id)` does the same from one store's object,
+`attributes(segment_id, {store_name: [names]})` reads attributes, and
+`resolve_many(ids)` returns a DataFrame.
 
 ```python
-from zarr_vectors_tools.algorithms import SegmentLink
+from zarr_vectors_tools.algorithms import SegmentLink, compute_skeleton_metrics
 
-link = SegmentLink({"skeletons": "em.zv", "synapses": "synapses.zv"})
-link.resolve(720575940611111111)   # {'skeletons': 0, 'synapses': 0}: object id in each store
-link.link("synapses", 0)           # {'skeletons': 0, 'synapses': 0}: an object picked in one store
-link.attributes(720575940611111111, {"skeletons": ["synapse_post_count"]})
-# {'skeletons': {'synapse_post_count': 2}}
-link.resolve_many([720575940611111111, 720575940633333333, 99])
-# DataFrame by segment_id; <NA>: not in that store at that level
+metrics = compute_skeleton_metrics("neurons.zv")
+link = SegmentLink({"skeletons": "neurons.zv", "synapses": "synapses.zv"})
+link.resolve(1)   # {'skeletons': 0, 'synapses': 0}
 ```
 
 ## Cortical surfaces
 
-`anat/` holds GIFTI midthickness and white surfaces, `thickness` and an `aparc`
-parcellation for both hemispheres (see [Surfaces](../convert/surfaces.md)). Each
-hemisphere is a sphere of 642 vertices centred 40 mm from the midline, split at
-its equator into `superior` and `inferior`.
-
-```bash
-zvtools convert anat surf.zv --chunk-shape 20,20,20
-```
+| Function | What it does | Returns |
+| --- | --- | --- |
+| `read_hemisphere(store, hemisphere, *, coords=None, attributes=(), level=0)` | One hemisphere in the source file's vertex order, with positions from any kept surface (`coords`; default the geometry). | `vertices`, `faces`, `source_vertex`, `attributes`, `surface` |
+| `parcel_summary(store, parcellation, *, metrics=None, surface="white", ...)` | Per parcel, as FreeSurfer's `?h.aparc.stats`: area on `surface`, each vertex taking a third of its triangles. | DataFrame indexed by (hemisphere, parcel): `code`, `vertex_count`, `surface_area`, `<map>_mean`, `<map>_std`, `<map>_area_weighted_mean` |
+| `parcel_at(store, points, parcellation, *, surface="white", ...)` | The parcel of the vertex nearest each point. | DataFrame: `hemisphere`, `parcel`, `code`, `vertex`, `distance` |
 
 ```python
-from zarr_vectors_tools.algorithms import parcel_at, parcel_summary, read_hemisphere
+from zarr_vectors_tools.algorithms import parcel_summary
 
-lh = read_hemisphere("surf.zv", "lh", coords="white", attributes=["thickness", "aparc"])
-lh["vertices"].shape, lh["faces"].shape    # (642, 3) (1280, 3); vertex i = source vertex i
-
-table = parcel_summary("surf.zv", "aparc", metrics=["thickness"])   # index (hemisphere, parcel)
-table.loc[("left", "superior"), ["vertex_count", "surface_area", "thickness_mean"]].round(2).tolist()
-# [305.0, 481.88, 2.76]
-parcel_at("surf.zv", [[-40.0, 0.0, 12.0]], "aparc")   # one row: left, superior, code 1, vertex 25, distance 3.0
+parcel_summary("surf.zv", "aparc", metrics=["thickness"])
 ```
 
-`read_hemisphere` returns `vertices`, `faces`, `source_vertex`, `attributes`
-and `surface` in the source file's vertex order, with positions from any
-surface the store kept (`coords`; default: its geometry). `parcel_summary`
-follows FreeSurfer's `?h.aparc.stats`: `vertex_count`, `surface_area` on the
-`white` surface (`surface=None`: the geometry), each vertex taking a third of
-its triangles (`vertex_areas` in `zarr_vectors_tools.algorithms.parcels`),
-and `<map>_mean`, `<map>_std` (population) and `<map>_area_weighted_mean`.
-`parcel_at` gives the parcel of the `white` vertex nearest each point.
+Converting surfaces: [Surfaces](../convert/surfaces.md).

@@ -12,9 +12,8 @@ build multiresolution pyramids for viewing, and run algorithms over stores too
 large to load at once.
 
 It extends [zarr-vectors-py](https://github.com/AllenInstitute/zarr-vectors-py),
-which owns the format and its core Python API
-([docs](https://zarr-vectors-py.readthedocs.io/en/latest)). Zarr Vectors was
-specified by Forrest Collman at the Allen Institute for Brain Science.
+which owns the format and its core Python API. Zarr Vectors was specified by
+Forrest Collman at the Allen Institute for Brain Science.
 
 **Documentation:** <https://zarr-vectors-tools.readthedocs.io/en/latest>
 
@@ -22,12 +21,12 @@ specified by Forrest Collman at the Allen Institute for Brain Science.
 
 ```bash
 pip install zarr-vectors-tools                 # CSV, tables, lines, SWC, OBJ, STL
-pip install "zarr-vectors-tools[trk]"          # + TRK and TCK (nibabel)
 pip install "zarr-vectors-tools[all]"          # every reader and writer
 ```
 
-Python 3.11 or later. The other extras are listed in the
-[install guide](https://zarr-vectors-tools.readthedocs.io/en/latest/install.html).
+Python 3.11 or later. The
+[install guide](https://zarr-vectors-tools.readthedocs.io/en/latest/install.html)
+lists the extras.
 
 ## Quick start
 
@@ -35,14 +34,16 @@ Python 3.11 or later. The other extras are listed in the
 # A table of points -> a store with two coarser levels
 zvtools convert cells.csv cells.zv --chunk-shape 100,100,100 --bin-shape 10,10,10 \
     --coarsen 2,2 --sparsity 1,1 --cross-level-storage none
-zvtools info cells.zv
 zvtools validate cells.zv
 
-# A store -> a file: the direction comes from the input
+# A store -> a file
 zvtools convert cells.zv cells_out.csv
+
+# View a TRK file in Neuroglancer without converting it
+zvtools virtual serve tracts.trk
 ```
 
-The same from Python:
+The same conversion from Python:
 
 ```python
 from zarr_vectors_tools.convert.ingest.csv_points import ingest_csv
@@ -52,44 +53,6 @@ ingest_csv("cells.csv", "cells.zv", (100.0, 100.0, 100.0), bin_shape=(10.0, 10.0
 build_pyramid("cells.zv", factors=[(2, 1), (2, 1)], cross_level_storage="none")
 ```
 
-Choosing chunk, bin and pyramid values is covered in
-[Store layout](https://zarr-vectors-tools.readthedocs.io/en/latest/store_layout.html)
-and [Pyramids](https://zarr-vectors-tools.readthedocs.io/en/latest/pyramids.html).
-To view a store, see
-[Visualise](https://zarr-vectors-tools.readthedocs.io/en/latest/visualise.html).
-
-## What's in it
-
-| Module | Purpose |
-| --- | --- |
-| `convert.ingest`, `convert.export` | readers and writers for CSV, LAS/LAZ, PLY, h5ad, delimited tables, line CSV, TRK, TCK, TRX, SWC, OBJ, STL, GraphML, edge lists, GIFTI, FreeSurfer, CIFTI and Neuroglancer precomputed |
-| `multiresolution` | pyramid building for every geometry |
-| `compose` | merging stores and files into a store, and splitting one apart |
-| `algorithms` | graph search, components and clustering; mesh summaries and queries; streamline, skeleton and parcel summaries |
-| `headers` | format headers kept for round-trip export |
-| `virtual` | tractograms, meshes, SWC neurons and point tables read as Zarr Vectors stores without converting them (below) |
-| `cli` | the `zvtools` command line |
-
-## Virtual stores
-
-`zarr_vectors_tools.virtual` reads a tractogram (`.trk`, `.tck`, `.trx`), a
-mesh (`.obj`, `.stl`, `.ply`, GIFTI, FreeSurfer surfaces), SWC neurons
-(`folder/@all.swc` reads every SWC file in a folder as one store) or a point
-table (`.csv`, `.tsv`, `.xyz`) as a Zarr Vectors store without converting it.
-The file is read once; every key of the store is made when it is requested.
-
-```bash
-zvtools virtual serve tracts.trk    # http://127.0.0.1:8000/tracts.trk/|zarr-vectors:
-```
-
-```python
-from zarr_vectors_tools.virtual import open_virtual
-
-store = open_virtual("tracts.trk")
-store.get("zarr.json")
-store.list("0/object_attributes/")
-```
-
 ## Development
 
 ```bash
@@ -97,11 +60,6 @@ git clone https://github.com/AllenInstitute/zarr-vectors-tools
 cd zarr-vectors-tools
 pip install -e ".[all,dev]"
 pytest -m "not slow" -n auto      # fast tier; plain `pytest` runs everything
-```
-
-Build the docs:
-
-```bash
 pip install -r docs/requirements-docs.txt
 python -m sphinx -b html docs docs/_build/html
 ```

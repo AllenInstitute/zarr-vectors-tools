@@ -1,179 +1,74 @@
 # Streamlines
 
-This page shows how to convert TRK, TCK and TRX tractograms to streamline
-stores and back. Each streamline becomes one object, its points the object's
-vertices.
+Convert TRK, TCK and TRX tractograms to streamline stores and back. Chunk
+shape, `--overwrite` and the export options are in
+[Converting files](index.md).
+
+| Format | In / out | Extra | Positions | Memory |
+|---|---|---|---|---|
+| `trk` | in, out | `trk` | voxmm (RAS mm with `--apply-affine`) | streams the file; larger than RAM works |
+| `tck` | in | `trk` | RAS mm | loads the whole file |
+| `trx` | in, out | `trx` | RAS mm | loads the whole file |
 
 ```bash
-zvtools convert tracts.trk tracts.zv
+zvtools convert tracts.trk tracts.zv --num-chunks 64 --workers 8
 ```
 
-TRK and TCK need the `[trk]` extra (nibabel), TRX the `[trx]` extra
-(trx-python); see [Install](../install.md). The options every converter
-shares are in [Converting files](index.md).
+```python
+from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
 
-## TRK
-
-`zvtools convert` streams a TRK file in byte ranges and never holds the whole
-tractogram, so files larger than RAM work. The file's per-point scalars
-become vertex attributes and its per-streamline properties object
-attributes, under the names in the header.
-
-```bash
-zvtools convert tracts.trk tracts.zv --num-chunks 64 --workers 8 \
-    --scratch-dir scratch --resume
+ingest_trk_parallel("tracts.trk", "tracts.zv", num_chunks=64, build_multiscale=False)
 ```
 
-| Option | Default | Effect |
-| --- | --- | --- |
-| `--num-chunks N` or `X,Y,Z` | `125` | Target total chunk count, or chunks per axis. The ingest picks the chunk edge in mm, prints it as `chunk_shape`, and the grid comes out close to N. TRK refuses `--chunk-shape`. |
-| `--workers N` | one process | Worker processes. Without it the ingest runs serially. |
-| `--n-parts N` | `max(4 × workers, 16)`, at most the streamline count | Byte ranges the file is cut into for the parallel pass. |
-| `--scratch-dir DIR` | a temporary directory | Keep the part files and a progress record here. |
-| `--resume` | off | Reuse what an earlier run with the same options finished in `--scratch-dir`. |
-| `--apply-affine` | off | Store RAS mm instead of voxmm; see [Coordinates](#coordinates). |
-| `--compute-length` | off | `object_attributes/length`, in mm. |
-| `--compute-endpoints` | off | `object_attributes/start` and `end`, three columns each. |
+TRK takes `--num-chunks`, not `--chunk-shape`. TCK and TRX need
+`--chunk-shape` in mm. In Python, `ingest_trk_parallel` runs serially unless
+given an `executor`, and builds a pyramid unless `build_multiscale=False`.
 
-Pass `--resume` and the same options on every run, including the first. A
-rerun reuses the file scan, the part files, a finished level 0 and finished
-pyramid levels, and refuses options that would change them. Choosing
-`--num-chunks`, `--workers` and `--n-parts`: [Store layout](../store_layout.md),
-[Large data](../large_data.md).
+| Option | Format | Effect |
+|---|---|---|
+| `--num-chunks N` or `X,Y,Z` | trk | Target chunk count (default 125), or chunks per axis. The chunk edge it picks is printed as `chunk_shape`. |
+| `--workers N`, `--n-parts N` | trk | Worker processes, and the byte ranges the file is cut into. See [Large data](../large_data.md). |
+| `--scratch-dir DIR`, `--resume` | trk | Keep part files here; with `--resume`, a rerun with the same options reuses them. Pass both on every run, including the first. |
+| `--apply-affine` | trk | Store RAS mm instead of voxmm; see [Coordinates](#coordinates). |
+| `--compute-length` | all | `object_attributes/length`, in mm. |
+| `--compute-endpoints` | all | `object_attributes/start` and `end`, 3 columns each. |
+| `--object-attr`, `--vertex-attr` | trk | Generated demo attributes (`tortuosity`, `arc_length`, …) for files with no scalars of their own. |
 
-`--object-attr` and `--vertex-attr` (repeatable, TRK only) generate test and
-demo attributes from the geometry, for trying colour-by on a file with no
-scalars of its own:
+## What the store holds
 
-```bash
-zvtools convert tracts.trk demo.zv --object-attr tortuosity --vertex-attr arc_length
-```
-
-Per streamline: `length`, `endpoints`, `orientation` (start-to-end unit
-vector, 3 columns), `tortuosity` (length ÷ endpoint distance). Each
-streamline's `vertex_count` is stored without asking, as for every store with
-objects ([attributes](../reference/headers_attributes.md)). Per vertex: `arc_length` (0 to 1 along the streamline), `x`,
-`y`, `z`, `index`, `random` (seeded by `--attr-seed`), `tangent` (3 columns).
-
-From Python, `zarr_vectors_tools.convert.ingest.trk_parallel.ingest_trk_parallel`
-adds `max_streamlines` (ingest the first N only, for a trial run). It runs
-serially unless given an `executor`, and unlike the CLI it builds a pyramid
-by default (`pyramid_factors=[(8, 1), (8, 1)]`); pass
-`build_multiscale=False` or factors of your own.
-
-### Pyramid
-
-The levels are built inside the ingest. What the values do, and how to
-choose others: [Pyramids](../pyramids.md).
-
-```bash
-zvtools convert tracts.trk tracts.zv \
-    --coarsen 1,1,1 --sparsity 2,2,2 --rdp-tolerance 0.5,1,2 --chunk-scale 2,2,2
-```
+- One object per streamline; its points are the object's vertices.
+- TRK scalars and TRX `dpv` as vertex attributes; TRK properties and TRX `dps`
+  as object attributes. TRX keeps its dtypes (float16 becomes float32).
+- TRX `groups` as named groups and `dpg` as group attributes, on every level.
+- The TRK or TRX header, and millimetres as the axis unit.
+- Every name: [Headers and attributes](../reference/headers_attributes.md).
 
 ## Coordinates
 
-A TRK file stores points in **voxmm**: voxel index × voxel size, in mm along
-the reference image's voxel axes. The header's vox-to-RAS affine maps them to
-scanner **RAS mm**. TCK and TRX files store RAS mm. Stores written by
-`zvtools convert`, `ingest_tck` and `ingest_trx` record millimetres as the
-axis unit, which the viewer's scale bar and a precomputed export read; the
-Python `ingest_trk` and `ingest_linc_trk` record no unit.
-
-| Input | Stored positions | Affine kept in |
-| --- | --- | --- |
-| `zvtools convert x.trk` | voxmm, as in the file | TRK header (`space: voxmm`) and the store's `crs` |
-| `zvtools convert x.trk --apply-affine` | RAS mm | TRK header (`space: rasmm`); `crs` is the identity |
-| TCK | RAS mm | — |
-| TRX | RAS mm | TRX header (`VOXEL_TO_RASMM`, `DIMENSIONS`) |
-| Python `ingest_trk`, `ingest_linc_trk` | RAS mm | TRK header |
-
-The viewer draws stored positions as they are; it does not apply the store's
-affine. Use `--apply-affine` when the tracts must line up with data in RAS
-mm, such as a TCK or TRX store or surfaces in scanner space. Keep the default
-to keep the file's own coordinates. The exporters convert from either space.
-Headers in full: [Headers and attributes](../reference/headers_attributes.md).
-
-## TCK and TRX
-
-```bash
-zvtools convert tracts.tck tck.zv --chunk-shape 20,20,20 --compute-length
-zvtools convert bundles.trx bundles.zv --chunk-shape 20,20,20 --compute-endpoints
-```
-
-Both readers load the whole file into memory, in one process, and need
-`--chunk-shape` in mm. TCK carries positions only. TRX `dpv` become vertex
-attributes, `dps` object attributes (one value per streamline when the array
-has one column), `dpg` group attributes, and `groups` named groups, kept on
-every pyramid level (`zv.open("bundles.zv").level(0).groups.names()` lists
-them). `dpv` and `dps` keep the file's dtype, so a `uint32`
-count exports as the same integers; `float16` is stored as float32.
-The pyramid flags are the same as for TRK; the levels are built after the
-ingest. From Python, `ingest_tck` and `ingest_trx` also take `length_range`,
-and `ingest_trx` takes `mean_scalar`:
-
-```python
-from zarr_vectors_tools.convert.ingest.trx import ingest_trx
-
-summary = ingest_trx(
-    "bundles.trx", "bundles_25mm.zv",
-    (20.0, 20.0, 20.0),           # chunk_shape, mm
-    length_range=(25.0, 250.0),   # drop shorter and longer streamlines, mm
-    mean_scalar="fa",             # object_attributes/mean_fa from dpv "fa"
-)
-print(summary["dropped_by_length"])
-```
+A TRK file stores points in **voxmm**: voxel index × voxel size. Its
+vox-to-RAS affine maps them to scanner **RAS mm**. TCK and TRX store RAS mm.
+The viewer draws stored positions as they are. Use `--apply-affine` when TRK
+tracts must line up with data in RAS mm, such as TCK or TRX stores or surfaces.
+Exporters convert from either space.
 
 ## LINC TRK
 
-`ingest_linc_trk` (Python only, `[trk]` extra) reads a TRK whose
-`data_per_streamline["label_id"]` holds an atlas label per streamline and
-makes one group per label. It loads the whole file, in one process;
-positions are RAS mm.
-
-```python
-from zarr_vectors_tools.convert.ingest.linc_trk import ingest_linc_trk
-
-summary = ingest_linc_trk(
-    "my_bundle.trk", "my_bundle.zv",
-    (20.0, 20.0, 20.0),               # chunk_shape, mm
-    lut_path="linc_lut.txt",          # lines of "ID NAME R G B A"
-    mapping_path="linc_mapping.json", # {"my_bundle.trk": 34}
-    compute_length=True,
-)
-```
-
-- The input's file name must be in the mapping, and its label must occur in
-  the file. Every label in the file needs a LUT line, such as
-  `34 Left-Hippocampus 220 20 60 255`; names may contain spaces and `#`
-  starts a comment. Integral float labels such as `34.0` are accepted.
-- The group id is the label id: `level.groups.by_id(34).members`. The LUT
-  name and RGBA colour become group attributes `name` and `color`; the group
-  itself is unnamed, so TRX export calls it `group_34`.
-- `compute_endpoints` and `length_range` are accepted too; groups are built
-  from the streamlines that remain.
+`ingest_linc_trk` (Python only) reads a TRK whose
+`data_per_streamline["label_id"]` holds an atlas label, and makes one group per
+label. Its `lut_path` file has lines `ID NAME R G B A`; its `mapping_path` JSON
+maps the file name to its label, such as `{"my_bundle.trk": 34}`. The group id
+is the label; its name and colour become group attributes.
 
 ## Export to TRK and TRX
 
 ```bash
-zvtools convert tracts.zv out.trk
-zvtools convert tracts.zv three.trk --object-id 0 --object-id 1 --object-id 2 \
-    --attribute fa --object-attribute weight
 zvtools convert bundles.zv cst.trx --group-id 0
 ```
 
-Vertex attributes become TRK scalars or TRX `dpv`, object attributes TRK
-properties or TRX `dps`; TRX also gets the groups and their attributes. The
-reference image comes from the store's TRK header, else its TRX header, else
-the identity (Python `export_trk(..., affine=...)` supplies one).
+Vertex attributes become TRK scalars or TRX `dpv`; object attributes become
+TRK properties or TRX `dps`. Text attributes are skipped. TRK holds at most 10
+scalars and 10 properties, with names of up to 20 characters. The reference
+image comes from the store's TRK header, else its TRX header, else the identity.
 
-- By default every numeric attribute is written; `--attribute` and
-  `--object-attribute` choose. Text attributes are skipped and listed as
-  `attributes_skipped`. TRK holds at most 10 scalars and 10 properties, with
-  names of up to 20 characters.
-- `--group-id` takes group ids, in the order of `groups.names()`, and needs a
-  store with groups; TRX export then writes only those groups. `--level N` exports a pyramid level.
-- Positions are converted from the stored space, so a TRK exported from a
-  voxmm or a RAS mm store of the same file matches the original.
-
-Region selection, bundle summaries: [Streamlines and skeletons](../algorithms/streamlines_skeletons.md).
+Region selection and bundle summaries:
+[Streamlines and skeletons](../algorithms/streamlines_skeletons.md).

@@ -1,113 +1,76 @@
 # Meshes
 
-This page shows how to convert OBJ and STL files and Neuroglancer precomputed
-mesh layers to mesh stores, export them back, and build mesh pyramids.
+Convert OBJ and STL files and Neuroglancer precomputed mesh layers to mesh
+stores, and export them back. Chunk shape, `--overwrite` and the export
+options are in [Converting files](index.md).
+
+| Format | In / out | Extra | Units |
+|---|---|---|---|
+| `obj` | in, out | — | the file's |
+| `stl` | in | — | the file's |
+| `precomputed` | in, out | `precomputed` | nm |
 
 ```bash
 zvtools convert model.obj model.zv --chunk-shape 50,50,50
-zvtools convert part.stl part.zv --chunk-shape 50,50,50
 ```
 
-`--chunk-shape` is in the mesh's own coordinate units: for a model in micrometres,
-`50,50,50` gives 50 µm chunks ([choosing it](../store_layout.md#chunk-shape); shared
-options: [Converting files](index.md)). OBJ and STL need no extra.
+```python
+from zarr_vectors_tools.convert.ingest.obj import ingest_obj
 
-## OBJ
-
-Triangles and quads are stored as they are; larger faces are fan-triangulated, and a
-file mixing triangles and quads is stored as triangles. Only the vertex index of a
-`v/vt/vn` corner is read (negative indices work); texture coordinates and materials
-are dropped. Vertex normals become the vertex attribute `normal` when there is one
-`vn` per `v`. To leave normals out of the store, drop them first with `grep -v '^vn ' model.obj > model_plain.obj`.
-
-By default the whole file is one [object](../concepts.md). `--split-objects` gives one
-object per `o` or `g` name (each vertex takes the id of the last such line above it) and
-keeps the names in the store's `obj` header:
-
-```bash
-zvtools convert model.obj model_objects.zv --chunk-shape 50,50,50 --split-objects
+ingest_obj("model.obj", "model.zv", (50.0, 50.0, 50.0), auto_object_id=True)
 ```
 
-In Python the same is `ingest_obj(..., auto_object_id=True)`.
+| Option | Format | Effect |
+|---|---|---|
+| `--split-objects` | obj | One object per `o` or `g` name (Python `auto_object_id=True`). Default: the whole file is one object. |
+| `--merge-tolerance D` | stl | Weld corners that round to the same point on a grid of spacing D (default `1e-6`, file units). |
+| `--no-merge-vertices` | stl | Keep every triangle's corners separate. |
+| `--segment-id ID` | precomputed | Read only this segment (repeatable). Default: all. |
+| `--lod N` | precomputed | Level of detail of a multi-resolution layer; `0` (default) is the finest. |
 
-## STL
+## What the store holds
 
-ASCII and binary STL are detected automatically. STL repeats each corner once per
-triangle, so the ingest welds corners that round to the same point of a grid
-`--merge-tolerance` fine (default `1e-6`, file units): a 5,120-triangle sphere gives
-2,562 vertices, or 15,360 disconnected ones with `--no-merge-vertices`. Facet normals are
-not stored.
-
-```bash
-zvtools convert part.stl part_welded.zv --chunk-shape 50,50,50 --merge-tolerance 1e-4
-```
-
-In Python these are `ingest_stl(..., merge_tolerance=1e-4)` and `merge_vertices=False`.
-Both readers store meshes raw: `encoding="draco"` is refused, since a Draco store could
-not be read back.
+- Triangles, or quads when every face of an OBJ is a quad. Larger faces are
+  split into triangles.
+- OBJ vertex normals as `normal`, when there is one `vn` per `v`. Texture
+  coordinates, materials and STL facet normals are dropped.
+- With `--split-objects`, the `o` and `g` names in the store's `obj` header.
+- For a precomputed layer, one object per segment, with `segment_id` and the
+  segment properties as object attributes. Fragment seams are welded.
 
 ## Neuroglancer precomputed mesh layers
 
 ```bash
-zvtools convert seg/mesh cells.zv --chunk-shape 32000,32000,32000
-zvtools convert seg/mesh two_cells.zv --chunk-shape 32000,32000,32000 --segment-id 7 --segment-id 9 --lod 1
+zvtools convert seg/mesh cells.zv --chunk-shape 32000,32000,32000 --segment-id 7
 ```
 
-INPUT is the mesh directory (local, or `gs://`, `s3://`, `https://`, `file://`, with or
-without `precomputed://`), not the segmentation layer above it. Neuroglancer's legacy (single-resolution) and
-multi-resolution Draco layouts, plain or sharded, are read. Needs `[precomputed]`.
-
-| Option | Meaning |
-| --- | --- |
-| `--chunk-shape X,Y,Z` | required, in nanometres: a mesh layer has no grid to inherit |
-| `--segment-id ID` | read only this segment; repeatable. Default: every segment |
-| `--lod N` | multi-resolution layers: level of detail, `0` (default) the finest |
-
-Each segment becomes one object, in ascending segment id, kept as the object attribute
-`segment_id`; inline segment properties become object attributes too. Fragment seams
-are welded, so a closed mesh stays closed. Memory holds the selected segments until
-they are written, so `--segment-id` bounds it.
+INPUT is the mesh directory (local, or `gs://`, `s3://`, `https://`,
+`file://`), not the segmentation layer above it. Legacy and multi-resolution
+layers, plain or sharded, are read. `--chunk-shape` is required, in nm. Memory
+holds the selected segments until they are written, so `--segment-id` bounds it.
 
 ## Export
 
 ```bash
 zvtools convert model.zv model_out.obj
-zvtools convert model.zv corner.obj --bbox 0,0,0,100,100,100
-zvtools convert model_objects.zv ball_b --format precomputed --object-id 1
 ```
 
-OBJ export writes vertices and faces from `--level N` (default 0); quads stay quads,
-and no normals, groups or materials are written. `--bbox X0,Y0,Z0,X1,Y1,Z1` keeps the
-faces whose corners are all inside, so a box that cuts the mesh leaves an open edge.
-OBJ export cannot select objects, so `--object-id` is refused.
+OBJ export writes vertices and faces only. `--bbox` keeps faces whose corners
+are all inside, so a box that cuts the mesh leaves an open edge.
 
-Precomputed export (`--format precomputed`, or a URL as OUTPUT; needs `[precomputed]`)
-writes a segmentation layer with a legacy `mesh/`: one level of detail, in nanometres,
-one segment per object (object N is segment N + 1 unless the store has `segment_id`).
-Pass `--unit micrometer` (or `millimeter`) if the store records no unit and is not in
-nm. Segment properties work as for [skeletons](skeletons.md). On Windows, write to a bucket.
+Precomputed export writes a segmentation layer with a single-resolution
+`mesh/` in nm, one segment per object. Segment ids come from `segment_id`, else
+object id + 1. Pass `--unit micrometer` if the store records no unit and is not
+in nm.
 
 ## Pyramids
 
-`zvtools pyramid`, or the same flags on `convert`, adds coarser levels. For meshes pass
-`--method mesh_decimate`, edge-collapse decimation, which keeps a closed surface closed:
+Use `--method mesh_decimate`, which keeps a closed surface closed, with
+`--sparsity 1`:
 
 ```bash
-zvtools pyramid model_objects.zv --coarsen 4,4 --sparsity 1,1 --chunk-scale 2,2 \
-    --method mesh_decimate
+zvtools pyramid model.zv --coarsen 4,4 --sparsity 1,1 --chunk-scale 2,2 --method mesh_decimate
 ```
 
-Each `--coarsen` value (> 1) is how many times smaller a level is than the one below. On
-a model of two spheres (5,124 vertices, 50-unit chunks) the command above gave
-5,124 → 1,284 → 324 vertices in 100- and 200-unit chunks, with no open or non-manifold
-edges. `--sparsity` must be 1: decimation keeps every object. Object attributes and
-segment ids carry to every level; per-vertex attributes come from the nearest source
-vertex, which needs scipy (`[mesh]`; without it they are left off, with a warning).
-In Python: `build_pyramid(..., factors=[(4, 1), (4, 1)], chunk_scale_factors=[2, 2],
-method="mesh_decimate")`.
-
-Without `--method`, levels are built by vertex clustering, the one mesh method that
-also drops objects (`--sparsity`). It can leave non-manifold edges: on the same model,
-`--coarsen 2,2` did. Keep `--chunk-scale 2,...` with either
-method: the viewer never refines a level that keeps every object and the chunk size of
-the level below ([Visualise](../visualise.md)). Choosing values: [Pyramids](../pyramids.md).
+Carrying per-vertex attributes to coarser levels needs the `mesh` extra. Choosing values:
+[Pyramids](../pyramids.md).

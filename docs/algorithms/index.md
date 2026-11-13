@@ -1,50 +1,40 @@
 # Algorithms
 
-`zarr_vectors_tools.algorithms` measures and queries a store where it is. Each
-function reads the chunks it needs from one [level](../concepts.md) and
-returns arrays, dicts or pandas tables. Some can also write their result into
-the store as an attribute.
+`zarr_vectors_tools.algorithms` measures and queries a store in place. Each
+function reads the chunks it needs from one [level](../concepts.md) and returns
+arrays, dicts or pandas tables. Bundle summaries also have a command,
+`zvtools bundles STORE`.
 
-```python
-from zarr_vectors_tools.algorithms import compute_skeleton_metrics
-
-metrics = compute_skeleton_metrics("neurons.zv")   # one row per neuron; also stored
-```
-
-Everything here is Python, except bundle summaries, which also have a
-command: `zvtools bundles STORE`.
-
-| Function | Geometry | Computes | Writes to the store | Page |
-| --- | --- | --- | --- | --- |
-| `bfs_distances` | graph, skeleton | hop count and parent from one vertex | no | [Graphs](graphs.md) |
-| `shortest_path` | graph, skeleton | Dijkstra or A* path and cost | no | [Graphs](graphs.md) |
-| `compute_connected_components` | graph, skeleton | component label per vertex | `write_back=False`; if true: `vertex_attributes/component_label` | [Graphs](graphs.md) |
-| `compute_k_core` | graph, skeleton | coreness per vertex | no | [Graphs](graphs.md) |
-| `compute_label_propagation` | graph, skeleton | community per vertex | no | [Graphs](graphs.md) |
-| `compute_louvain` | graph, skeleton | community per vertex, modularity | no | [Graphs](graphs.md) |
-| `compute_mesh_summary` | mesh | area, volume, Euler characteristic; per object on request | no | [Meshes](meshes.md) |
-| `compute_vertex_normals` | mesh | unit normal per vertex | `write_back=False`; if true: `vertex_attributes/vertex_normal` | [Meshes](meshes.md) |
-| `compute_mean_curvature` | mesh | mean curvature per vertex | `write_back=False`; if true: `vertex_attributes/mean_curvature` | [Meshes](meshes.md) |
-| `closest_point` | mesh | nearest point on the surface | no | [Meshes](meshes.md) |
-| `cast_ray` | mesh | first surface hit along a ray | no | [Meshes](meshes.md) |
-| `select_streamlines` | streamlines | ids of streamlines through, or ending in, a mask or box | no | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `bundle_summary` | streamlines with groups | per group: count, length statistics, tortuosity, endpoint centroids | `write=True`: `group_attributes/bundle_*` | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `read_bundle_summary` | streamlines with groups | the rows `bundle_summary` stored | no | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `compute_skeleton_metrics` | skeleton | per object: cable length, node, leaf, branch and component counts, Strahler order, extent | `write=True`: `object_attributes/<metric>` | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `SegmentLink` | stores with segment ids | the same segment's object in each store | no | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `read_hemisphere` | cortical surface | one hemisphere in the source file's vertex order | no | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `parcel_summary` | cortical surface | per parcel: vertex count, area, map mean and standard deviation | no | [Streamlines, skeletons](streamlines_skeletons.md) |
-| `parcel_at` | cortical surface | the parcel nearest each point | no | [Streamlines, skeletons](streamlines_skeletons.md) |
+| Function | Geometry | Computes |
+| --- | --- | --- |
+| `bfs_distances` | [graph, skeleton](graphs.md) | hop count and parent from one vertex |
+| `shortest_path` | [graph, skeleton](graphs.md) | Dijkstra or A* path and cost |
+| `compute_connected_components` | [graph, skeleton](graphs.md) | component label per vertex |
+| `compute_k_core` | [graph, skeleton](graphs.md) | coreness per vertex |
+| `compute_label_propagation` | [graph, skeleton](graphs.md) | community per vertex |
+| `compute_louvain` | [graph, skeleton](graphs.md) | community per vertex, modularity |
+| `compute_mesh_summary` | [mesh](meshes.md) | area, volume, Euler characteristic |
+| `compute_vertex_normals` | [mesh](meshes.md) | unit normal per vertex |
+| `compute_mean_curvature` | [mesh](meshes.md) | mean curvature per vertex |
+| `closest_point` | [mesh](meshes.md) | nearest point on the surface |
+| `cast_ray` | [mesh](meshes.md) | first surface hit along a ray |
+| `select_streamlines` | [streamlines](streamlines_skeletons.md) | ids of streamlines through, or ending in, a region |
+| `bundle_summary` | [streamlines with groups](streamlines_skeletons.md) | per group: count, length, tortuosity, endpoint centroids |
+| `read_bundle_summary` | [streamlines with groups](streamlines_skeletons.md) | the stored `bundle_summary` rows |
+| `compute_skeleton_metrics` | [skeleton](streamlines_skeletons.md) | per object: cable length, counts, Strahler order, extent |
+| `SegmentLink` | [stores with segment ids](streamlines_skeletons.md) | the same segment's object in each store |
+| `read_hemisphere` | [cortical surface](streamlines_skeletons.md) | one hemisphere in source vertex order |
+| `parcel_summary` | [cortical surface](streamlines_skeletons.md) | per parcel: vertex count, area, map statistics |
+| `parcel_at` | [cortical surface](streamlines_skeletons.md) | the parcel nearest each point |
 
 Every function takes the store path first (`SegmentLink` takes several) and
-`level=` as a keyword argument, defaulting to `0`. The exception is
-`bundle_summary`: it defaults to `level=None`, which computes from level 0 and
-writes the same rows to every level. A writing function writes to the level it
-was given: `0/vertex_attributes/component_label` for level 0. Re-running it
-replaces the attribute.
+`level=0` as a keyword.
+`compute_connected_components`, `compute_vertex_normals` and
+`compute_mean_curvature` store their result as a vertex attribute with
+`write_back=True`. `compute_skeleton_metrics` and `bundle_summary` store theirs
+by default. A function writes to the level it reads, and a rerun replaces the
+attribute; `bundle_summary` reads level 0 and writes to every level.
 
-## Objects that span chunks
-
-Every function follows objects across chunk boundaries: an edge or a triangle
-whose ends lie in different chunks counts once, like any other. Results do not
-depend on the chunk shape.
+Every function follows objects across chunk boundaries: an edge or triangle
+whose ends lie in different chunks counts once. Results do not depend on the
+chunk shape.
