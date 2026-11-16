@@ -13,6 +13,7 @@ the third-party readers this package already wraps.
 | [`internals/`](internals/) | *How does Zarr Vectors scale along axis X?* | 8 notebooks — size, geometry type, backend, pyramid, bbox query, chunk shape, codec, edit cost |
 | [`filtering/`](filtering/) | *Is numpy, under Pyodide, fast enough to filter streamlines in a browser?* | scripts — gate G1 of the viewer platform plan, CPython and Pyodide side by side |
 | [`octree/`](octree/) | *How fast are spatial and object reads of points, meshes and networks, by shard layout, reader and latency?* | scripts — octree vs indexed sharding at 4 M vertices, local / 20 ms / 80 ms per request |
+| [`gpu/`](gpu/) | *How much faster is a whole-level read on a CUDA device?* | scripts, paper style — `read_cells` CPU vs GPU host/device decode, 10³–10⁷ vertices |
 
 `formats/` and `internals/` are exploratory: each has its own
 `README.md`, its own `_build.py`, and its own `01..N` numbering. They
