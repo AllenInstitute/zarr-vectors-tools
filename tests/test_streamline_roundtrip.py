@@ -187,6 +187,31 @@ class TestTrkRoundTrip:
         counts = sorted(sum(len(f) for f in p) for p in result["polylines"])
         assert counts == sorted(len(s) for s in streamlines)
 
+    def test_serial_and_parallel_stores_agree_on_units_and_property_shapes(
+        self, tmp_path: Path,
+    ) -> None:
+        import zarr
+
+        from zarr_vectors_tools.convert.ingest.trk import ingest_trk
+        from zarr_vectors_tools.convert.ingest.trk_parallel import ingest_trk_parallel
+
+        source = tmp_path / "in.trk"
+        _write_trk(source)
+        serial, parallel = tmp_path / "serial.zv", tmp_path / "parallel.zv"
+        ingest_trk(str(source), str(serial), (50.0, 50.0, 50.0))
+        ingest_trk_parallel(
+            str(source), str(parallel), num_chunks=8, n_parts=2, workers=1,
+            build_multiscale=False, progress=False,
+        )
+        for store in (serial, parallel):
+            attrs = zarr.open_group(str(store), mode="r").attrs.asdict()
+            assert [a.get("unit") for a in attrs["multiscales"][0]["axes"]] == ["millimeter"] * 3
+            world = attrs["ome"]["attributes"]["scene"]["coordinateSystems"][0]
+            assert [a.get("unit") for a in world["axes"]] == ["millimeter"] * 3
+            objects = store / "0" / "object_attributes"
+            assert zarr.open_array(str(objects / "weight"), mode="r").shape == (4,)
+            assert zarr.open_array(str(objects / "colour"), mode="r").shape == (4, 3)
+
     def test_attribute_selection(self, tmp_path: Path) -> None:
         from zarr_vectors_tools.convert.ingest.trk import ingest_trk
 

@@ -211,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--compressor", choices=("none", "zstd", "blosc"),
                    default="none",
                    help="trk only: codec for per-chunk arrays (default: none = raw). "
-                        "zstd/blosc make streamline stores ~2.4x smaller, but "
+                        "zstd and blosc compress them losslessly, but "
                         "the zarr-vectors Neuroglancer viewer cannot read "
                         "compressed chunk arrays: keep stores meant for "
                         "viewing uncompressed")
@@ -631,7 +631,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "only the link_fragments index is rewritten; a level where "
                     "some face spans two objects is left unstamped. Meshes "
                     "written by zarr-vectors-py and pyramids built by `zvtools "
-                    "pyramid` are already stamped.",
+                    "pyramid` are already stamped. Needs a zarr-vectors-py with "
+                    "fragment_link_groups support, and refuses to run without "
+                    "it.",
     )
     x.add_argument("store", help="zarr-vectors store path")
     x.add_argument("--levels", type=parse_int_list, default=None,
@@ -781,14 +783,21 @@ def build_parser() -> argparse.ArgumentParser:
     # virtual
     vt = sub.add_parser(
         "virtual", help="serve files as zarr-vectors stores, without converting them",
-        description="Read tractograms (.trk, .tck, .trx), meshes (.obj, .stl, .ply, .gii, FreeSurfer surfaces), SWC neurons or "
+        description="Read tractograms (.trk, .tck, .trx), meshes (.obj, .stl, .ply, .gii, "
+        "FreeSurfer surfaces), SWC neurons or "
                     "point tables (.csv, .tsv, .xyz) once and serve each as a "
                     "virtual zarr-vectors store over HTTP, for any Neuroglancer with "
                     "the zarr-vectors data source.  Nothing is written.",
     )
     vsub = vt.add_subparsers(dest="virtual_command", required=True)
-    vs = vsub.add_parser("serve", help="serve files at http://host:port/<name>/|zarr-vectors:")
-    vs.add_argument("files", nargs="+", help=".trk, .tck, .trx, .obj, .stl, .ply, .gii, FreeSurfer surface (lh.pial, ...), .swc, .csv, .tsv or .xyz files")
+    vs = vsub.add_parser("serve", help="serve each file as a zarr-vectors store at "
+                              "http://host:port/<name>/")
+    vs.add_argument(
+        "files",
+        nargs="+",
+        help=".trk, .tck, .trx, .obj, .stl, .ply, .gii, FreeSurfer surface (lh.pial, ...), "
+        ".swc, .csv, .tsv or .xyz files",
+    )
     vs.add_argument("--host", default="127.0.0.1")
     vs.add_argument("--port", type=int, default=8000)
     vs.set_defaults(func=_run_virtual_serve)

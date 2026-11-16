@@ -24,6 +24,7 @@ from ._args import (
     EXPORT_REGISTRY,
     FORMAT_REGISTRY,
     build_factors,
+    check_executor,
     check_pyramid_method,
     check_rdp_tolerances,
     executor_ctx,
@@ -38,9 +39,10 @@ from ._args import (
 def _maybe_overwrite(output, overwrite: bool, *, resume: bool = False) -> None:
     """Remove an existing output store when ``--overwrite`` is set.
 
-    Only deletes a directory that looks like a zarr store (has ``zarr.json`` or
-    ``.zattrs``) — including a partial store from a failed ingest, whose root is
-    created before level-0 data — so an unrelated directory is never wiped.
+    Only deletes a directory that is a zarr-vectors store (its root
+    ``zarr.json`` carries ``zarr_vectors`` attributes) — including a partial
+    store from a failed ingest, whose root is created before level-0 data — so
+    an unrelated directory, or another Zarr store, is never wiped.
     Without ``--overwrite`` an existing output is refused: the ingesters write
     into it, and the old chunks they do not touch would survive alongside the
     new data.  ``resume`` is the exception, since continuing into the store an
@@ -57,8 +59,7 @@ def _maybe_overwrite(output, overwrite: bool, *, resume: bool = False) -> None:
             f"or choose another OUTPUT"
         )
     if p.is_dir():
-        looks_like_store = (p / "zarr.json").exists() or (p / ".zattrs").exists()
-        if not looks_like_store:
+        if not looks_like_store(p):
             raise SystemExit(
                 f"error: refusing to overwrite {output}: not a zarr-vectors store"
             )
@@ -182,6 +183,45 @@ def _check_method(args, fmt, factors) -> str | None:
             f"simplifies by distance; --method {method} has no tolerance"
         )
     return method
+
+
+def _check_sparsity_strategy(args, fmt, factors) -> None:
+    """Refuse a ``--sparsity-strategy`` the pyramid's coarsener cannot
+    select by, before the ingest rather than once the pyramid is reached."""
+    from zarr_vectors_tools.multiresolution.coarsen import check_sparsity_strategy
+
+    if factors is None:
+        return
+    key = args.method
+    if key is None:
+        geometry = fmt.geometry
+        if fmt.name == "precomputed":
+            geometry = _precomputed_kind(args)
+        key = {
+            "streamlines": "polyline", "skeleton": "skeleton",
+            "mesh": "mesh", "surface": "mesh",
+        }.get(geometry, "per_object")
+    try:
+        check_sparsity_strategy(key, args.sparsity_strategy, factors)
+    except ValueError as exc:
+        raise SystemExit(f"error: --sparsity-strategy: {exc}") from None
+
+
+def _check_refinement(args, factors) -> None:
+    """``--refinement add`` is refused before the ingest where it cannot run:
+    without pyramid levels, or without zarr-vectors-py support."""
+    if (getattr(args, "refinement", "replace") or "replace") != "add":
+        return
+    if factors is None:
+        raise SystemExit(
+            "error: --refinement add makes pyramid levels additive; pass "
+            "--coarsen and --sparsity to build some"
+        )
+    from zarr_vectors_tools.multiresolution.additive import additive_support_error
+
+    refusal = additive_support_error()
+    if refusal is not None:
+        raise SystemExit(f"error: {refusal}")
 
 
 def _check_sparsity_attribute(args, fmt, factors) -> None:
@@ -668,6 +708,9 @@ def run(args) -> int:
     # conversion ran.
     check_rdp_tolerances(args.rdp_tolerance, factors, args.coarsen_mode)
     args.method = _check_method(args, fmt, factors)
+    _check_sparsity_strategy(args, fmt, factors)
+    _check_refinement(args, factors)
+    check_executor(args.workers, args.workers_backend)
 
     _maybe_overwrite(args.output, args.overwrite, resume=bool(getattr(args, "resume", False)))
 
@@ -830,8 +873,14 @@ def run_shard(args) -> int:
 
 def run_index_faces(args) -> int:
     """``zvtools index-faces STORE`` -- per-object face groups."""
-    from zarr_vectors_tools.multiresolution.face_groups import index_mesh_faces
+    from zarr_vectors_tools.multiresolution.face_groups import (
+        face_groups_support_error,
+        index_mesh_faces,
+    )
 
+    refusal = face_groups_support_error()
+    if refusal is not None:
+        raise SystemExit(f"error: {refusal}")
     reports = index_mesh_faces(str(args.store), levels=args.levels,
                                dry_run=args.dry_run, verify=args.verify)
     for r in reports:

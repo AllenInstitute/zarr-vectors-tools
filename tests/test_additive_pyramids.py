@@ -30,7 +30,6 @@ from zarr_vectors.building import (
     open_store,
     read_level_metadata,
     read_root_metadata,
-    stored_object_ids,
 )
 from zarr_vectors.types.meshes import write_mesh
 from zarr_vectors.types.points import read_points, write_points
@@ -46,9 +45,10 @@ from zarr_vectors_tools.multiresolution.strategies.points import (
     build_point_subset_pyramid,
 )
 
-pytestmark = pytest.mark.skipif(
-    not supports_additive(), reason="zarr-vectors-py without additive levels",
-)
+if not supports_additive():
+    pytest.skip("zarr-vectors-py without additive levels", allow_module_level=True)
+
+from zarr_vectors.building import stored_object_ids  # noqa: E402  (additive cores only)
 
 
 def _streamlines(path, n=60, seed=3):

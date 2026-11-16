@@ -2170,6 +2170,71 @@ def _write_cross_level_family(
 # Full pyramid builder
 # ===================================================================
 
+#: The sparsity strategies each built-in coarsener selects by.  The others
+#: lack the per-object signal a strategy ranks by (lengths, representative
+#: points, group labels) and would fail once their level is reached.  A
+#: coarsener registered elsewhere is not listed and not checked.
+COARSENER_SPARSITY_STRATEGIES: dict[str, frozenset[str]] = {
+    "per_object": frozenset({
+        "random", "length", "spatial_coverage", "point_thinning", "group",
+        "attribute",
+    }),
+    "polyline": frozenset({"random", "length", "group", "attribute"}),
+    # "random" becomes "length".
+    "skeleton": frozenset({"random", "length", "attribute"}),
+    "mesh": frozenset({"random", "attribute"}),
+    "per_fragment": frozenset({"random", "attribute"}),
+    # Drops no objects: any --sparsity above 1 is refused by the coarsener.
+    "mesh_decimate": frozenset({"random"}),
+}
+
+
+def check_sparsity_strategy(
+    key: str, strategy: str, factors: Sequence[tuple[float, float]],
+) -> None:
+    """Refuse a sparsity strategy coarsener ``key`` cannot select by, when
+    some level of ``factors`` drops objects.  Needs no store, so a caller
+    can run it before an ingest."""
+    if not any(float(s) > 1.0 for _c, s in factors):
+        return
+    fits = COARSENER_SPARSITY_STRATEGIES.get(key)
+    if fits is not None and strategy not in fits:
+        raise ValueError(
+            f"sparsity_strategy={strategy!r} does not apply to the {key!r} "
+            f"coarsener, which selects by {', '.join(sorted(fits))}"
+        )
+
+
+def _check_strategy_data(
+    store_path: str | Path, key: str, strategy: str, start_level: int,
+) -> None:
+    """Refuse a strategy whose per-object signal the source level lacks."""
+    level = get_resolution_level(open_store(str(store_path), mode="r"), start_level)
+    if strategy == "group":
+        from zarr_vectors_tools.multiresolution.groupings import read_all_groupings
+
+        try:
+            has_groups = bool(list(read_all_groupings(level)))
+        except Exception:  # noqa: BLE001 - a level with no taxonomy at all
+            has_groups = False
+        if not has_groups:
+            raise ValueError(
+                f"sparsity_strategy='group' needs level {start_level} to have "
+                f"object groups, and it has none. Build the taxonomy first "
+                f"(see zarr_vectors_tools.compose.derive_groups), or use a "
+                f"different strategy."
+            )
+    if strategy == "length" and key == "polyline" and start_level == 0:
+        try:
+            read_object_attributes(level, "length")
+        except (KeyError, StoreError, ArrayError):
+            raise ValueError(
+                "sparsity_strategy='length' on a streamline store ranks by "
+                "object_attributes/length, which level 0 does not have "
+                "(convert with --compute-length)"
+            ) from None
+
+
 def check_pyramid_request(
     store_path: str | Path,
     *,
@@ -2199,17 +2264,15 @@ def check_pyramid_request(
             f"levels factors describes), got {start_level}"
         )
     from zarr_vectors_tools.multiresolution.additive import (
+        additive_support_error,
         check_refinement,
         refuse_additive,
-        supports_additive,
     )
 
     check_refinement(refinement)
-    if refinement == "add" and not supports_additive():
-        raise ValueError(
-            "refinement='add' needs a zarr-vectors-py that writes additive "
-            "levels; the installed one does not"
-        )
+    refusal = additive_support_error() if refinement == "add" else None
+    if refusal is not None:
+        raise ValueError(refusal)
     try:
         refuse_additive(store_path, "build_pyramid")
     except ValueError:
@@ -2260,6 +2323,9 @@ def check_pyramid_request(
             f"method={key!r} is not a registered coarsener; "
             f"choose from {coarsener_keys()}"
         )
+    check_sparsity_strategy(key, sparsity_strategy, factors[int(start_level):])
+    if any(float(s) > 1.0 for _c, s in factors[int(start_level):]):
+        _check_strategy_data(store_path, key, sparsity_strategy, int(start_level))
     if sparsity_strategy == "attribute" or sparsity_attribute is not None:
         _sparsity_attribute_values(store_path, sparsity_strategy, sparsity_attribute)
     tolerances = validate_rdp_tolerances(

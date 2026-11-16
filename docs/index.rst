@@ -7,25 +7,23 @@
 
 ----
 
-**zarr-vectors-tools** converts neuroscience geometry — point clouds,
+**zarr-vectors-tools** converts neuroscience geometry (point clouds,
 single-cell tables, tractography, skeletons, meshes, cortical surfaces and
-graphs — into `Zarr Vectors <https://alleninstitute.github.io/zarr_vectors/>`__
+graphs) into `Zarr Vectors <https://alleninstitute.github.io/zarr_vectors/>`__
 stores and back, builds multiresolution pyramids for viewing, and runs
-algorithms over stores too large to load at once. Its command line is
-``zvtools``.
+algorithms over large stores. Its command line is ``zvtools``. It targets
+Zarr Vectors format |zv_version|.
 
-It extends `zarr-vectors-py <https://zarr-vectors-py.readthedocs.io/en/latest>`__,
-which owns the format and its core Python API. Questions about the store layout,
-metadata or the ``zarr_vectors`` API are answered there: see the
-:zvpy:`specification <spec/index.html>` and the :zvpy:`core API reference
-<api/index.html>`. This package targets Zarr Vectors format |zv_version|.
+The format and its core Python API belong to
+`zarr-vectors-py <https://zarr-vectors-py.readthedocs.io/en/latest>`__: see its
+:zvpy:`specification <spec/index.html>` and :zvpy:`API reference
+<api/index.html>`.
 
 .. code-block:: bash
 
    pip install zarr-vectors-tools
    zvtools convert cells.csv cells.zv --chunk-shape 100,100,100 --bin-shape 10,10,10 \
        --coarsen 2,2 --sparsity 1,1 --cross-level-storage none
-   zvtools convert cells.zv cells_out.csv
 
 Where to start
 --------------
@@ -34,19 +32,18 @@ Where to start
    :widths: 30 70
 
    * - :doc:`quickstart`
-     - Convert a table, build a pyramid, inspect it and export it again.
+     - Convert a table, build a pyramid, inspect it and export it.
    * - :doc:`convert/index`
-     - Every input and output format, and the options they share.
+     - Every input and output format.
    * - :doc:`store_layout` and :doc:`pyramids`
-     - The values to choose for chunk and bin shape, compression, sharding and
-       pyramid levels.
+     - Choosing chunk, bin and pyramid values.
    * - :doc:`visualise`
-     - View a store in the BRIDGE Neuroscience Neuroglancer fork.
+     - Viewing a store in Neuroglancer.
    * - :doc:`reference/cli`
      - Every ``zvtools`` subcommand and flag.
 
-The format was originally specified by Forrest Collman at the Allen Institute
-for Brain Science. Source and issues:
+The format was specified by Forrest Collman at the Allen Institute for Brain
+Science. Source and issues:
 `github.com/AllenInstitute/zarr-vectors-tools
 <https://github.com/AllenInstitute/zarr-vectors-tools>`__.
 

@@ -57,8 +57,9 @@ env:
   #   git -C ../zarr-vectors-py log -1 --format=%H
   #   git -C ../zarr-vectors-py branch -r --contains <sha>   # must list a branch
   #
-  # Currently core's main at the merge of core PR #35 (its APEX-hackathon).
-  CORE_SHA: 6794461a5f03e8defe936ca88a5536fce6ea4f49
+  # Currently core's octree branch: this package needs its pyramid and object
+  # work, which core's main does not have yet. Move to main once it merges.
+  CORE_SHA: 4828d3474cc652785ff526563a1141d5f6342c21
   CORE_REPO: https://github.com/AllenInstitute/zarr-vectors-py
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 

@@ -5,7 +5,7 @@ The file is read once and binned into spatial cells; every key of the store
 (``zarr.json``, ``0/vertices/c/1/0/2``, …) is then made when asked.  The
 layout matches, chunk for chunk, the one the browser makes from the same
 file (ngplatform's Zarr Vectors plugin reads local tractograms this way),
-and is a valid format 0.9.2 store (``zarr_vectors.validate(level=3)``).
+and is a valid format 0.9.4 store (``zarr_vectors.validate(level=3)``).
 
 Tractograms (TrackVis ``.trk``, MRtrix ``.tck``, ``.trx``), meshes
 (``.obj`` by object, ``.stl``, ``.ply``, GIFTI ``.gii`` and FreeSurfer
@@ -27,11 +27,32 @@ from __future__ import annotations
 from pathlib import Path
 
 from .meshes import MeshStore, is_mesh_file
-from .points import CellStore, is_point_file, open_point_file, parse_point_table, parse_swc, parse_swc_collection, point_store, skeleton_store
+from .points import (
+    CellStore,
+    is_point_file,
+    open_point_file,
+    parse_point_table,
+    parse_swc,
+    parse_swc_collection,
+    point_store,
+    skeleton_store,
+)
 from .streamlines import StreamlineStore, cell_size, fragment_index
 from .tractograms import open_tck, open_tractogram, open_trk, open_trx
 
-VIRTUAL_SUFFIXES = (".trk", ".tck", ".trx", ".obj", ".stl", ".ply", ".gii", ".swc", ".csv", ".tsv", ".xyz")
+VIRTUAL_SUFFIXES = (
+    ".trk",
+    ".tck",
+    ".trx",
+    ".obj",
+    ".stl",
+    ".ply",
+    ".gii",
+    ".swc",
+    ".csv",
+    ".tsv",
+    ".xyz",
+)
 
 
 def open_virtual(path: str | Path) -> StreamlineStore | MeshStore | CellStore:

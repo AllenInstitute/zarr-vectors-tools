@@ -1,5 +1,5 @@
 """A virtual zarr-vectors streamline store: streamlines binned once into
-spatial cells, every key of a format 0.9.2 store made from that when asked.
+spatial cells, every key of a format 0.9.4 store made from that when asked.
 
 The same layout, byte for byte in its chunks, as the browser's
 (ngplatform's Zarr Vectors plugin, ``src/virtual/streamlines.ts``):
@@ -26,6 +26,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .tractograms import Tractogram
+
+#: The format version every virtual store declares.
+ZV_VERSION = "0.9.4"
 
 MAGIC = 0x5A564647
 MANIFEST_ROWS = 16384
@@ -109,7 +112,9 @@ class Level:
             self.cell_counts_flat.append([])
         return i
 
-    def add_batch(self, first_obj: int, points: np.ndarray, offsets: np.ndarray, values: np.ndarray) -> None:
+    def add_batch(
+        self, first_obj: int, points: np.ndarray, offsets: np.ndarray, values: np.ndarray
+    ) -> None:
         """Bins a batch of streamlines (objects first_obj, first_obj + 1, ...), all at once."""
         offsets = np.asarray(offsets, np.int64)
         counts = np.diff(offsets)
@@ -190,13 +195,17 @@ class Level:
             key_heads = np.flatnonzero(np.r_[True, key_of[by_key][1:] != key_of[by_key][:-1]])
             key_sizes = np.diff(np.append(key_heads, len(by_key)))
             pair_rows = np.stack([row[src] + lens[src] - 1, row[dst]], axis=1)
-            group_of_key = {int(key_of[by_key[h]]): (h, key_sizes[k]) for k, h in enumerate(key_heads)}
+            group_of_key = {
+                int(key_of[by_key[h]]): (h, key_sizes[k]) for k, h in enumerate(key_heads)
+            }
             for u in np.argsort(key_first, kind="stable"):
                 h, size = group_of_key[int(u)]
                 members = by_key[h : h + size]
                 first_pair = members[0]
                 bucket = self.bridges.setdefault(names[int(name_of[first_pair])], {})
-                bucket.setdefault(int(rcell[src[first_pair]]), []).extend(pair_rows[members].ravel().tolist())
+                bucket.setdefault(int(rcell[src[first_pair]]), []).extend(
+                    pair_rows[members].ravel().tolist()
+                )
         # Each object's runs, in walk order: (cell, fragment).
         runs_per_obj = np.bincount(robj, minlength=n)
         self.obj_runs.append(runs_per_obj)
@@ -211,7 +220,10 @@ class Level:
         """Joins what was gathered batch by batch into arrays."""
         for ci in range(len(self.cell_at)):
             self.cell_vertices[ci] = np.concatenate(self.cell_vertices[ci]).astype("<f4")
-            self.cell_values[ci] = [np.concatenate(v).astype("<f4") if v else np.zeros(0, "<f4") for v in self.cell_values[ci]]
+            self.cell_values[ci] = [
+                np.concatenate(v).astype("<f4") if v else np.zeros(0, "<f4")
+                for v in self.cell_values[ci]
+            ]
             self.cell_owners[ci] = np.concatenate(self.cell_owners[ci]).astype("<u4")
             self.cell_counts[ci] = np.concatenate(self.cell_counts[ci]).astype(np.int64)
         self.cell_counts_flat = []
@@ -291,20 +303,34 @@ class StreamlineStore:
         self.count = obj
         lengths = np.concatenate(lengths) if lengths else np.zeros(0)
         points_per = np.concatenate(points_per) if points_per else np.zeros(0)
-        props = np.concatenate(props) if props else np.zeros((0, len(tractogram.property_names)), np.float32)
+        props = (
+            np.concatenate(props)
+            if props
+            else np.zeros((0, len(tractogram.property_names)), np.float32)
+        )
         for level in self.levels:
             level.finish()
         base = self.levels[0]
         self.lo = [float(v) if np.isfinite(v) else 0.0 for v in base.lo]
         self.hi = [float(v) if np.isfinite(v) else 0.0 for v in base.hi]
         props = np.asarray(props, np.float32).reshape(self.count, len(tractogram.property_names))
-        self.columns = {"length": np.asarray(lengths, "<f4"), "n_points": np.asarray(points_per, "<f4")}
+        self.columns = {
+            "length": np.asarray(lengths, "<f4"),
+            "n_points": np.asarray(points_per, "<f4"),
+        }
         for k, name in enumerate(tractogram.property_names):
             self.columns[name] = props[:, k].astype("<f4")
         self.directories = set()
         for level in self.levels:
             p = level.path
-            for a in ["vertices", "vertex_fragments", "fragment_attributes/segment_id", "object_index/manifests", "object_index/object_ids", "links/0"]:
+            for a in [
+                "vertices",
+                "vertex_fragments",
+                "fragment_attributes/segment_id",
+                "object_index/manifests",
+                "object_index/object_ids",
+                "links/0",
+            ]:
                 self._add_dir(f"{p}/{a}")
             for seg in level.bridges:
                 self._add_dir(f"{p}/links/0/{seg}")
@@ -329,7 +355,7 @@ class StreamlineStore:
         names = {"zarr.json"}
         for path in self.directories:
             if path != d and path.startswith(base):
-                names.add(path[len(base):].split("/")[0] + "/")
+                names.add(path[len(base) :].split("/")[0] + "/")
         return sorted(names)
 
     def keys(self):
@@ -337,15 +363,32 @@ class StreamlineStore:
         out = ["zarr.json"]
         for level in self.levels:
             origin, _ = level.grid(self.lo, self.hi)
-            for d in sorted(x for x in self.directories if x.startswith(f"{level.path}/") or x == level.path):
+            for d in sorted(
+                x for x in self.directories if x.startswith(f"{level.path}/") or x == level.path
+            ):
                 out.append(f"{d}/zarr.json")
-            cells = ["/".join(str(level.cell_at[i][k] - origin[k]) for k in range(3)) for i in range(len(level.cell_at))]
-            for array in ["vertices", "vertex_fragments", "fragment_attributes/segment_id"] + [f"vertex_attributes/{v}" for v in level.value_names]:
+            cells = [
+                "/".join(str(level.cell_at[i][k] - origin[k]) for k in range(3))
+                for i in range(len(level.cell_at))
+            ]
+            for array in ["vertices", "vertex_fragments", "fragment_attributes/segment_id"] + [
+                f"vertex_attributes/{v}" for v in level.value_names
+            ]:
                 out += [f"{level.path}/{array}/c/{c}" for c in cells]
             for seg, bucket in level.bridges.items():
-                out += [f"{level.path}/links/0/{seg}/c/" + "/".join(str(level.cell_at[i][k] - origin[k]) for k in range(3)) for i in bucket]
-            out += [f"{level.path}/object_index/manifests/c/{k}" for k in range(-(-self.count // MANIFEST_ROWS))]
-            out += [f"{level.path}/object_index/object_ids/c/{k}" for k in range(-(-self.count // COLUMN_ROWS))]
+                out += [
+                    f"{level.path}/links/0/{seg}/c/"
+                    + "/".join(str(level.cell_at[i][k] - origin[k]) for k in range(3))
+                    for i in bucket
+                ]
+            out += [
+                f"{level.path}/object_index/manifests/c/{k}"
+                for k in range(-(-self.count // MANIFEST_ROWS))
+            ]
+            out += [
+                f"{level.path}/object_index/object_ids/c/{k}"
+                for k in range(-(-self.count // COLUMN_ROWS))
+            ]
         for c in self.columns:
             out += [f"0/object_attributes/{c}/c/{k}" for k in range(-(-self.count // COLUMN_ROWS))]
         return out
@@ -356,7 +399,7 @@ class StreamlineStore:
         if key == "zarr.json":
             return _json(self._root())
         level_path, _, rest = key.partition("/")
-        level = next((l for l in self.levels if l.path == level_path), None)
+        level = next((lv for lv in self.levels if lv.path == level_path), None)
         if level is None:
             return None
         return self._level_key(level, rest)
@@ -364,7 +407,7 @@ class StreamlineStore:
     def _root(self):
         values = self.levels[0].value_names
         zv = {
-            "zv_version": "0.9.2",
+            "zv_version": ZV_VERSION,
             "format_capabilities": ["preserved_object_ids"],
             "chunk_shape": [self.levels[0].chunk] * 3,
             "bounds": [self.lo, self.hi],
@@ -385,13 +428,13 @@ class StreamlineStore:
                         "axes": [{"name": a, "type": "space", "unit": "millimeter"} for a in "xyz"],
                         "datasets": [
                             {
-                                "path": l.path,
+                                "path": lv.path,
                                 "coordinateTransformations": [
                                     {"type": "scale", "scale": [1, 1, 1]},
-                                    {"type": "translation", "translation": [l.chunk / 2] * 3},
+                                    {"type": "translation", "translation": [lv.chunk / 2] * 3},
                                 ],
                             }
-                            for l in self.levels
+                            for lv in self.levels
                         ],
                         "metadata": {"format": "zarr_vectors"},
                     }
@@ -404,12 +447,25 @@ class StreamlineStore:
         nonempty = [".".join(str(v) for v in at) for at in level.cell_at]
 
         def per_cell(attributes):
-            return _json(_per_cell(shape, {"nonempty_chunks": nonempty, "chunk_grid_origin": origin, **attributes}))
+            return _json(
+                _per_cell(
+                    shape, {"nonempty_chunks": nonempty, "chunk_grid_origin": origin, **attributes}
+                )
+            )
 
         if key == "zarr.json":
-            attrs = {"level": int(level.path), "vertex_count": level.vertex_count, "arrays_present": ["vertices", "object_index"]}
+            attrs = {
+                "level": int(level.path),
+                "vertex_count": level.vertex_count,
+                "arrays_present": ["vertices", "object_index"],
+            }
             if level.path == "0":
-                attrs.update(object_sparsity=1, coarsening_method="none", parent_level=None, fragments_tile=True)
+                attrs.update(
+                    object_sparsity=1,
+                    coarsening_method="none",
+                    parent_level=None,
+                    fragments_tile=True,
+                )
             else:
                 attrs.update(
                     chunk_shape=[level.chunk] * 3,
@@ -421,9 +477,20 @@ class StreamlineStore:
                 )
             return _json(_group({"zarr_vectors_level": attrs}))
         fixed = {
-            "vertices/zarr.json": lambda: per_cell({"zv_array": "vertices", "dtype": "float32", "encoding": "raw"}),
-            "vertex_fragments/zarr.json": lambda: per_cell({"zv_array": "vertex_fragments", "encoding": "fragment_index_v1"}),
-            "fragment_attributes/segment_id/zarr.json": lambda: per_cell({"zv_array": "fragment_attribute", "name": "segment_id", "dtype": "uint32", "row_shape": []}),
+            "vertices/zarr.json": lambda: per_cell(
+                {"zv_array": "vertices", "dtype": "float32", "encoding": "raw"}
+            ),
+            "vertex_fragments/zarr.json": lambda: per_cell(
+                {"zv_array": "vertex_fragments", "encoding": "fragment_index_v1"}
+            ),
+            "fragment_attributes/segment_id/zarr.json": lambda: per_cell(
+                {
+                    "zv_array": "fragment_attribute",
+                    "name": "segment_id",
+                    "dtype": "uint32",
+                    "row_shape": [],
+                }
+            ),
             "links/0/zarr.json": lambda: _json(
                 _group(
                     {
@@ -433,18 +500,36 @@ class StreamlineStore:
                         "directed": True,
                         "store": "canonical",
                         "sid_ndim": 3,
-                        "num_links": sum(len(r) // 2 for b in level.bridges.values() for r in b.values()),
-                        "num_physical_records": sum(len(r) // 2 for b in level.bridges.values() for r in b.values()),
+                        "num_links": sum(
+                            len(r) // 2 for b in level.bridges.values() for r in b.values()
+                        ),
+                        "num_physical_records": sum(
+                            len(r) // 2 for b in level.bridges.values() for r in b.values()
+                        ),
                     }
                 )
             ),
             "object_index/zarr.json": lambda: _json(
-                _group({"zv_array": "object_index", "num_objects": self.count, "num_present": level.present, "sid_ndim": 3, "layout": "vlen_manifests_v2", "object_ids_sorted": True})
+                _group(
+                    {
+                        "zv_array": "object_index",
+                        "num_objects": self.count,
+                        "num_present": level.present,
+                        "sid_ndim": 3,
+                        "layout": "vlen_manifests_v2",
+                        "object_ids_sorted": True,
+                    }
+                )
             ),
             "object_index/manifests/zarr.json": lambda: _json(
-                {**_column(self.count, MANIFEST_ROWS, "variable_length_bytes", ""), "codecs": [{"name": "vlen-bytes", "configuration": {}}]}
+                {
+                    **_column(self.count, MANIFEST_ROWS, "variable_length_bytes", ""),
+                    "codecs": [{"name": "vlen-bytes", "configuration": {}}],
+                }
             ),
-            "object_index/object_ids/zarr.json": lambda: _json(_column(self.count, COLUMN_ROWS, "int64", 0)),
+            "object_index/object_ids/zarr.json": lambda: _json(
+                _column(self.count, COLUMN_ROWS, "int64", 0)
+            ),
         }
         if key in fixed:
             return fixed[key]()
@@ -453,13 +538,15 @@ class StreamlineStore:
             if f"{level.path}/{d}" not in self.directories:
                 return None
             if d.startswith("links/0/"):
-                seg = d[len("links/0/"):]
+                seg = d[len("links/0/") :]
                 bucket = level.bridges[seg]
                 return _json(
                     _per_cell(
                         shape,
                         {
-                            "nonempty_chunks": [".".join(str(v) for v in level.cell_at[i]) for i in bucket],
+                            "nonempty_chunks": [
+                                ".".join(str(v) for v in level.cell_at[i]) for i in bucket
+                            ],
                             "chunk_grid_origin": origin,
                             "zv_array": "links",
                             "dtype": "int32",
@@ -471,11 +558,30 @@ class StreamlineStore:
                     )
                 )
             if d.startswith("vertex_attributes/"):
-                return per_cell({"zv_array": "attribute", "name": d.split("/", 1)[1], "dtype": "float32", "row_shape": []})
+                return per_cell(
+                    {
+                        "zv_array": "attribute",
+                        "name": d.split("/", 1)[1],
+                        "dtype": "float32",
+                        "row_shape": [],
+                    }
+                )
             if d.startswith("object_attributes/") and level.path == "0":
                 name = d.split("/", 1)[1]
                 return _json(
-                    _column(self.count, COLUMN_ROWS, "float32", "NaN", {"zv_array": "object_attribute", "name": name, "dtype": "float32", "shape": [self.count], "fill_sentinel_meaning": "absent"})
+                    _column(
+                        self.count,
+                        COLUMN_ROWS,
+                        "float32",
+                        "NaN",
+                        {
+                            "zv_array": "object_attribute",
+                            "name": name,
+                            "dtype": "float32",
+                            "shape": [self.count],
+                            "fill_sentinel_meaning": "absent",
+                        },
+                    )
                 )
             return _json(_group())
         return self._chunk(level, key, origin)
@@ -505,10 +611,12 @@ class StreamlineStore:
                     return None
                 return element(level.cell_values[ci][level.value_names.index(name)].tobytes())
             if array.startswith("links/0/"):
-                rows = level.bridges.get(array[len("links/0/"):], {}).get(ci)
+                rows = level.bridges.get(array[len("links/0/") :], {}).get(ci)
                 if rows is None:
                     return None
-                return element(np.asarray([1, 0], "<i8").tobytes() + np.asarray(rows, "<i4").tobytes())
+                return element(
+                    np.asarray([1, 0], "<i8").tobytes() + np.asarray(rows, "<i4").tobytes()
+                )
             return None
         if len(parts) != 1 or not parts[0].isdigit():
             return None
@@ -517,7 +625,13 @@ class StreamlineStore:
             first = chunk * MANIFEST_ROWS
             if first >= self.count:
                 return None
-            return vlen_chunk([self._manifest(level, o) for o in range(first, min(self.count, first + MANIFEST_ROWS))], MANIFEST_ROWS)
+            return vlen_chunk(
+                [
+                    self._manifest(level, o)
+                    for o in range(first, min(self.count, first + MANIFEST_ROWS))
+                ],
+                MANIFEST_ROWS,
+            )
         first = chunk * COLUMN_ROWS
         if first >= self.count:
             return None

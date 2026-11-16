@@ -221,3 +221,26 @@ Edge list
    :members:
    :undoc-members:
    :show-inheritance:
+
+Running ingests
+---------------
+
+Parallel executors
+~~~~~~~~~~~~~~~~~~
+
+.. automodule:: zarr_vectors_tools.parallel
+   :members:
+   :show-inheritance:
+
+Virtual stores
+~~~~~~~~~~~~~~
+
+A file read as a store on request, without converting it. ``zvtools virtual
+serve`` serves these; see :doc:`../visualise`.
+
+.. automodule:: zarr_vectors_tools.virtual
+   :members:
+   :show-inheritance:
+
+.. automodule:: zarr_vectors_tools.virtual.serve
+   :members:

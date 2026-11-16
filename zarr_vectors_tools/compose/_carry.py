@@ -496,6 +496,32 @@ def stale_levels(dataset: Any) -> list[int]:
     return [int(i) for i in dataset.levels if int(i) != 0]
 
 
+#: Key, inside the tools-owned level block
+#: (:data:`~zarr_vectors_tools.multiresolution.coarsen.TOOLS_LEVEL_ATTRS_KEY`),
+#: that marks a level left out of date by a merge with ``pyramid="keep"``.
+COMPOSE_STALE: str = "compose_stale"
+
+
+def mark_compose_stale(level_group: Any) -> None:
+    """Mark a level out of date: ``{"zarr_vectors_tools": {"compose_stale":
+    true}}`` in its attributes.  Outside the ``zarr_vectors_level`` block,
+    whose fields zarr-vectors-py's ``update_level_metadata`` restricts to
+    the ones it declares."""
+    from zarr_vectors_tools.multiresolution.coarsen import TOOLS_LEVEL_ATTRS_KEY
+
+    block = dict(level_group.attrs.get(TOOLS_LEVEL_ATTRS_KEY) or {})
+    block[COMPOSE_STALE] = True
+    level_group.attrs.update({TOOLS_LEVEL_ATTRS_KEY: block})
+
+
+def is_compose_stale(level_group: Any) -> bool:
+    """Whether a merge with ``pyramid="keep"`` left this level out of date."""
+    from zarr_vectors_tools.multiresolution.coarsen import TOOLS_LEVEL_ATTRS_KEY
+
+    block = level_group.attrs.get(TOOLS_LEVEL_ATTRS_KEY) or {}
+    return bool(isinstance(block, dict) and block.get(COMPOSE_STALE))
+
+
 def handle_pyramid(
     dataset: Any,
     policy: str,
@@ -517,26 +543,19 @@ def handle_pyramid(
         Cheap and honest; a reader gets no pyramid rather than a wrong one.
 
     ``"keep"``
-        Leave them, and stamp ``compose_stale`` on each so a reader can at
-        least find out.  For when the merge is one of several and the
-        rebuild is deferred to the end.
+        Leave them, and mark each stale (:func:`mark_compose_stale`) so a
+        reader can at least find out.  For when the merge is one of several
+        and the rebuild is deferred to the end.
     """
     from zarr_vectors.building import (
         remove_resolution_level,
-        update_level_metadata,
         write_multiscale_metadata,
     )
 
     levels = stale_levels(dataset)
     if policy == "keep":
         for index in levels:
-            try:
-                # The level group, not the root plus an index: the root
-                # form is a TypeError, and a swallowed TypeError here
-                # means the "stale" marker never lands.
-                update_level_metadata(dataset.level(index).store, compose_stale=True)
-            except Exception:  # noqa: BLE001
-                pass
+            mark_compose_stale(dataset.level(index).store)
         return {"pyramid": "keep", "stale_levels": levels}
 
     if policy not in ("rebuild", "drop"):

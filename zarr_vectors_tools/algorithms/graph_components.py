@@ -10,7 +10,7 @@ links its links convention implies rather than stores.
 
 ``write_back=True`` persists the component labels via
 :func:`~zarr_vectors_tools._attributes.write_vertex_attribute` under
-``attributes/component_label/``.
+``<level>/vertex_attributes/component_label``.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def compute_connected_components(
         store_path: Path to a zarr-vectors graph (or skeleton) store.
         level: Resolution level to operate on.
         write_back: When True, persist the labels under
-            ``attributes/component_label/`` via
+            ``vertex_attributes/component_label`` via
             :func:`~zarr_vectors_tools._attributes.write_vertex_attribute`.
 
     Returns:

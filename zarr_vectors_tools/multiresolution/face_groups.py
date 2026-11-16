@@ -35,7 +35,22 @@ except ImportError:  # zarr-vectors-py without fragment_link_groups
     _stamp_fragment_link_groups = None
 
 #: Whether the installed zarr-vectors-py can stamp ``fragment_link_groups``.
-HAS_FRAGMENT_LINK_GROUPS = _stamp_fragment_link_groups is not None
+HAS_FRAGMENT_LINK_GROUPS = (
+    _stamp_fragment_link_groups is not None
+    and _index_fragment_link_groups is not None
+)
+
+
+def face_groups_support_error() -> str | None:
+    """Why :func:`index_mesh_faces` cannot run here, or ``None`` when it can."""
+    if HAS_FRAGMENT_LINK_GROUPS:
+        return None
+    return (
+        "indexing faces per object needs zarr-vectors-py support for "
+        "fragment_link_groups that the installed version lacks: "
+        "zarr_vectors.building.index_fragment_link_groups, "
+        "zarr_vectors.building.stamp_fragment_link_groups"
+    )
 
 
 def split_faces_by_fragment(
@@ -81,11 +96,9 @@ def index_mesh_faces(
     stamp them -- :func:`zarr_vectors.building.index_fragment_link_groups`,
     which rewrites as little as it can (usually just the ``link_fragments``
     sidecar) and leaves alone a level where a face joins two fragments."""
-    if _index_fragment_link_groups is None:
-        raise RuntimeError(
-            "the installed zarr-vectors-py has no fragment_link_groups "
-            "support (zarr_vectors.building.index_fragment_link_groups)"
-        )
+    refusal = face_groups_support_error()
+    if refusal is not None:
+        raise RuntimeError(refusal)
     return _index_fragment_link_groups(
         str(store_path), levels, dry_run=dry_run, verify=verify,
     )

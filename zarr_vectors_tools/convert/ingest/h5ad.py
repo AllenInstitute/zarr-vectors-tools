@@ -65,9 +65,10 @@ _AUTO_SPATIAL_KEYS = (
     "X_pca",
 )
 
-# Inlining the obs index costs ~20 bytes/cell of JSON in the store's
-# ``.zattrs``.  Past this many cells the barcodes are dropped rather than
-# bloating the metadata; the row-index attribute still restores order.
+# Inlining the obs index costs ~20 bytes/cell of JSON in the h5ad header's
+# ``zarr.json`` attributes.  Past this many cells the barcodes are dropped
+# rather than bloating the metadata; the row-index attribute still restores
+# order.
 DEFAULT_MAX_OBS_INDEX = 200_000
 
 

@@ -1,8 +1,10 @@
 Headers
 =======
 
-The :class:`HeaderRegistry` plus per-format header dataclasses for
-round-trip metadata preservation.
+``zarr_vectors_tools.headers``: the source format's metadata that the store's
+arrays cannot hold, kept under ``headers/<format>/`` so that an export can
+write it back. :class:`~zarr_vectors_tools.headers.registry.HeaderRegistry`
+reads and writes it as one dataclass per format.
 
 Registry
 --------
