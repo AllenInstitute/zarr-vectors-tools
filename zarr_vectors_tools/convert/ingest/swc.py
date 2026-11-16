@@ -124,6 +124,25 @@ def ingest_swc(
     if roots.size == 0:
         raise IngestError(f"SWC file has no root (parent -1): {input_path}")
     object_ids = _tree_ids(parent_idx, roots) if roots.size > 1 else None
+    # Real per-object cable length (sum of edge Euclidean distances), not a
+    # fragment-count proxy -- see open-items.md item 11: sparsity_strategy=
+    # "length" silently ranked skeletons by fragment count wherever a store
+    # didn't record this, invisible for a year because nothing raised.
+    # `owner` always exists locally even when `object_ids` itself is left
+    # `None` for write_graph (single-tree files default to one object
+    # there), since the scatter-sum below needs a grouping key regardless.
+    owner = object_ids if object_ids is not None else np.zeros(n_nodes, dtype=np.int64)
+    num_objects = int(owner.max()) + 1 if n_nodes else 0
+    cable_length = np.zeros(num_objects, dtype=np.float32)
+    if len(edges_arr):
+        diffs = (
+            positions[edges_arr[:, 0]].astype(np.float64)
+            - positions[edges_arr[:, 1]].astype(np.float64)
+        )
+        edge_len = np.sqrt((diffs * diffs).sum(axis=1))
+        cable_length = np.bincount(
+            owner[edges_arr[:, 0]], weights=edge_len, minlength=num_objects,
+        ).astype(np.float32)
 
     if compute_topological_depth or compute_strahler or compute_node_kind:
         from zarr_vectors_tools.convert.ingest._tree_enrichments import compute_tree_metrics
@@ -146,6 +165,7 @@ def ingest_swc(
         bin_shape=bin_shape,
         kind="skeleton",
         vertex_attributes=node_attributes,
+        object_attributes={"length": cable_length},
         object_ids=object_ids,
         dtype=dtype,
     )

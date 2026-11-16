@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from zarr_vectors_tools.multiresolution.object_selection import apply_sparsity
+from zarr_vectors_tools.multiresolution.object_selection import (
+    apply_sparsity,
+    select_by_length,
+)
 
 
 class TestAliveMask:
@@ -121,3 +124,50 @@ class TestAliveMask:
         b = apply_sparsity(n, 0.25, "random", seed=1, relative_to="alive")
         assert len(a) == len(b) == 250
         assert np.array_equal(a, b)
+
+
+class TestLengthStrategy:
+    """`select_by_length` itself had no direct unit test anywhere before
+    this — every existing coverage of "length" only exercised it
+    incidentally, through `apply_sparsity`'s `alive_mask`/`relative_to`
+    plumbing (see `TestAliveMask` above). See open-items.md item 11: a
+    caller (`coarsen_skeleton_level`) passed FRAGMENT COUNT as `lengths` for
+    over a year, and nothing here would have caught it, because nothing
+    ever checked what `select_by_length` actually does with its input.
+    """
+
+    def test_keeps_the_top_n_by_whatever_is_in_lengths(self) -> None:
+        # The function has no way to know what its input array MEANS -- it
+        # only ranks it. This is the literal contract: top target_count by
+        # value, nothing more.
+        lengths = np.array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0])
+        kept = select_by_length(lengths, target_count=3)
+        assert set(kept.tolist()) == {5, 7, 4}  # values 9, 6, 5
+
+    def test_a_shorter_object_can_lose_to_a_longer_one_even_amid_noise(self) -> None:
+        # The property that was actually violated: given genuine lengths,
+        # a strictly SHORTER object must never be kept over a strictly
+        # LONGER one when there is room for only one of them.
+        lengths = np.array([10.0, 50.0, 20.0])
+        kept = select_by_length(lengths, target_count=1)
+        assert kept.tolist() == [1]  # index of the 50.0, not 10.0 or 20.0
+
+    def test_keeps_everything_when_target_meets_or_exceeds_the_population(self) -> None:
+        lengths = np.array([1.0, 2.0, 3.0])
+        kept = select_by_length(lengths, target_count=3)
+        assert set(kept.tolist()) == {0, 1, 2}
+
+    def test_apply_sparsity_length_forwards_the_real_lengths_array(self) -> None:
+        # End-to-end through the dispatcher: the object apply_sparsity keeps
+        # must be the same one select_by_length would pick directly on the
+        # same array -- no silent substitution in between.
+        n = 10
+        lengths = np.array([5.0, 1.0, 9.0, 2.0, 7.0, 3.0, 8.0, 4.0, 6.0, 0.5])
+        kept = apply_sparsity(n, 0.3, "length", lengths=lengths)
+        direct = select_by_length(lengths, target_count=3)
+        assert set(kept.tolist()) == set(direct.tolist()) == {2, 6, 4}  # 9, 8, 7
+
+    def test_result_is_sorted_ascending(self) -> None:
+        lengths = np.array([5.0, 9.0, 1.0, 7.0])
+        kept = select_by_length(lengths, target_count=2)
+        assert list(kept) == sorted(kept)
