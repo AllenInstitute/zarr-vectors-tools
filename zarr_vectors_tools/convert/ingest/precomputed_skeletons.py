@@ -565,12 +565,14 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
                 continue
             coord = np.rint(pos).astype(np.int64)
             on_face = np.any(np.mod(coord - off, cs) == 0, axis=1)
+            edges = np.asarray(p.get("edges", ()), dtype=np.int64).reshape(-1, 2)
+            parented = set(edges[:, 0].tolist())  # edges are [child, parent]
             for vidx in np.flatnonzero(on_face):
                 tag = ("b", pi, int(vidx))
                 p.setdefault("anchors", {})[tag] = int(vidx)
                 tag_meta.append(
                     (int(p["segment_id"]),
-                     tuple(int(c) for c in coord[vidx]), tag)
+                     tuple(int(c) for c in coord[vidx]), tag, int(vidx) in parented)
                 )
         # record_presence=False: _l0_extract_write is dispatched one task per
         # chunk across worker PROCESSES.  ``nonempty_chunks`` is array-wide, so
@@ -581,10 +583,11 @@ def _l0_extract_write(payload: dict, shared: dict | None = None) -> dict:
             lg, cc, pieces, attr_dtypes=attr_dtypes, record_presence=False,
         )
         records.extend(recs)
-        for seg, coordt, tag in tag_meta:
+        for seg, coordt, tag, has_parent in tag_meta:
             loc = alocs.get(tag)
             if loc is not None:
-                boundary.append((seg, coordt, tuple(int(c) for c in cc), int(loc[1])))
+                boundary.append(
+                    (seg, coordt, tuple(int(c) for c in cc), int(loc[1]), has_parent))
     return {
         "records": records,
         "boundary": boundary,
@@ -623,6 +626,11 @@ def _match_coincident_links(boundary: list) -> list:
     small gathered boundary records (post-write chunk-local indices), so no
     bulk vertex data is held.
 
+    A link is ``[child, parent]``: the reader re-parents its first end.  So
+    each group's parent is a copy that has a parent in its own chunk, and only
+    copies that have none there become its children -- re-parenting a copy
+    that already has one would cut it from its own chunk's tree.
+
     Returns ``[((ccA, viA), (ccB, viB)), ...]`` for
     :func:`write_skeleton_cross_chunk_links`.
     """
@@ -643,13 +651,14 @@ def _match_coincident_links(boundary: list) -> list:
             continue
         per_chunk: dict = {}
         for m in order[s:e]:
-            ccloc = (boundary[m][2], boundary[m][3])
-            per_chunk.setdefault(ccloc[0], ccloc)
+            per_chunk.setdefault(boundary[m][2], (boundary[m][2], boundary[m][3], boundary[m][4]))
         reps = list(per_chunk.values())
         if len(reps) < 2:
             continue
-        for k in range(1, len(reps)):
-            links.append((reps[0], reps[k]))
+        parent = next((r for r in reps if r[2]), reps[0])
+        for r in reps:
+            if r is not parent and not r[2]:
+                links.append(((r[0], r[1]), (parent[0], parent[1])))
     return links
 
 

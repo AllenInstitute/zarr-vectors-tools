@@ -13,5 +13,6 @@ part, see the narrative pages: :doc:`../convert/index`,
    compose
    multiresolution
    algorithms
+   filtering
    headers
    cli

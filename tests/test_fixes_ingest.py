@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import struct
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -495,18 +496,18 @@ def _write_inputs(root: Path) -> dict[str, list[str]]:
                          + v[c].tobytes() + b"\0\0")
     out["stl"] = [str(root / "ball.stl"), "--chunk-shape", "50,50,50"]
 
-    # A legacy precomputed mesh layer of two segments.
-    layer = root / "mesh"
-    layer.mkdir()
-    (layer / "info").write_text(json.dumps({"@type": "neuroglancer_legacy_mesh"}))
-    for seg, centre in ((7, 60.0), (9, 200.0)):
-        verts = (v - 60 + centre).astype("<f4")
-        (layer / f"{seg}:0:0").write_bytes(
-            struct.pack("<I", len(verts)) + verts.tobytes() + f.astype("<u4").tobytes())
-        (layer / f"{seg}:0").write_text(json.dumps({"fragments": [f"{seg}:0:0"]}))
-    out["precomputed_mesh"] = [str(layer), "--chunk-shape", "50,50,50"]
-
-    import sys
+    # A legacy precomputed mesh layer of two segments.  Its file names hold
+    # ':', which Windows does not allow, so there is no such layer there.
+    if sys.platform != "win32":
+        layer = root / "mesh"
+        layer.mkdir()
+        (layer / "info").write_text(json.dumps({"@type": "neuroglancer_legacy_mesh"}))
+        for seg, centre in ((7, 60.0), (9, 200.0)):
+            verts = (v - 60 + centre).astype("<f4")
+            (layer / f"{seg}:0:0").write_bytes(
+                struct.pack("<I", len(verts)) + verts.tobytes() + f.astype("<u4").tobytes())
+            (layer / f"{seg}:0").write_text(json.dumps({"fragments": [f"{seg}:0:0"]}))
+        out["precomputed_mesh"] = [str(layer), "--chunk-shape", "50,50,50"]
 
     sys.path.insert(0, str(Path(__file__).parent))
     from _surface_fixtures import write_freesurfer_subject, write_gifti_subject
@@ -533,6 +534,8 @@ class TestObjectColumns:
         self, inputs: dict[str, list[str]], tmp_path: Path, name: str,
     ) -> None:
         if name == "precomputed_mesh":
+            if sys.platform == "win32":
+                pytest.skip("'<id>:0:0' is not a Windows file name")
             pytest.importorskip("cloudvolume")
         args = inputs[name]
         store = tmp_path / f"{name}.zv"
@@ -641,10 +644,12 @@ def test_skeleton_levels_record_their_scale_and_stride(
     assert [tuple(read_level_metadata(root, lv).bin_ratio) for lv in (1, 2)] == [
         (4, 4, 4), (16, 16, 16)]
     assert [read_coarsening_record(root, lv)["stride"] for lv in (1, 2)] == [4, 2]
+    # NGFF carries level 0's transform on every level: coarse vertices are
+    # stored in level-0 coordinates, and the ratio above is the level's scale.
     meta = json.loads((store / "zarr.json").read_text())["attributes"]
     scales = [d["coordinateTransformations"][0]["scale"]
               for d in meta["multiscales"][0]["datasets"]]
-    assert scales == [[1.0] * 3, [4.0] * 3, [16.0] * 3]
+    assert scales == [[1.0] * 3] * 3
 
     def snapshot() -> list[np.ndarray]:
         out = []

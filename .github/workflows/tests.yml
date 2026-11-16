@@ -4,7 +4,7 @@ name: Tests
 # pyproject.toml):
 #
 #   lint + fast tier   every push to main / APEX-hackathon, and every PR
-#   full tier          nightly, and on demand (Actions tab -> Run workflow)
+#   full tier          weekly, and on demand (Actions tab -> Run workflow)
 #
 # Runners are shared with zarr-vectors-py's own suite, so this workflow keeps
 # its footprint small: push runs only on the long-lived branches (a feature
@@ -12,7 +12,7 @@ name: Tests
 # a newer push cancels the run it supersedes.
 #
 # GitHub only fires `schedule` from the default branch, and only offers
-# "Run workflow" once this file is on it.  So the nightly tests main; to run
+# "Run workflow" once this file is on it.  So the weekly run tests main; to run
 # the full tier on another branch, dispatch it with that ref:
 #
 #   gh workflow run tests.yml --ref APEX-hackathon -f tier=full
@@ -24,7 +24,7 @@ on:
   pull_request:
     paths-ignore: ["docs/**", "examples/**", "benchmarks/**", "assets/**", "**/*.md", ".readthedocs.yaml"]
   schedule:
-    - cron: "17 7 * * *"   # 07:17 UTC; off the hour, when scheduled load peaks
+    - cron: "17 7 * * 1"   # Mondays 07:17 UTC; off the hour, when scheduled load peaks
   workflow_dispatch:
     inputs:
       tier:
@@ -36,7 +36,7 @@ on:
 permissions:
   contents: read
 
-# The event is part of the group so a push to main cannot cancel the nightly
+# The event is part of the group so a push to main cannot cancel the weekly run
 # that happens to be running on main.  Only push/PR runs cancel each other.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -57,8 +57,12 @@ env:
   #   git -C ../zarr-vectors-py log -1 --format=%H
   #   git -C ../zarr-vectors-py branch -r --contains <sha>   # must list a branch
   #
-  # Currently core's main at the merge of core PR #35 (its APEX-hackathon).
-  CORE_SHA: 6794461a5f03e8defe936ca88a5536fce6ea4f49
+  # Currently core's perf/speedups-on-octree branch (the top of the
+  # gpu-backend -> octree -> speedups stack): this package needs its pyramid,
+  # object and octree work and follows its behaviour (contiguous level
+  # removal, NGFF transforms, [child, parent] skeleton links), which core's
+  # main does not have yet. Move to main once the stack merges.
+  CORE_SHA: 0d92e7cbeb929332303ee22bb2f3beb59422602a
   CORE_REPO: https://github.com/AllenInstitute/zarr-vectors-py
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 

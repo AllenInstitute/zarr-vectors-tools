@@ -204,3 +204,43 @@ def test_a_neuron_crossing_a_chunk_boundary_is_one_tree(tmp_path: Path) -> None:
     assert summary["root_count"] == 1
     assert sum(1 for row in rows if row["parent"] == -1) == 1
     assert len(rows) == 7
+
+
+@pytest.mark.parametrize("per_object", [False, True], ids=["level", "objects"])
+def test_export_writes_every_parent_before_its_child(tmp_path: Path, per_object: bool) -> None:
+    """Level order is chunk-major, so a node can be stored before its parent;
+    the export numbers each tree from its root, and loses nothing."""
+    from zarr_vectors_tools.convert.ingest.swc import ingest_swc
+
+    rng = np.random.default_rng(3)
+    lines = ["# synthetic"]
+    for i in range(30):
+        parent = -1 if i == 0 else (i if i != 20 else 5)  # a branch at node 5
+        x, y, z = rng.uniform(0, 200, 3)
+        lines.append(f"{i + 1} {1 if i == 0 else 3} {x:.2f} {y:.2f} {z:.2f} {0.5 + i / 10:.2f} {parent}")
+    source = tmp_path / "neuron.swc"
+    source.write_text("\n".join(lines) + "\n")
+    store = tmp_path / "n.zv"
+    ingest_swc(source, store, (50.0, 50.0, 50.0))
+    if per_object:
+        export_swc(str(store), str(tmp_path / "objs"), object_ids=[0])
+        out = tmp_path / "objs" / "1.swc"
+    else:
+        out = tmp_path / "out.swc"
+        export_swc(str(store), str(out))
+
+    rows = _read_swc(out)
+    assert [r["id"] for r in rows] == list(range(1, len(rows) + 1))
+    assert rows[0]["parent"] == -1
+    assert all(r["parent"] == -1 or 1 <= r["parent"] < r["id"] for r in rows)
+
+    def described(rows):
+        by_id = {r["id"]: r for r in rows}
+        return sorted(
+            (tuple(round(v, 2) for v in r["xyz"]), r["type"], round(r["radius"], 2),
+             None if r["parent"] == -1 else tuple(round(v, 2) for v in by_id[r["parent"]]["xyz"]))
+            for r in rows
+        )
+
+    assert described(rows) == described(_read_swc(source))
+    assert out.read_text().startswith("# synthetic\n")

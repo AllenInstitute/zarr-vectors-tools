@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -216,6 +217,25 @@ def check_pyramid_method(
     return method
 
 
+def check_executor(workers: int | None, backend: str = "process") -> None:
+    """Refuse a parallel backend that is not installed.
+
+    Run before anything is removed or written: :func:`executor_ctx` only
+    finds out when it starts the executor, after the old store or levels are
+    gone.
+    """
+    if not (workers and workers > 1 and backend == "dask"):
+        return
+    try:
+        import dask.distributed  # noqa: F401
+    except ImportError:
+        raise SystemExit(
+            "error: --workers-backend dask needs dask.distributed, which is not "
+            "installed; install it with: pip install "
+            "'zarr-vectors-tools[parallel]', or use --workers-backend process"
+        ) from None
+
+
 @contextmanager
 def executor_ctx(workers: int | None, backend: str = "process"):
     """Yield a parallel executor when ``workers > 1``, else ``None``.
@@ -250,13 +270,21 @@ def looks_like_store(path: str | Path) -> bool:
     What decides the DIRECTION of ``zvtools convert``: a store on the input
     side means the user is exporting out of it.  The test is the same one
     ``--overwrite`` uses to decide whether a directory is safe to replace --
-    a directory carrying Zarr's own metadata file -- so the two cannot
-    disagree about what a store is.
+    a directory whose root ``zarr.json`` (Zarr v3 group metadata) carries
+    ``zarr_vectors`` attributes -- so the two cannot disagree about what a
+    store is.
     """
     p = Path(path)
     if not p.is_dir():
         return False
-    return (p / "zarr.json").exists() or (p / ".zattrs").exists()
+    root = p / "zarr.json"
+    if not root.is_file():
+        return False
+    try:
+        attributes = json.loads(root.read_text()).get("attributes", {})
+    except (OSError, ValueError, AttributeError):  # unreadable: not a store
+        return False
+    return isinstance(attributes, dict) and "zarr_vectors" in attributes
 
 
 @dataclass(frozen=True)
@@ -372,10 +400,9 @@ EXPORT_REGISTRY: dict[str, ExportFmt] = {
             "object_attribute_names", "unit",
         }),
     ),
-    # No object_ids: core's read_mesh cannot select objects yet.
     "obj": ExportFmt(
         "obj", (".obj",), "obj", "export_obj", None, "mesh",
-        _COMMON | {"bbox"},
+        _COMMON | {"bbox", "object_ids"},
     ),
     "ply": ExportFmt(
         "ply", (".ply",), "ply", "export_ply", "ply", "points",

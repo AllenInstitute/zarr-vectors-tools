@@ -197,7 +197,9 @@ class TestRechunkByGroup:
         from zarr_vectors.building import list_chunk_keys, open_store, read_chunk_vertices
         from zarr_vectors.rechunk import RechunkSpec, rechunk
 
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+        # Plain polylines: rechunk refuses fragment attributes it cannot carry,
+        # and these tests need no segment_id.
+        from zarr_vectors.types.polylines import write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 60)
@@ -235,7 +237,9 @@ class TestRechunkByAttribute:
         from zarr_vectors.building import list_chunk_keys, open_store
         from zarr_vectors.rechunk import RechunkSpec, rechunk
 
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+        # Plain polylines: rechunk refuses fragment attributes it cannot carry,
+        # and these tests need no segment_id.
+        from zarr_vectors.types.polylines import write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 80)
@@ -264,7 +268,9 @@ class TestRechunkViaLazy:
     def test_lazy_rechunk(self, tmp_path: Path) -> None:
         from zarr_vectors.lazy import open_zv
 
-        from tests._source_helpers import write_polylines_with_segment_id as write_polylines
+        # Plain polylines: rechunk refuses fragment attributes it cannot carry,
+        # and these tests need no segment_id.
+        from zarr_vectors.types.polylines import write_polylines
 
         rng = np.random.default_rng(42)
         polys = _make_streamlines(rng, 40)

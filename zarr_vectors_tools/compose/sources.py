@@ -365,6 +365,13 @@ class StoreSource(Source):
         self._dataset = store if hasattr(store, "level") else zv.open_dataset(str(store))
         self._level = self._dataset.level(int(level))
         self._level_index = int(level)
+        # An additive level's complete content is spread over its chain:
+        # each object is stored at exactly one of these levels.
+        try:
+            chain = list(getattr(self._level, "chain", (int(level),)))
+        except Exception:  # noqa: BLE001 - a store without the field
+            chain = [int(level)]
+        self._levels = [self._level] + [self._dataset.level(lv) for lv in chain[1:]]
         self._transform = as_transform(transform)
         self._want_vertex_attrs = bool(with_vertex_attributes)
         self._want_object_attrs = bool(with_object_attributes)
@@ -400,9 +407,10 @@ class StoreSource(Source):
             if self._explicit_objects is not None:
                 self._ids = np.sort(np.unique(self._explicit_objects))
             else:
-                self._ids = np.asarray(
-                    self._level.objects.ids(present=True), dtype=np.int64
-                )
+                self._ids = np.unique(np.concatenate([
+                    np.asarray(lvl.objects.ids(present=True), dtype=np.int64)
+                    for lvl in self._levels
+                ]))
         return self._ids
 
     @property
@@ -448,7 +456,7 @@ class StoreSource(Source):
             ndim=int(self._dataset.ndim),
             bounds=bounds,
             object_count=int(len(ids)),
-            vertex_count=int(self._level.vertex_count) or None,
+            vertex_count=int(sum(lvl.vertex_count for lvl in self._levels)) or None,
             vertex_attributes=(
                 self._level.attribute_names("vertex") if self._want_vertex_attrs else ()
             ),
@@ -507,7 +515,7 @@ class StoreSource(Source):
         return out
 
     def _batch_sizes(
-        self, order: list[int], manifests: dict[int, Any],
+        self, order: list[int], manifests: dict[int, Any], group: Any = None,
     ) -> list[int]:
         """Per-object VERTEX counts, for the ``max_vertices`` batch budget.
 
@@ -528,7 +536,10 @@ class StoreSource(Source):
         fragments = [len(manifests[oid]) for oid in order]
         try:
             counts = np.asarray(
-                read_object_attributes(self._level_group(), "vertex_count"),
+                read_object_attributes(
+                    group if group is not None else self._level_group(),
+                    "vertex_count",
+                ),
             ).ravel()
             if len(counts) > max(order, default=-1):
                 return [max(1, int(counts[oid])) for oid in order]
@@ -555,32 +566,40 @@ class StoreSource(Source):
             return
         obj_columns = self._object_attribute_columns()
         attr_names = tuple(self.info.vertex_attributes)
-        group = self._level_group()
+        remaining = [int(i) for i in ids]
 
-        # Reading the manifests for the whole id set up front is O(objects)
-        # small integers -- cheaper than a second pass.
-        manifests = read_object_manifests(group, ids=[int(i) for i in ids])
-        order = [int(i) for i in ids if manifests.get(int(i))]
-        sizes = self._batch_sizes(order, manifests)
+        # One level at a time: on an additive level each object is stored
+        # at exactly one level of the chain, and is read from that one.
+        for level in self._levels:
+            if not remaining:
+                break
+            group = level.store
+            # Reading the manifests for the whole id set up front is
+            # O(objects) small integers -- cheaper than a second pass.
+            manifests = read_object_manifests(group, ids=remaining)
+            order = [i for i in remaining if manifests.get(i)]
+            here = set(order)
+            remaining = [i for i in remaining if i not in here]
+            sizes = self._batch_sizes(order, manifests, group)
 
-        for start, stop in _batched(sizes, max_objects, max_vertices):
-            window = order[start:stop]
-            parts, kept = self._gather(group, window, manifests)
-            if not parts:
-                continue
-            batch_ids = np.asarray(kept, dtype=np.int64)
-            yield ObjectBatch(
-                parts=parts,
-                object_ids=batch_ids,
-                object_attributes={
-                    name: np.asarray(col)[batch_ids]
-                    for name, col in obj_columns.items()
-                    if len(col) > int(batch_ids.max(initial=-1))
-                },
-                vertex_attributes=self._gather_attributes(
-                    group, kept, manifests, attr_names, parts,
-                ),
-            )
+            for start, stop in _batched(sizes, max_objects, max_vertices):
+                window = order[start:stop]
+                parts, kept = self._gather(group, window, manifests)
+                if not parts:
+                    continue
+                batch_ids = np.asarray(kept, dtype=np.int64)
+                yield ObjectBatch(
+                    parts=parts,
+                    object_ids=batch_ids,
+                    object_attributes={
+                        name: np.asarray(col)[batch_ids]
+                        for name, col in obj_columns.items()
+                        if len(col) > int(batch_ids.max(initial=-1))
+                    },
+                    vertex_attributes=self._gather_attributes(
+                        group, kept, manifests, attr_names, parts,
+                    ),
+                )
 
     def _gather(
         self, group: Any, window: Sequence[int], manifests: Mapping[int, Any],

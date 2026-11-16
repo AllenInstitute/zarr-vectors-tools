@@ -14,6 +14,7 @@ the CLI to a Python script for its last step.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from ._args import (
     EXPORT_REGISTRY,
     FORMAT_REGISTRY,
     build_factors,
+    check_executor,
     check_pyramid_method,
     check_rdp_tolerances,
     executor_ctx,
@@ -37,9 +39,10 @@ from ._args import (
 def _maybe_overwrite(output, overwrite: bool, *, resume: bool = False) -> None:
     """Remove an existing output store when ``--overwrite`` is set.
 
-    Only deletes a directory that looks like a zarr store (has ``zarr.json`` or
-    ``.zattrs``) — including a partial store from a failed ingest, whose root is
-    created before level-0 data — so an unrelated directory is never wiped.
+    Only deletes a directory that is a zarr-vectors store (its root
+    ``zarr.json`` carries ``zarr_vectors`` attributes) — including a partial
+    store from a failed ingest, whose root is created before level-0 data — so
+    an unrelated directory, or another Zarr store, is never wiped.
     Without ``--overwrite`` an existing output is refused: the ingesters write
     into it, and the old chunks they do not touch would survive alongside the
     new data.  ``resume`` is the exception, since continuing into the store an
@@ -56,8 +59,7 @@ def _maybe_overwrite(output, overwrite: bool, *, resume: bool = False) -> None:
             f"or choose another OUTPUT"
         )
     if p.is_dir():
-        looks_like_store = (p / "zarr.json").exists() or (p / ".zattrs").exists()
-        if not looks_like_store:
+        if not looks_like_store(p):
             raise SystemExit(
                 f"error: refusing to overwrite {output}: not a zarr-vectors store"
             )
@@ -106,8 +108,16 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
         extra["sparsity_attribute"] = args.sparsity_attribute
     if getattr(args, "method", None) is not None:
         extra["method"] = args.method
+    refinement = getattr(args, "refinement", "replace") or "replace"
+    if refinement != "replace":
+        extra["refinement"] = refinement
 
-    with executor_ctx(args.workers, args.workers_backend) as ex:
+    from zarr_vectors_tools.multiresolution.additive import (
+        level_zero_notice,
+        warnings_as_banner,
+    )
+
+    with executor_ctx(args.workers, args.workers_backend) as ex, warnings_as_banner():
         result = build_pyramid(
             str(args.output),
             factors=factors,
@@ -119,6 +129,29 @@ def _build_pyramid_post(args, factors, chunk_scale) -> None:
             **extra,
         )
     print(f"  pyramid: {result.get('levels_created', '?')} coarser level(s) built")
+    if refinement == "add":
+        print(level_zero_notice(args.output), file=sys.stderr, flush=True)
+
+
+def _make_inline_pyramid_additive(args, factors, coarsener: str, geometry: str) -> None:
+    """``--refinement add`` for an ingest that built its pyramid itself
+    (TRK, precomputed skeletons): convert it once it is written."""
+    if (getattr(args, "refinement", "replace") or "replace") != "add" or not factors:
+        return
+    from zarr_vectors_tools.multiresolution.additive import (
+        additive_concerns,
+        level_zero_notice,
+        make_pyramid_additive,
+        warnings_as_banner,
+    )
+
+    concerns = additive_concerns(
+        geometry_types=[geometry], coarsener=coarsener, factors=factors,
+        coarsen_mode=args.coarsen_mode, rdp_tolerances=args.rdp_tolerance,
+    )
+    with warnings_as_banner():
+        make_pyramid_additive(str(args.output), concerns=concerns)
+    print(level_zero_notice(args.output), file=sys.stderr, flush=True)
 
 
 def _check_method(args, fmt, factors) -> str | None:
@@ -150,6 +183,45 @@ def _check_method(args, fmt, factors) -> str | None:
             f"simplifies by distance; --method {method} has no tolerance"
         )
     return method
+
+
+def _check_sparsity_strategy(args, fmt, factors) -> None:
+    """Refuse a ``--sparsity-strategy`` the pyramid's coarsener cannot
+    select by, before the ingest rather than once the pyramid is reached."""
+    from zarr_vectors_tools.multiresolution.coarsen import check_sparsity_strategy
+
+    if factors is None:
+        return
+    key = args.method
+    if key is None:
+        geometry = fmt.geometry
+        if fmt.name == "precomputed":
+            geometry = _precomputed_kind(args)
+        key = {
+            "streamlines": "polyline", "skeleton": "skeleton",
+            "mesh": "mesh", "surface": "mesh",
+        }.get(geometry, "per_object")
+    try:
+        check_sparsity_strategy(key, args.sparsity_strategy, factors)
+    except ValueError as exc:
+        raise SystemExit(f"error: --sparsity-strategy: {exc}") from None
+
+
+def _check_refinement(args, factors) -> None:
+    """``--refinement add`` is refused before the ingest where it cannot run:
+    without pyramid levels, or without zarr-vectors-py support."""
+    if (getattr(args, "refinement", "replace") or "replace") != "add":
+        return
+    if factors is None:
+        raise SystemExit(
+            "error: --refinement add makes pyramid levels additive; pass "
+            "--coarsen and --sparsity to build some"
+        )
+    from zarr_vectors_tools.multiresolution.additive import additive_support_error
+
+    refusal = additive_support_error()
+    if refusal is not None:
+        raise SystemExit(f"error: {refusal}")
 
 
 def _check_sparsity_attribute(args, fmt, factors) -> None:
@@ -227,6 +299,7 @@ def _convert_trk(args, factors, chunk_scale) -> int:
     _print_summary("ingested trk (streamlines)", summary)
     if factors is not None:
         print(f"  pyramid: {len(factors)} coarser level(s) built")
+    _make_inline_pyramid_additive(args, factors, "polyline", "streamline")
     return 0
 
 
@@ -332,6 +405,7 @@ def _convert_precomputed(args, fmt, factors, chunk_scale) -> None:
     _print_summary("ingested precomputed (skeleton)", summary)
     if strides:
         print(f"  pyramid: {len(strides)} coarser level(s) built")
+    _make_inline_pyramid_additive(args, factors, "skeleton", "skeleton")
 
 
 def _convert_precomputed_meshes(args, fmt, factors, chunk_scale) -> None:
@@ -634,6 +708,9 @@ def run(args) -> int:
     # conversion ran.
     check_rdp_tolerances(args.rdp_tolerance, factors, args.coarsen_mode)
     args.method = _check_method(args, fmt, factors)
+    _check_sparsity_strategy(args, fmt, factors)
+    _check_refinement(args, factors)
+    check_executor(args.workers, args.workers_backend)
 
     _maybe_overwrite(args.output, args.overwrite, resume=bool(getattr(args, "resume", False)))
 
@@ -791,6 +868,31 @@ def run_shard(args) -> int:
     print(f"{verb} {store} ...")
     stats = reshard(store, shape)
     print("  " + ", ".join(f"{k}={v}" for k, v in stats.items()))
+    return 0
+
+
+def run_index_faces(args) -> int:
+    """``zvtools index-faces STORE`` -- per-object face groups."""
+    from zarr_vectors_tools.multiresolution.face_groups import (
+        face_groups_support_error,
+        index_mesh_faces,
+    )
+
+    refusal = face_groups_support_error()
+    if refusal is not None:
+        raise SystemExit(f"error: {refusal}")
+    reports = index_mesh_faces(str(args.store), levels=args.levels,
+                               dry_run=args.dry_run, verify=args.verify)
+    for r in reports:
+        state = (r["skipped"] if "skipped" in r
+                 else "would stamp" if r.get("would_stamp")
+                 else "stamped" if r.get("stamped") else "not stamped")
+        if r.get("withdrawn"):
+            state += " (stamp withdrawn)"
+        elif r.get("would_withdraw"):
+            state += " (would withdraw the stamp)"
+        print(f"  level {r['level']}: {r['chunks']} chunks, "
+              f"{r['regrouped']} regrouped, {r['reordered']} reordered -- {state}")
     return 0
 
 

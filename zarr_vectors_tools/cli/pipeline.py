@@ -45,6 +45,7 @@ _POSITIONALS: dict[str, tuple[str, ...]] = {
     "validate": ("store",),
     "info": ("store",),
     "shard": ("store",),
+    "index-faces": ("store",),
     "bundles": ("store",),
     "synapses": ("table", "skeletons", "output"),
 }
@@ -55,6 +56,7 @@ _OUTPUTS: dict[str, tuple[str, ...]] = {
     "merge": ("target",),
     "split": ("output",),
     "shard": ("store",),
+    "index-faces": ("store",),
     "bundles": ("store",),
     "synapses": ("output",),
 }

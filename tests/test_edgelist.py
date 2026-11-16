@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("pandas")
-pytest.importorskip("networkx")
 
 
 def _write_csvs(tmp_path: Path) -> tuple[Path, Path]:
@@ -43,6 +42,7 @@ class TestEdgelistIngest:
         assert result["edge_count"] == 4
 
     def test_with_enrichments(self, tmp_path: Path) -> None:
+        pytest.importorskip("networkx")
         from zarr_vectors_tools.convert.ingest.edgelist import ingest_edgelist
         from zarr_vectors_tools.headers.registry import HeaderRegistry
 
@@ -75,3 +75,20 @@ class TestEdgelistIngest:
             use_cudf=True,
         )
         assert result["node_count"] == 4
+
+
+def test_edges_naming_a_missing_node_are_counted_and_warned(tmp_path: Path) -> None:
+    from zarr_vectors_tools.convert.ingest.edgelist import ingest_edgelist
+
+    edges, nodes = _write_csvs(tmp_path)
+    edges.write_text(edges.read_text() + "a,zz,0.9\nyy,b,1.0\n")
+    with pytest.warns(UserWarning, match="2 of 6 edges"):
+        result = ingest_edgelist(edges, nodes, tmp_path / "g.zv", (100., 100., 100.))
+    assert result["edge_count"] == 4
+    assert result["dropped_edges_missing_node"] == 2
+    assert "2 of 6 edges" in result["warnings"][0]
+
+    (tmp_path / "clean").mkdir()
+    clean_edges, clean_nodes = _write_csvs(tmp_path / "clean")
+    clean = ingest_edgelist(clean_edges, clean_nodes, tmp_path / "c.zv", (100., 100., 100.))
+    assert clean["dropped_edges_missing_node"] == 0 and "warnings" not in clean

@@ -83,11 +83,33 @@ def test_only_the_chunks_the_region_touches_are_read(
         return real(*args, **kwargs)
 
     monkeypatch.setattr(polylines, "read_polylines", _spy)
-    select_streamlines(store, mask=_mask(), mask_affine=AFFINE)
+    select_streamlines(store, mask=_mask(), mask_affine=AFFINE, reach=0)
     # The ROI spans 17.5..21.5 mm, so chunks 1 and 2 on each axis; streamline
     # 2 lives in chunk 0 and is never read.
     assert seen and seen[0]
     assert all(all(int(c) in (1, 2) for c in cc) for cc in seen[0])
+
+    # By default the neighbouring chunks are read as well: 0..3 on each axis.
+    seen.clear()
+    select_streamlines(store, mask=_mask(), mask_affine=AFFINE)
+    assert {int(c) for cc in seen[0] for c in cc} == {0, 1, 2, 3}
+
+
+def test_a_segment_leaving_the_touched_chunks_is_still_found(tmp_path: Path) -> None:
+    # The segment crosses the box, which lies in chunk (0, 0, 0) alone; no
+    # vertex is inside the box, and the far end is in chunk (1, 0, 0).  A read
+    # cropped to the touched chunks drops the segment, so reach=0 misses it.
+    path = tmp_path / "face.zv"
+    write_polylines(
+        str(path),
+        [np.array([[7.0, 9.0, 9.0], [13.0, 9.0, 9.0]], np.float32),
+         np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], np.float32)],
+        chunk_shape=CHUNK, geometry_type="streamline",
+    )
+    box = ([8.0, 8.5, 8.5], [9.5, 9.5, 9.5])
+    assert select_streamlines(path, box=box).tolist() == [0]
+    assert select_streamlines(path, box=box, reach=6.0).tolist() == [0]
+    assert select_streamlines(path, box=box, reach=0).tolist() == []
 
 
 def test_a_nifti_file_is_read_with_its_affine(store: Path, tmp_path: Path) -> None:
@@ -142,6 +164,7 @@ def test_a_voxmm_trk_store_answers_a_ras_mask(tmp_path: Path) -> None:
     ({"box": ([0, 0, 0], [1, 1, 1]), "mode": "middle"}, "mode must be"),
     ({"mask": np.ones((2, 2, 2))}, "mask_affine"),
     ({"box": ([2, 2, 2], [1, 1, 1])}, "below its min corner"),
+    ({"box": ([0, 0, 0], [1, 1, 1]), "reach": -1}, "reach must be"),
 ])
 def test_refusals(store: Path, kwargs, message) -> None:
     with pytest.raises(ValueError, match=message):

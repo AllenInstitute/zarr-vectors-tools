@@ -142,6 +142,34 @@ def _columns(
     return radius, compartment
 
 
+def _parent_first_order(parents: np.ndarray) -> np.ndarray:
+    """The nodes in depth-first pre-order: each tree from its root, children in
+    node order, trees in the order of their roots.
+
+    Every parent then comes before its children, the order SWC readers
+    expect.  Nodes no root reaches (a cycle, which is not a tree) follow in
+    node order.
+    """
+    n_nodes = len(parents)
+    by_parent = np.argsort(parents, kind="stable")
+    sorted_parents = parents[by_parent]
+    starts = np.searchsorted(sorted_parents, np.arange(n_nodes), side="left")
+    ends = np.searchsorted(sorted_parents, np.arange(n_nodes), side="right")
+    seen = np.zeros(n_nodes, dtype=bool)
+    order: list[int] = []
+    for root in np.flatnonzero(parents < 0).tolist():
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if seen[node]:
+                continue
+            seen[node] = True
+            order.append(node)
+            stack.extend(reversed(by_parent[starts[node]:ends[node]].tolist()))
+    order.extend(np.flatnonzero(~seen).tolist())
+    return np.asarray(order, dtype=np.int64)
+
+
 def _write_swc(
     output_path: Path,
     positions: np.ndarray,
@@ -156,12 +184,17 @@ def _write_swc(
             for line in comments:
                 f.write(line + "\n")
             f.write(_PROVENANCE + "\n")
-            for i in range(len(positions)):
-                # SWC: ID type X Y Z radius parent_ID (1-indexed, -1 for root)
-                swc_parent = int(parents[i]) + 1 if parents[i] >= 0 else -1
+            # Ids are 1.. in parent-first order, so each parent id is
+            # smaller than its child's.
+            order = _parent_first_order(np.asarray(parents, dtype=np.int64))
+            swc_id = np.empty(len(order), dtype=np.int64)
+            swc_id[order] = np.arange(1, len(order) + 1)
+            for k, i in enumerate(order.tolist()):
+                # SWC: ID type X Y Z radius parent_ID (-1 for a root)
+                swc_parent = int(swc_id[parents[i]]) if parents[i] >= 0 else -1
                 x, y, z = positions[i, 0], positions[i, 1], positions[i, 2]
                 f.write(
-                    f"{i + 1} {compartment[i]} "
+                    f"{k + 1} {compartment[i]} "
                     f"{x:.6f} {y:.6f} {z:.6f} "
                     f"{radius[i]:.4f} {swc_parent}\n"
                 )
@@ -181,7 +214,9 @@ def export_swc(
 
     Reconstructs the parent array from the edge list and writes the
     7-column SWC format.  The ``#`` lines of an ingested SWC come first,
-    then ``# SWC exported by zarr-vectors``.
+    then ``# SWC exported by zarr-vectors``.  Each tree is written from its
+    root in depth-first order, ids numbered 1.. in that order, so every
+    parent comes before its children and a root's parent is ``-1``.
 
     Without ``object_ids`` the whole level is one file.  With them,
     ``output_path`` is a directory and each object gets its own

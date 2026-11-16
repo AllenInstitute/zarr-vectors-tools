@@ -138,6 +138,15 @@ def _add_pyramid_args(p: argparse.ArgumentParser) -> None:
         metavar="N",
         help="largest level gap to link (default 1; -1 = every pair of levels)",
     )
+    g.add_argument(
+        "--refinement", choices=("replace", "add"), default="replace",
+        help="'replace' (default): every level is complete. 'add': store each "
+             "object (or point) once, at the coarsest level that keeps it; "
+             "every level but the coarsest then holds only what the next "
+             "coarser one lacks, and readers show the union. LEVEL 0 IS "
+             "REWRITTEN IN PLACE. Exact for streamline/polyline sparsity "
+             "with --coarsen 1; warns for meshes and for coarsened levels",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -202,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--compressor", choices=("none", "zstd", "blosc"),
                    default="none",
                    help="trk only: codec for per-chunk arrays (default: none = raw). "
-                        "zstd/blosc make streamline stores ~2.4x smaller, but "
+                        "zstd and blosc compress them losslessly, but "
                         "the zarr-vectors Neuroglancer viewer cannot read "
                         "compressed chunk arrays: keep stores meant for "
                         "viewing uncompressed")
@@ -610,6 +619,33 @@ def build_parser() -> argparse.ArgumentParser:
                    help="remove sharding (back to one file per chunk)")
     s.set_defaults(func=_convert.run_shard)
 
+    # ---- index-faces -------------------------------------------------------
+    x = sub.add_parser(
+        "index-faces",
+        help="group a mesh store's faces per object, for per-object reads",
+        description="Regroup each chunk's intra-chunk faces one group per "
+                    "vertex fragment (object), and stamp the level "
+                    "fragment_link_groups once every chunk is checked, so a "
+                    "viewer drawing one object can read just its faces rather "
+                    "than the whole chunk. Face data is unchanged, and usually "
+                    "only the link_fragments index is rewritten; a level where "
+                    "some face spans two objects is left unstamped. Meshes "
+                    "written by zarr-vectors-py and pyramids built by `zvtools "
+                    "pyramid` are already stamped. Needs a zarr-vectors-py with "
+                    "fragment_link_groups support, and refuses to run without "
+                    "it.",
+    )
+    x.add_argument("store", help="zarr-vectors store path")
+    x.add_argument("--levels", type=parse_int_list, default=None,
+                   metavar="L1,L2,...", help="levels to index (default: all)")
+    x.add_argument("--dry-run", action="store_true",
+                   help="report what would change without writing")
+    x.add_argument("--verify", action="store_true",
+                   help="re-check levels already stamped instead of skipping "
+                        "them: repair them where possible, and withdraw the "
+                        "stamp where not")
+    x.set_defaults(func=_convert.run_index_faces)
+
     # ---- merge -------------------------------------------------------------
     m = sub.add_parser(
         "merge", help="add a file's or another store's objects to an existing store",
@@ -744,7 +780,36 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print each step's zvtools command, and stop")
     r.set_defaults(func=_pipeline.run)
 
+    # virtual
+    vt = sub.add_parser(
+        "virtual", help="serve files as zarr-vectors stores, without converting them",
+        description="Read tractograms (.trk, .tck, .trx), meshes (.obj, .stl, .ply, .gii, "
+        "FreeSurfer surfaces), SWC neurons or "
+                    "point tables (.csv, .tsv, .xyz) once and serve each as a "
+                    "virtual zarr-vectors store over HTTP, for any Neuroglancer with "
+                    "the zarr-vectors data source.  Nothing is written.",
+    )
+    vsub = vt.add_subparsers(dest="virtual_command", required=True)
+    vs = vsub.add_parser("serve", help="serve each file as a zarr-vectors store at "
+                              "http://host:port/<name>/")
+    vs.add_argument(
+        "files",
+        nargs="+",
+        help=".trk, .tck, .trx, .obj, .stl, .ply, .gii, FreeSurfer surface (lh.pial, ...), "
+        ".swc, .csv, .tsv or .xyz files",
+    )
+    vs.add_argument("--host", default="127.0.0.1")
+    vs.add_argument("--port", type=int, default=8000)
+    vs.set_defaults(func=_run_virtual_serve)
+
     return parser
+
+
+def _run_virtual_serve(args) -> int:
+    from zarr_vectors_tools.virtual.serve import serve
+
+    serve(args.files, host=args.host, port=args.port)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

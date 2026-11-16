@@ -15,6 +15,7 @@ from zarr_vectors.typing import BinShape, ChunkShape
 from zarr_vectors_tools.convert.ingest._attribute_widths import (
     record_vertex_attribute_widths,
 )
+from zarr_vectors_tools.convert.ingest._axes import declare_axis_unit
 from zarr_vectors_tools.convert.ingest._segment_ids import (
     stamp_segment_ids,
 )
@@ -268,7 +269,8 @@ def ingest_linc_trk(
             f"the TRK label_id attribute"
         )
 
-    # Shared TRK extraction.
+    # Shared TRK extraction; it reads label_id as float32, which the
+    # validated int64 array replaces below.
     (
         polylines,
         vertex_attributes,
@@ -344,6 +346,8 @@ def ingest_linc_trk(
     )
 
     stamp_segment_ids(output_path)
+    # nibabel returns streamlines in RAS+ millimetres.
+    declare_axis_unit(output_path, "millimeter")
 
     record_vertex_attribute_widths(
         output_path,

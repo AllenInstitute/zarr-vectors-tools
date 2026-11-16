@@ -1,8 +1,8 @@
 """Format-specific header dataclasses.
 
 Each header captures the metadata that would be lost when converting
-to the zarr vectors format.  Stored as JSON-serialisable dicts in
-``/headers/<format>/.zattrs``.
+to the zarr vectors format.  Stored as JSON-serialisable dicts in the
+attributes of ``/headers/<format>/`` (its ``zarr.json``).
 """
 
 from __future__ import annotations

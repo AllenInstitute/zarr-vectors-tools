@@ -244,14 +244,15 @@ class TestOMEZarrMetadata:
         assert "type" not in ms[0]
         assert len(ms[0]["datasets"]) == 3
 
-        # Verify scales
-        assert get_level_scale(root, 0) == [1.0, 1.0, 1.0]
-        assert get_level_scale(root, 1) == [2.0, 2.0, 2.0]
-        assert get_level_scale(root, 2) == [4.0, 4.0, 4.0]
-
-        # Translation = bin_shape / 2
-        assert get_level_translation(root, 1) == [50.0, 50.0, 50.0]
-        assert get_level_translation(root, 2) == [100.0, 100.0, 100.0]
+        # Coarse vertices are stored in level-0 coordinates, so every level
+        # carries level 0's transform; the bin ratio lives in level metadata.
+        from zarr_vectors.core.store import read_level_metadata
+        for level in (0, 1, 2):
+            assert get_level_scale(root, level) == [1.0, 1.0, 1.0]
+            assert get_level_translation(root, level) == [25.0, 25.0, 25.0]
+        assert read_level_metadata(root, 1).bin_ratio == (2.0, 2.0, 2.0)
+        assert read_level_metadata(root, 2).bin_ratio == (4.0, 4.0, 4.0)
+        assert read_level_metadata(root, 1).bin_shape == (100.0, 100.0, 100.0)
 
         # Round-trip
         ms_read = read_multiscale_metadata(root)

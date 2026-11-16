@@ -102,7 +102,16 @@ def mark_dictionary_encoded(store_path, level: int, columns: dict[str, dict]) ->
         return
     from zarr_vectors.building import VERTEX_ATTRIBUTES, get_resolution_level, open_store
 
-    level_group = get_resolution_level(open_store(str(store_path), mode="r+"), level)
-    for name, extra in columns.items():
-        # Merged into the array's own attributes; nothing else is touched.
-        level_group.write_array_meta(f"{VERTEX_ATTRIBUTES}/{name}", extra)
+    from zarr_vectors_tools.convert.ingest.attach import _additive_chain
+
+    root = open_store(str(store_path), mode="r+")
+    # Every level of an additive level's chain holds part of its vertices,
+    # and the attach wrote each of them.
+    for lv in _additive_chain(store_path, level):
+        level_group = get_resolution_level(root, lv)
+        for name, extra in columns.items():
+            path = f"{VERTEX_ATTRIBUTES}/{name}"
+            if lv != level and not level_group.array_exists(path):
+                continue
+            # Merged into the array's own attributes; nothing else is touched.
+            level_group.write_array_meta(path, extra)

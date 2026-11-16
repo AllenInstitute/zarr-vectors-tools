@@ -1,0 +1,458 @@
+{
+ "sets": {
+  "synth-1e5": {
+   "cpython": {
+    "n_streamlines": 100000,
+    "n_vertices": 6081228,
+    "tractogram_mb": 73.8,
+    "loaded_mb": 159,
+    "build_s": 4.113198713000202,
+    "index_mb": 123.3,
+    "built_mb": 354,
+    "cell_size_mm": 3.124,
+    "sphere_ms": {
+     "median": 3.2822830003169656,
+     "p90": 6.4906281999356,
+     "max": 6.774100999791699
+    },
+    "sphere_accepted": 396,
+    "sphere_candidates": 13520,
+    "sphere_tested": 12023,
+    "sphere_tested_per_s": 3263479.4009586703,
+    "first_result_s": 4.119972813999993,
+    "box_ms": {
+     "median": 3.6942490000910766,
+     "p90": 5.7353505997525644,
+     "max": 6.176064999635855
+    },
+    "box_accepted": 741,
+    "box_candidates": 13006,
+    "box_tested": 9139,
+    "box_tested_per_s": 2473845.1576422406,
+    "slab_ms": {
+     "median": 50.49626400023044,
+     "p90": 78.42951200009338,
+     "max": 96.52081600006568
+    },
+    "slab_accepted": 24145,
+    "slab_candidates": 317588,
+    "slab_tested": 292330,
+    "slab_tested_per_s": 5987144.196669679,
+    "disk_ms": {
+     "median": 1.984700000321027,
+     "p90": 3.3767958000680665,
+     "max": 4.123523000089335
+    },
+    "disk_accepted": 170,
+    "disk_candidates": 6885,
+    "disk_tested": 6885,
+    "disk_tested_per_s": 3683438.0493505565,
+    "mask_ms": {
+     "median": 5.508625999937067,
+     "p90": 11.76788859993394,
+     "max": 13.001399000131642
+    },
+    "mask_accepted": 668,
+    "mask_candidates": 13705,
+    "mask_tested": 13705,
+    "mask_tested_per_s": 2472793.1235709423,
+    "endpoints_ms": {
+     "median": 6.0887179997735075,
+     "p90": 6.264363800073625,
+     "max": 6.546167000124115
+    },
+    "endpoints_accepted": 98,
+    "endpoints_candidates": 13287,
+    "endpoints_tested": 13287,
+    "endpoints_tested_per_s": 2182232.7788040536,
+    "p1_ms": {
+     "median": 0.10168699964197003,
+     "p90": 0.17114459997173984,
+     "max": 0.27177899983144016
+    },
+    "p3_ms": {
+     "median": 0.0417169999309408,
+     "p90": 0.04888650005341333,
+     "max": 0.14627199971073424
+    },
+    "publish_ms": {
+     "median": 0.5662839998876734,
+     "p90": 0.5957045999821275,
+     "max": 0.6093709998822305
+    },
+    "oracle_sphere_s": 0.8478695250000783,
+    "agrees_with_oracle": true,
+    "peak_mb": 856,
+    "runtime": {
+     "name": "cpython",
+     "python": "3.13.17",
+     "numpy": "2.5.4"
+    }
+   },
+   "pyodide": {
+    "n_streamlines": 100000,
+    "n_vertices": 6081228,
+    "tractogram_mb": 73.8,
+    "loaded_mb": 487,
+    "build_s": 5.221072012999999,
+    "index_mb": 123.3,
+    "built_mb": 963,
+    "cell_size_mm": 3.124,
+    "sphere_ms": {
+     "median": 4.518486000000266,
+     "p90": 10.247410000000556,
+     "max": 10.706378000000072
+    },
+    "sphere_accepted": 396,
+    "sphere_candidates": 13520,
+    "sphere_tested": 12023,
+    "sphere_tested_per_s": 2561133.9568605185,
+    "first_result_s": 5.231778390999999,
+    "box_ms": {
+     "median": 5.491410000001196,
+     "p90": 8.656638600000122,
+     "max": 9.37798100000009
+    },
+    "box_accepted": 741,
+    "box_candidates": 13006,
+    "box_tested": 9139,
+    "box_tested_per_s": 1715724.414287665,
+    "slab_ms": {
+     "median": 94.93722100000035,
+     "p90": 119.43477280000076,
+     "max": 158.01107599999932
+    },
+    "slab_accepted": 24145,
+    "slab_candidates": 317588,
+    "slab_tested": 292330,
+    "slab_tested_per_s": 3632663.0672396813,
+    "disk_ms": {
+     "median": 3.883800000000548,
+     "p90": 6.897184799999678,
+     "max": 7.043855999999238
+    },
+    "disk_accepted": 170,
+    "disk_candidates": 6885,
+    "disk_tested": 6885,
+    "disk_tested_per_s": 1938426.9070806499,
+    "mask_ms": {
+     "median": 16.97075100000056,
+     "p90": 34.90491480000095,
+     "max": 38.268382000000045
+    },
+    "mask_accepted": 668,
+    "mask_candidates": 13705,
+    "mask_tested": 13705,
+    "mask_tested_per_s": 779160.5010369329,
+    "endpoints_ms": {
+     "median": 13.791123000000738,
+     "p90": 14.078899000000789,
+     "max": 14.60884699999987
+    },
+    "endpoints_accepted": 98,
+    "endpoints_candidates": 13287,
+    "endpoints_tested": 13287,
+    "endpoints_tested_per_s": 963445.8339614032,
+    "p1_ms": {
+     "median": 1.0416229999989923,
+     "p90": 1.3870283999995792,
+     "max": 1.6635659999995056
+    },
+    "p3_ms": {
+     "median": 0.610249500000215,
+     "p90": 0.7045695000007512,
+     "max": 0.8186539999996967
+    },
+    "publish_ms": {
+     "median": 1.1245510000001957,
+     "p90": 1.2033353999996166,
+     "max": 1.2041049999993447
+    },
+    "oracle_sphere_s": 1.2364110509999993,
+    "agrees_with_oracle": true,
+    "runtime": {
+     "name": "pyodide",
+     "python": "3.14.2",
+     "numpy": "2.4.6",
+     "pyodide": "314.0.7"
+    },
+    "peak_mb": 963,
+    "startup_mb": 38
+   }
+  },
+  "synth-1e6": {
+   "cpython": {
+    "n_streamlines": 1000000,
+    "n_vertices": 60898150,
+    "tractogram_mb": 738.8,
+    "loaded_mb": 860,
+    "build_s": 53.45343863299968,
+    "index_mb": 1336.9,
+    "built_mb": 2127,
+    "cell_size_mm": 2.0,
+    "sphere_ms": {
+     "median": 21.57156200019017,
+     "p90": 55.26533720003499,
+     "max": 62.12891399991349
+    },
+    "sphere_accepted": 4201,
+    "sphere_candidates": 148352,
+    "sphere_tested": 99489,
+    "sphere_tested_per_s": 4435975.304292416,
+    "first_result_s": 53.51556754699959,
+    "box_ms": {
+     "median": 22.031848000096943,
+     "p90": 33.1034474000262,
+     "max": 33.72180899987143
+    },
+    "box_accepted": 7817,
+    "box_candidates": 142196,
+    "box_tested": 60240,
+    "box_tested_per_s": 2930688.3971706848,
+    "slab_ms": {
+     "median": 481.81599400004416,
+     "p90": 581.0849936002342,
+     "max": 637.7327720001631
+    },
+    "slab_accepted": 291170,
+    "slab_candidates": 5059966,
+    "slab_tested": 2388660,
+    "slab_tested_per_s": 5047744.636340482,
+    "disk_ms": {
+     "median": 17.32333900008598,
+     "p90": 37.707511000098755,
+     "max": 59.56896300040171
+    },
+    "disk_accepted": 1648,
+    "disk_candidates": 90296,
+    "disk_tested": 90296,
+    "disk_tested_per_s": 5132849.982228165,
+    "mask_ms": {
+     "median": 80.9660130003067,
+     "p90": 131.73803519985086,
+     "max": 139.27226400028303
+    },
+    "mask_accepted": 6922,
+    "mask_candidates": 152328,
+    "mask_tested": 139440,
+    "mask_tested_per_s": 1735814.6656694897,
+    "endpoints_ms": {
+     "median": 94.20087199987393,
+     "p90": 101.40137719999984,
+     "max": 105.05019400034143
+    },
+    "endpoints_accepted": 1069,
+    "endpoints_candidates": 95306,
+    "endpoints_tested": 95306,
+    "endpoints_tested_per_s": 1011731.6111482233,
+    "p1_ms": {
+     "median": 2.221089000158827,
+     "p90": 2.4909605996981554,
+     "max": 3.439870999955019
+    },
+    "p3_ms": {
+     "median": 0.6104060000780009,
+     "p90": 0.7442700002684433,
+     "max": 0.783685999977024
+    },
+    "publish_ms": {
+     "median": 7.508574999974371,
+     "p90": 7.722971799830702,
+     "max": 7.906919000106427
+    },
+    "oracle_sphere_s": 15.178548370999579,
+    "agrees_with_oracle": true,
+    "peak_mb": 4279,
+    "runtime": {
+     "name": "cpython",
+     "python": "3.13.17",
+     "numpy": "2.5.4"
+    }
+   },
+   "pyodide": {
+    "error": "numpy._core._exceptions._ArrayMemoryError: Unable to allocate 433. MiB for an array with shape (113463089,) and data type int32"
+   }
+  },
+  "real": {
+   "cpython": {
+    "n_streamlines": 79648,
+    "n_vertices": 39401458,
+    "tractogram_mb": 473.5,
+    "loaded_mb": 545,
+    "build_s": 21.571032079999895,
+    "index_mb": 715.0,
+    "built_mb": 1370,
+    "cell_size_mm": 1.073,
+    "sphere_ms": {
+     "median": 43.245073000434786,
+     "p90": 68.43915339995876,
+     "max": 140.45033900038106
+    },
+    "sphere_accepted": 7897,
+    "sphere_candidates": 684509,
+    "sphere_tested": 138568,
+    "sphere_tested_per_s": 2970883.6549994,
+    "first_result_s": 21.711482419000276,
+    "box_ms": {
+     "median": 29.066365999824484,
+     "p90": 50.86460059992534,
+     "max": 109.56098699989525
+    },
+    "box_accepted": 11005,
+    "box_candidates": 542862,
+    "box_tested": 28148,
+    "box_tested_per_s": 817651.2864699312,
+    "slab_ms": {
+     "median": 40.77691500015135,
+     "p90": 72.98976620013491,
+     "max": 76.34921900034897
+    },
+    "slab_accepted": 37119,
+    "slab_candidates": 1235530,
+    "slab_tested": 16171,
+    "slab_tested_per_s": 519663.18609532254,
+    "disk_ms": {
+     "median": 44.300260999989405,
+     "p90": 100.46094299996184,
+     "max": 127.43900700024824
+    },
+    "disk_accepted": 4688,
+    "disk_candidates": 455677,
+    "disk_tested": 381064,
+    "disk_tested_per_s": 8906624.235695386,
+    "mask_ms": {
+     "median": 123.76812999991671,
+     "p90": 212.41444799998135,
+     "max": 260.7501599995885
+    },
+    "mask_accepted": 10277,
+    "mask_candidates": 930839,
+    "mask_tested": 374343,
+    "mask_tested_per_s": 2884734.347444376,
+    "endpoints_ms": {
+     "median": 6.188408999605599,
+     "p90": 6.5453123999759555,
+     "max": 6.587754000065615
+    },
+    "endpoints_accepted": 31,
+    "endpoints_candidates": 664883,
+    "endpoints_tested": 374343,
+    "endpoints_tested_per_s": 60490992.11507476,
+    "p1_ms": {
+     "median": 0.14673799978481838,
+     "p90": 0.25773140014280216,
+     "max": 0.39569699993080576
+    },
+    "p3_ms": {
+     "median": 0.06559500002367713,
+     "p90": 0.08709550002095057,
+     "max": 0.14393199990081484
+    },
+    "publish_ms": {
+     "median": 0.21793699988847948,
+     "p90": 0.25479240030108485,
+     "max": 0.26821800020115916
+    },
+    "oracle_sphere_s": 8.5767940679998,
+    "agrees_with_oracle": true,
+    "peak_mb": 2144,
+    "runtime": {
+     "name": "cpython",
+     "python": "3.13.17",
+     "numpy": "2.5.4"
+    }
+   },
+   "pyodide": {
+    "n_streamlines": 79648,
+    "n_vertices": 39401458,
+    "tractogram_mb": 473.5,
+    "loaded_mb": 1435,
+    "build_s": 33.627979818,
+    "index_mb": 715,
+    "built_mb": 2593,
+    "cell_size_mm": 1.073,
+    "sphere_ms": {
+     "median": 77.69678399999691,
+     "p90": 145.91067979999937,
+     "max": 283.613502999998
+    },
+    "sphere_accepted": 7897,
+    "sphere_candidates": 684509,
+    "sphere_tested": 138568,
+    "sphere_tested_per_s": 1272476.6187375938,
+    "first_result_s": 33.911593321,
+    "box_ms": {
+     "median": 62.35228199999909,
+     "p90": 128.510498,
+     "max": 227.4530819999967
+    },
+    "box_accepted": 11005,
+    "box_candidates": 542862,
+    "box_tested": 28148,
+    "box_tested_per_s": 410955.287891474,
+    "slab_ms": {
+     "median": 120.80101899999818,
+     "p90": 187.88031679999335,
+     "max": 225.69628799999464
+    },
+    "slab_accepted": 37119,
+    "slab_candidates": 1235530,
+    "slab_tested": 16171,
+    "slab_tested_per_s": 177884.33476586398,
+    "disk_ms": {
+     "median": 129.6004200000027,
+     "p90": 303.6038917999974,
+     "max": 429.5610789999955
+    },
+    "disk_accepted": 4688,
+    "disk_candidates": 455677,
+    "disk_tested": 381064,
+    "disk_tested_per_s": 2940299.113228121,
+    "mask_ms": {
+     "median": 305.82608899999997,
+     "p90": 508.386590799998,
+     "max": 965.7485219999984
+    },
+    "mask_accepted": 10277,
+    "mask_candidates": 930839,
+    "mask_tested": 374343,
+    "mask_tested_per_s": 1224038.8033082425,
+    "endpoints_ms": {
+     "median": 13.365365000005625,
+     "p90": 13.814107799997544,
+     "max": 13.816603000002203
+    },
+    "endpoints_accepted": 31,
+    "endpoints_candidates": 664883,
+    "endpoints_tested": 374343,
+    "endpoints_tested_per_s": 28008438.228199713,
+    "p1_ms": {
+     "median": 1.0286589999992657,
+     "p90": 1.3358750000023178,
+     "max": 1.5474670000017454
+    },
+    "p3_ms": {
+     "median": 0.5947975000033523,
+     "p90": 0.6535895000006064,
+     "max": 0.7286259999972344
+    },
+    "publish_ms": {
+     "median": 0.3633589999978426,
+     "p90": 0.4068295999985594,
+     "max": 0.41739600000312294
+    },
+    "oracle_sphere_s": 8.577264847999999,
+    "agrees_with_oracle": true,
+    "runtime": {
+     "name": "pyodide",
+     "python": "3.14.2",
+     "numpy": "2.4.6",
+     "pyodide": "314.0.7"
+    },
+    "peak_mb": 2593,
+    "startup_mb": 38
+   }
+  }
+ },
+ "real_store": "/tmp/claude-0/-home-user/34b23f17-056a-506c-9de9-b71b983fccaf/scratchpad/data/ifod.zarrvectors"
+}

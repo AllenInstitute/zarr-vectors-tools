@@ -144,6 +144,12 @@ def rebuild_pyramid_from_level(
     above = [lv for lv in levels if lv > source_level]
     if not above:
         return []
+    from zarr_vectors_tools.multiresolution.additive import refuse_additive
+
+    # Each additive level holds only what the next coarser one lacks, so a
+    # level rebuilt from the one below would duplicate objects (or, removed
+    # first, take the objects only it held with it).
+    refuse_additive(root, "rebuild_pyramid_from_level")
 
     if source_level not in levels:
         raise EditError(
@@ -285,12 +291,16 @@ def rebuild_pyramid_from_level(
         cross_level_depth = root_meta.cross_level_depth
     _clear_cross_level_families(root, from_level=source_level)
 
+    # Levels must stay contiguous, so drop the planned ones coarsest first
+    # (the plan already holds what each needs), then rebuild them in order.
+    for entry in sorted(plan, key=lambda e: e["level"], reverse=True):
+        remove_resolution_level(root, entry["level"])
+    if plan and session_for(root) is not None:
+        commit(root, "drop levels for refresh")
+
     summaries: list[dict[str, Any]] = []
     for entry in plan:
         lv = entry["level"]
-        remove_resolution_level(root, lv)
-        if session_for(root) is not None:
-            commit(root, f"drop level {lv} for refresh")
         summary = coarsen_level(
             url,
             source_level=entry["parent_level"],
