@@ -66,6 +66,9 @@ from zarr_vectors.typing import ChunkCoords
 from zarr_vectors_tools.convert.ingest._object_columns import stamp_level_object_columns
 
 # Re-use the coordinate-distribution helper from the .frags ingest module.
+from zarr_vectors_tools.convert.ingest._polyline_enrichments import (
+    compute_cable_lengths,
+)
 from zarr_vectors_tools.convert.ingest.precomputed_skeletons import (
     pieces_from_chunk,
     stamp_level_vertex_count,
@@ -79,6 +82,11 @@ from zarr_vectors_tools.multiresolution.strategies.skeletons import (
     build_skeleton_pyramid,
     coarsen_skeleton_level,
 )
+
+#: A reader that returns no ``"edges"`` key is treated as an all-isolated-
+#: vertices object (cable length 0), rather than an error -- matches
+#: ``compute_cable_lengths``'s own "no edges -> 0.0" handling.
+_NO_EDGES = np.zeros((0, 2), dtype=np.int64)
 
 # ===================================================================
 # Source description
@@ -543,7 +551,7 @@ def run_ingest_plain(
     scratch = tempfile.TemporaryDirectory(prefix="zv-plain-", dir=scratch_dir)
     try:
         scratch_root = Path(scratch.name)
-        batch_paths, vmin, vmax, n_with_geometry = _read_batches(
+        batch_paths, vmin, vmax, n_with_geometry, cable_lengths = _read_batches(
             reader, seg_ids, int(batch_size), read_workers,
             scratch_root / "skeletons", progress,
         )
@@ -619,7 +627,9 @@ def run_ingest_plain(
     if progress:
         print("  [plain-ingest] building object index...", flush=True)
 
-    oid_of_seg = build_object_index(lg, records, ndim=ndim)
+    oid_of_seg = build_object_index(
+        lg, records, ndim=ndim, cable_lengths=cable_lengths,
+    )
 
     sk.finalize_skeleton_store(root)
     stamp_level_vertex_count(lg)
@@ -765,17 +775,25 @@ def _read_batches(
     read_workers: int,
     directory: Path,
     progress: bool,
-) -> tuple[list[Path], npt.NDArray[np.float64], npt.NDArray[np.float64], int]:
+) -> tuple[
+    list[Path], npt.NDArray[np.float64], npt.NDArray[np.float64], int,
+    dict[int, float],
+]:
     """Stage 1: read skeletons a batch at a time, spilling each batch.
 
-    Returns the batch files, the vertex bounds, and how many segments had
-    geometry.  ``pool.map`` keeps each batch in segment order, so pieces reach
-    their chunks in the same order however the reads finish.
+    Returns the batch files, the vertex bounds, how many segments had
+    geometry, and each segment's cable length (sum of edge Euclidean
+    distances -- see :func:`compute_cable_lengths`).  Computed here because
+    this is the only stage that ever holds a segment's vertices AND edges
+    together in memory; downstream stages spill, re-chunk, and discard them.
+    ``pool.map`` keeps each batch in segment order, so pieces reach their
+    chunks in the same order however the reads finish.
     """
     vmin = np.full(3, np.inf)
     vmax = np.full(3, -np.inf)
     paths: list[Path] = []
     with_geometry = 0
+    cable_lengths: dict[int, float] = {}
     n_batches = -(-len(seg_ids) // batch_size)
     report_every = max(1, n_batches // 20)
     with ThreadPoolExecutor(max_workers=read_workers) as pool:
@@ -791,6 +809,17 @@ def _read_batches(
                 kept[sid] = piece
             with_geometry += len(kept)
             if kept:
+                sids_in_order = list(kept.keys())
+                batch_lengths = compute_cable_lengths(
+                    [np.asarray(kept[s]["vertices"]) for s in sids_in_order],
+                    [
+                        np.asarray(kept[s].get("edges", _NO_EDGES))
+                        for s in sids_in_order
+                    ],
+                )
+                cable_lengths.update(
+                    zip(sids_in_order, (float(bl) for bl in batch_lengths))
+                )
                 path = directory / f"batch_{batch_index:06d}.pkl"
                 _spill(path, kept)
                 paths.append(path)
@@ -803,7 +832,7 @@ def _read_batches(
                     f"({with_geometry} with geometry)",
                     flush=True,
                 )
-    return paths, vmin, vmax, with_geometry
+    return paths, vmin, vmax, with_geometry, cable_lengths
 
 
 def _distribute_batches(

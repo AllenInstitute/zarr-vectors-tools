@@ -208,6 +208,14 @@ def test_segment_id_uint64_preserved(tmp_store):
 # --------------------------------------------------------------------------
 
 def _build_random_skeleton_store(d, n_seg=30, seed=0):
+    """Returns ``(n_seg, cable_lengths)`` -- ``cable_lengths`` is
+    ``{segment_id: true path length}``, computed from each segment's
+    un-split random-walk polyline (chunk-splitting a path doesn't change its
+    total length, so this is the full-object cable length regardless of how
+    many chunks/fragments it ends up split across). Threading this into
+    ``build_object_index`` is what makes ``sparsity_strategy="length"``
+    usable (not fragment-count-proxy-usable) on this fixture at level 0.
+    """
     rng = np.random.default_rng(seed)
     chunk_shape = (256.0, 256.0, 256.0)
     bounds = ([0.0, 0.0, 0.0], [1024.0, 1024.0, 256.0])
@@ -216,12 +224,16 @@ def _build_random_skeleton_store(d, n_seg=30, seed=0):
         attribute_dtypes={"radius": "float32"})
     records = []
     chunk_pieces = defaultdict(list)
+    cable_lengths: dict[int, float] = {}
     for s in range(n_seg):
         seg = 1000 + s * 7
         npts = int(rng.integers(40, 120))
         pos = np.cumsum(rng.normal(0, 8, size=(npts, 3)), axis=0)
         pos = np.clip(pos + rng.uniform([10, 10, 10], [1000, 1000, 240]),
                       [1, 1, 1], [1023, 1023, 255]).astype(np.float32)
+        cable_lengths[seg] = float(
+            np.linalg.norm(np.diff(pos, axis=0), axis=1).sum()
+        )
         cc_of = np.floor(pos / np.array(chunk_shape)).astype(int)
         i = 0
         while i < len(pos):
@@ -239,9 +251,9 @@ def _build_random_skeleton_store(d, n_seg=30, seed=0):
         recs, _ = sk.write_skeleton_chunk(lg, cc, pieces,
                                           attr_dtypes={"radius": np.float32})
         records += recs
-    build_object_index(lg, records, ndim=3)
+    build_object_index(lg, records, ndim=3, cable_lengths=cable_lengths)
     sk.finalize_skeleton_store(root)
-    return n_seg
+    return n_seg, cable_lengths
 
 
 def test_drop_interior_below_reduces_fragments_and_keeps_metrics_consistent(tmp_path):
@@ -336,7 +348,7 @@ def test_pyramid_parallel_executor_matches_serial(tmp_path):
 
 
 def test_pyramid_preserves_oids_and_shrinks(tmp_store):
-    n_seg = _build_random_skeleton_store(tmp_store, n_seg=30)
+    n_seg, _cable_lengths = _build_random_skeleton_store(tmp_store, n_seg=30)
     l0 = _level_stats(tmp_store, 0)
     assert l0["objs"] == n_seg
 
@@ -357,7 +369,7 @@ def test_pyramid_preserves_oids_and_shrinks(tmp_store):
 
 
 def test_pyramid_sparsity_drops_objects(tmp_store):
-    n_seg = _build_random_skeleton_store(tmp_store, n_seg=30, seed=3)
+    n_seg, cable_lengths = _build_random_skeleton_store(tmp_store, n_seg=30, seed=3)
     build_skeleton_pyramid(
         tmp_store, strides=[8], chunk_scale_factors=[2],
         sparsity_factors=[3.0], sparsity_strategy="length", sparsity_seed=1)
@@ -365,6 +377,19 @@ def test_pyramid_sparsity_drops_objects(tmp_store):
     assert l1["slots"] == n_seg          # OID space preserved
     assert l1["objs"] < n_seg            # but fewer objects survive
     assert l1["objs"] == pytest.approx(n_seg // 3, abs=2)
+
+    # WHICH objects survive, not just how many (open-items.md item 11: a
+    # count-only assertion here passed under the old fragment-count proxy
+    # too, so it would not have caught the bug). Segment ids are generated
+    # as 1000 + s*7 for s in range(n_seg) -- already ascending in s, so the
+    # object index's sorted-segment-id oid order coincides with s.
+    level1 = get_resolution_level(open_store(tmp_store), 1)
+    kept_oids = {oid for oid, m in enumerate(read_all_object_manifests(level1)) if m}
+    target_count = len(kept_oids)
+    longest_by_cable = set(
+        sorted(range(n_seg), key=lambda s: -cable_lengths[1000 + s * 7])[:target_count]
+    )
+    assert kept_oids == longest_by_cable
 
 
 def test_pull_by_id_works_at_coarse_levels(tmp_store):

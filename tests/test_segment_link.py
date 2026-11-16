@@ -52,7 +52,14 @@ def stores(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     run_ingest(
         InMemoryFragsReader(info, {key: segments}), str(skeletons), [key],
         bounds_nm=(origin.tolist(), (origin + np.array(info.chunk_size_nm)).tolist()),
-        strides=[2], chunk_scale_factors=[2], sparsity_factors=[2.0], progress=False,
+        strides=[2], chunk_scale_factors=[2], sparsity_factors=[2.0],
+        # Explicit, not the "length" default: this fixture only needs ANY
+        # one of A/B dropped (see test_sparsity_removes_a_segment_from_
+        # the_coarse_level below, which accepts whichever one survives),
+        # not a particular ranking -- and this ``.frags``-based ingest path
+        # doesn't record a per-object length (unlike run_ingest_plain), so
+        # "length" would now raise at level 0 (open-items.md item 11).
+        sparsity_strategy="random", progress=False,
     )
 
     # The mesh store numbers C first, so its object ids differ from the skeletons'.
