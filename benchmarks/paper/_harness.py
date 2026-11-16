@@ -254,6 +254,99 @@ class Workspace:
 
 
 # --------------------------------------------------------------------
+# Request accounting
+# --------------------------------------------------------------------
+#
+# Wall time on a warm local disk says little about the object-storage
+# case, where each request is a round-trip and each byte is transfer.
+# What a read *asks for* is the same on any backend, so it is counted
+# directly: every request a zarr-vectors read sends through its store,
+# and every file read a competitor makes.  Metadata is counted on both
+# sides -- a ``zarr.json`` GET costs a round-trip like any other.
+
+
+def counting_store(path):
+    """A zarr ``LocalStore`` at ``path`` that counts what is asked of it.
+
+    ``.requests`` is every GET, ranged GET, existence check and listing;
+    ``.bytes`` every byte returned.  Wrapping it also turns off
+    zarr-vectors' direct-``open`` fast path (which only recognises a bare
+    ``LocalStore``), so every byte is seen; time reads against the plain
+    path and count them through this, never both at once.
+    """
+    from zarr.storage import LocalStore, WrapperStore
+
+    class CountingStore(WrapperStore):
+        requests = 0
+        bytes = 0
+
+        def _count(self, buf):
+            type(self).requests += 1
+            if buf is not None:
+                type(self).bytes += len(buf)
+            return buf
+
+        async def get(self, key, prototype, byte_range=None):
+            return self._count(await self._store.get(key, prototype, byte_range))
+
+        async def get_partial_values(self, prototype, key_ranges):
+            out = await self._store.get_partial_values(prototype, key_ranges)
+            for buf in out:
+                self._count(buf)
+            return out
+
+        async def exists(self, key):
+            type(self).requests += 1
+            return await self._store.exists(key)
+
+        async def list_dir(self, prefix):
+            type(self).requests += 1
+            async for k in self._store.list_dir(prefix):
+                yield k
+
+        async def list_prefix(self, prefix):
+            type(self).requests += 1
+            async for k in self._store.list_prefix(prefix):
+                yield k
+
+    # Counters live on a fresh class so the copies zarr makes of a store
+    # (``with_read_only`` and friends) all add to the same tally.
+    return CountingStore(LocalStore(str(path), read_only=True))
+
+
+class FileFetch:
+    """File reads under one directory, counted like :func:`counting_store`.
+
+    The precomputed readers in ``_formats`` fetch through one of these, so
+    their requests and bytes are tallied the same way a zarr-vectors read's
+    are: one request per whole-file or byte-range read.
+    """
+
+    def __init__(self, root):
+        self.root = Path(root)
+        self.requests = 0
+        self.bytes = 0
+
+    def get(self, rel: str, start: int | None = None, stop: int | None = None):
+        self.requests += 1
+        try:
+            with open(self.root / rel, "rb") as fh:
+                if start is None:
+                    data = fh.read()
+                else:
+                    fh.seek(start)
+                    data = fh.read(stop - start)
+        except FileNotFoundError:
+            return None
+        self.bytes += len(data)
+        return data
+
+    def list(self) -> list[str]:
+        self.requests += 1
+        return sorted(p.name for p in self.root.iterdir())
+
+
+# --------------------------------------------------------------------
 # Synthetic datasets
 # --------------------------------------------------------------------
 

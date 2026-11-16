@@ -1,0 +1,223 @@
+block,geometry,n_target,n_vertices,n_objects,op,impl,unit,value,ci_hw,n_runs,detail
+bulk,meshes,1000,864,6,write_full,zarr-vectors,s,0.112913,0.045227,5,
+bulk,meshes,1000,864,6,write_full,STL,s,0.000525,2.7e-05,200,
+bulk,meshes,1000,864,6,read_full,zarr-vectors,s,0.010987,0.001531,46,
+bulk,meshes,1000,864,6,read_full,STL,s,2.9e-05,3e-06,200,
+object,meshes,1000,864,6,fetch_one,zarr-vectors,s,0.009935,0.000877,51,chunks= then filter (no object_ids= on read_mesh); reads 1x the object
+object,meshes,1000,864,6,fetch_one,STL,s,2.9e-05,2e-06,200,no object index: full read
+bulk,meshes,10000,9936,69,write_full,zarr-vectors,s,0.210449,0.01456,5,
+bulk,meshes,10000,9936,69,write_full,STL,s,0.00177,7.4e-05,200,
+bulk,meshes,10000,9936,69,read_full,zarr-vectors,s,0.051157,0.004212,10,
+bulk,meshes,10000,9936,69,read_full,STL,s,0.000108,4e-06,200,
+object,meshes,10000,9936,69,fetch_one,zarr-vectors,s,0.030201,0.000258,17,chunks= then filter (no object_ids= on read_mesh); reads 1x the object
+object,meshes,10000,9936,69,fetch_one,STL,s,0.000109,2e-06,200,no object index: full read
+bulk,meshes,100000,99936,694,write_full,zarr-vectors,s,0.552403,0.050885,5,
+bulk,meshes,100000,99936,694,write_full,STL,s,0.012805,0.000783,40,
+bulk,meshes,100000,99936,694,read_full,zarr-vectors,s,0.29906,0.030751,5,
+bulk,meshes,100000,99936,694,read_full,STL,s,0.001108,2e-05,200,
+object,meshes,100000,99936,694,fetch_one,zarr-vectors,s,0.275411,0.025837,5,chunks= then filter (no object_ids= on read_mesh); reads 10x the object
+object,meshes,100000,99936,694,fetch_one,STL,s,0.001085,1.7e-05,200,no object index: full read
+bulk,meshes,1000000,999936,6944,write_full,zarr-vectors,s,2.154354,0.108705,5,
+bulk,meshes,1000000,999936,6944,write_full,STL,s,0.155259,0.129341,5,
+bulk,meshes,1000000,999936,6944,read_full,zarr-vectors,s,2.664909,0.042145,5,
+bulk,meshes,1000000,999936,6944,read_full,STL,s,0.0128,0.000686,40,
+object,meshes,1000000,999936,6944,fetch_one,zarr-vectors,s,2.620357,0.041073,5,chunks= then filter (no object_ids= on read_mesh); reads 70x the object
+object,meshes,1000000,999936,6944,fetch_one,STL,s,0.012764,0.00047,40,no object index: full read
+chunks,meshes,8,999936,6944,fetch_one,zarr-vectors,s,2.61133,0.026542,5,chunk side 500; reads 959x the object
+chunks,meshes,8,999936,6944,write_full,zarr-vectors,s,1.138643,0.0,1,chunk side 500; reads 959x the object
+chunks,meshes,64,999936,6944,fetch_one,zarr-vectors,s,2.5275,0.01776,5,chunk side 250; reads 138x the object
+chunks,meshes,64,999936,6944,write_full,zarr-vectors,s,1.837554,0.0,1,chunk side 250; reads 138x the object
+chunks,meshes,125,999936,6944,fetch_one,zarr-vectors,s,2.60574,0.03912,5,chunk side 200; reads 70x the object
+chunks,meshes,125,999936,6944,write_full,zarr-vectors,s,2.034121,0.0,1,chunk side 200; reads 70x the object
+chunks,meshes,512,999936,6944,fetch_one,zarr-vectors,s,2.896391,0.166399,5,chunk side 125; reads 16x the object
+chunks,meshes,512,999936,6944,write_full,zarr-vectors,s,3.591285,0.0,1,chunk side 125; reads 16x the object
+chunks,meshes,1000,999936,6944,fetch_one,zarr-vectors,s,3.33848,0.709021,5,chunk side 100; reads 23x the object
+chunks,meshes,1000,999936,6944,write_full,zarr-vectors,s,4.875163,0.0,1,chunk side 100; reads 23x the object
+chunks,meshes,8000,999936,6944,fetch_one,zarr-vectors,s,10.862232,6.085656,5,chunk side 50; reads 10x the object
+chunks,meshes,8000,999936,6944,write_full,zarr-vectors,s,27.229929,0.0,1,chunk side 50; reads 10x the object
+fragments,points,8,1000000,1,fetch_one,zarr-vectors,s,0.002404,3.4e-05,200,chunk side 500; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,8,1000000,9,fetch_one,zarr-vectors,s,0.027547,0.004081,19,chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
+fragments,meshes,8,1000000,8,fetch_one,zarr-vectors,s,2.980206,0.011477,5,chunk side 500; 2304-vertex patch spans 8 chunks; 1002240 vertices read
+fragments,points,64,1000000,1,fetch_one,zarr-vectors,s,0.001194,1.9e-05,200,chunk side 250; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,64,1000000,27,fetch_one,zarr-vectors,s,0.017976,0.000143,28,chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
+fragments,meshes,64,1000000,24,fetch_one,zarr-vectors,s,2.729169,0.010052,5,chunk side 250; 2304-vertex patch spans 24 chunks; 417920 vertices read
+fragments,points,125,1000000,1,fetch_one,zarr-vectors,s,0.001168,2.2e-05,200,chunk side 200; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,125,1000000,23,fetch_one,zarr-vectors,s,0.012063,0.000121,42,chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
+fragments,meshes,125,1000000,16,fetch_one,zarr-vectors,s,2.652494,0.011424,5,chunk side 200; 2304-vertex patch spans 16 chunks; 143510 vertices read
+fragments,points,512,1000000,1,fetch_one,zarr-vectors,s,0.001386,4.1e-05,200,chunk side 125; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,512,1000000,47,fetch_one,zarr-vectors,s,0.011857,0.000325,43,chunk side 125; 1024-vertex streamline spans 47 chunks; 1024 vertices read
+fragments,meshes,512,1000000,48,fetch_one,zarr-vectors,s,2.907901,0.018976,5,chunk side 125; 2304-vertex patch spans 48 chunks; 118896 vertices read
+fragments,points,1000,1000000,1,fetch_one,zarr-vectors,s,0.001164,2.2e-05,200,chunk side 100; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,1000,1000000,42,fetch_one,zarr-vectors,s,0.010646,0.000516,47,chunk side 100; 1024-vertex streamline spans 42 chunks; 1024 vertices read
+fragments,meshes,1000,1000000,49,fetch_one,zarr-vectors,s,3.17636,0.094249,5,chunk side 100; 2304-vertex patch spans 49 chunks; 64943 vertices read
+fragments,points,8000,1000000,1,fetch_one,zarr-vectors,s,0.001665,2.6e-05,200,chunk side 50; one point spans 1 chunks; 1 vertices read
+fragments,streamlines,8000,1000000,98,fetch_one,zarr-vectors,s,0.011151,0.000173,45,chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
+fragments,meshes,8000,1000000,247,fetch_one,zarr-vectors,s,11.968571,0.742661,5,chunk side 50; 2304-vertex patch spans 247 chunks; 39737 vertices read
+mesh_precomputed,meshes,1000,864,6,write_full,zarr-vectors (zstd),s,0.084823,0.010062,7,
+mesh_precomputed,meshes,1000,864,6,bytes,zarr-vectors (zstd),bytes,22883,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,zarr-vectors (zstd),s,0.010156,0.001375,50,
+mesh_precomputed,meshes,1000,864,6,fetch_one,zarr-vectors (zstd),s,0.008461,8.3e-05,60,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,zarr-vectors (zstd),requests,67.5,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,zarr-vectors (zstd),bytes,38235.0,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,write_full,"zarr-vectors (zstd, sharded)",s,0.087027,0.005737,7,
+mesh_precomputed,meshes,1000,864,6,bytes,"zarr-vectors (zstd, sharded)",bytes,42947,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,"zarr-vectors (zstd, sharded)",s,0.029485,0.001878,17,
+mesh_precomputed,meshes,1000,864,6,fetch_one,"zarr-vectors (zstd, sharded)",s,0.018452,0.000813,28,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,92.83333333333333,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,103449.0,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,write_full,zarr-vectors (no codec),s,0.155556,0.070784,7,
+mesh_precomputed,meshes,1000,864,6,bytes,zarr-vectors (no codec),bytes,58629,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,zarr-vectors (no codec),s,0.009357,0.001363,54,
+mesh_precomputed,meshes,1000,864,6,fetch_one,zarr-vectors (no codec),s,0.008252,6.5e-05,61,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,zarr-vectors (no codec),requests,67.5,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,zarr-vectors (no codec),bytes,66827.66666666667,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,write_full,"zarr-vectors (no codec, sharded)",s,0.09175,0.006619,7,
+mesh_precomputed,meshes,1000,864,6,bytes,"zarr-vectors (no codec, sharded)",bytes,78357,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,"zarr-vectors (no codec, sharded)",s,0.025262,0.001109,20,
+mesh_precomputed,meshes,1000,864,6,fetch_one,"zarr-vectors (no codec, sharded)",s,0.017135,0.000661,30,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,92.83333333333333,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,130865.66666666667,0.0,6,chunks=
+mesh_precomputed,meshes,1000,864,6,write_full,precomputed mesh,s,0.002536,6.6e-05,198,
+mesh_precomputed,meshes,1000,864,6,bytes,precomputed mesh,bytes,27973,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,precomputed mesh,s,0.000218,6.1e-05,200,
+mesh_precomputed,meshes,1000,864,6,fetch_one,precomputed mesh,s,5.9e-05,3e-06,200,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,precomputed mesh,requests,3.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,precomputed mesh,bytes,4693.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,write_full,precomputed mesh (sharded),s,0.000671,5.8e-05,200,
+mesh_precomputed,meshes,1000,864,6,bytes,precomputed mesh (sharded),bytes,28207,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,precomputed mesh (sharded),s,0.000114,2.3e-05,200,
+mesh_precomputed,meshes,1000,864,6,fetch_one,precomputed mesh (sharded),s,8.2e-05,2e-06,200,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,precomputed mesh (sharded),bytes,5027.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,write_full,"precomputed mesh (sharded, gzip)",s,0.001587,6.3e-05,200,
+mesh_precomputed,meshes,1000,864,6,bytes,"precomputed mesh (sharded, gzip)",bytes,10931,0.0,1,
+mesh_precomputed,meshes,1000,864,6,read_full,"precomputed mesh (sharded, gzip)",s,0.000171,2.4e-05,200,
+mesh_precomputed,meshes,1000,864,6,fetch_one,"precomputed mesh (sharded, gzip)",s,8.6e-05,1e-06,200,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,6,by id
+mesh_precomputed,meshes,1000,864,6,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2148.5,0.0,6,by id
+mesh_precomputed,meshes,10000,9936,69,write_full,zarr-vectors (zstd),s,0.194861,0.012221,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,zarr-vectors (zstd),bytes,130774,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,zarr-vectors (zstd),s,0.05084,0.006228,10,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,zarr-vectors (zstd),s,0.029629,0.000259,17,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,zarr-vectors (zstd),requests,205.0625,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,zarr-vectors (zstd),bytes,110058.4375,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,write_full,"zarr-vectors (zstd, sharded)",s,0.160429,0.006663,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,"zarr-vectors (zstd, sharded)",bytes,155854,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,"zarr-vectors (zstd, sharded)",s,0.160978,0.009323,7,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,"zarr-vectors (zstd, sharded)",s,0.078586,0.003583,7,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,358.125,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,435947.6875,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,write_full,zarr-vectors (no codec),s,0.199802,0.021096,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,zarr-vectors (no codec),bytes,553864,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,zarr-vectors (no codec),s,0.045876,0.003452,11,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,zarr-vectors (no codec),s,0.028727,0.000354,18,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,zarr-vectors (no codec),requests,205.0625,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,zarr-vectors (no codec),bytes,460866.25,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,write_full,"zarr-vectors (no codec, sharded)",s,0.132819,0.006709,7,
+mesh_precomputed,meshes,10000,9936,69,bytes,"zarr-vectors (no codec, sharded)",bytes,578524,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,"zarr-vectors (no codec, sharded)",s,0.141475,0.010594,7,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,"zarr-vectors (no codec, sharded)",s,0.072549,0.00378,7,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,358.125,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,785159.5,0.0,16,chunks=
+mesh_precomputed,meshes,10000,9936,69,write_full,precomputed mesh,s,0.026959,0.001215,19,
+mesh_precomputed,meshes,10000,9936,69,bytes,precomputed mesh,bytes,321360,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,precomputed mesh,s,0.001668,6.4e-05,200,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,precomputed mesh,s,7.2e-05,5e-06,200,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,precomputed mesh,requests,3.0,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,precomputed mesh,bytes,4693.8125,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,write_full,precomputed mesh (sharded),s,0.001095,1.6e-05,200,
+mesh_precomputed,meshes,10000,9936,69,bytes,precomputed mesh (sharded),bytes,321835,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,precomputed mesh (sharded),s,0.000248,2.3e-05,200,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,precomputed mesh (sharded),s,8.4e-05,2e-06,200,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,precomputed mesh (sharded),bytes,5298.5,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,write_full,"precomputed mesh (sharded, gzip)",s,0.012096,9.9e-05,42,
+mesh_precomputed,meshes,10000,9936,69,bytes,"precomputed mesh (sharded, gzip)",bytes,122525,0.0,1,
+mesh_precomputed,meshes,10000,9936,69,read_full,"precomputed mesh (sharded, gzip)",s,0.000912,7.7e-05,200,
+mesh_precomputed,meshes,10000,9936,69,fetch_one,"precomputed mesh (sharded, gzip)",s,0.000131,1.8e-05,200,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,10000,9936,69,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2395.875,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,write_full,zarr-vectors (zstd),s,0.479774,0.036138,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,zarr-vectors (zstd),bytes,1077643,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,zarr-vectors (zstd),s,0.299317,0.023132,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,zarr-vectors (zstd),s,0.2614,0.005215,7,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,zarr-vectors (zstd),requests,617.5,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,zarr-vectors (zstd),bytes,663983.9375,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,write_full,"zarr-vectors (zstd, sharded)",s,0.378774,0.008946,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,"zarr-vectors (zstd, sharded)",bytes,1127803,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,"zarr-vectors (zstd, sharded)",s,0.582897,0.03493,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,"zarr-vectors (zstd, sharded)",s,0.416226,0.014746,7,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,1133.0,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,1741397.9375,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,write_full,zarr-vectors (no codec),s,0.476508,0.047424,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,zarr-vectors (no codec),bytes,5363956,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,zarr-vectors (no codec),s,0.288383,0.014096,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,zarr-vectors (no codec),s,0.26432,0.013701,7,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,zarr-vectors (no codec),requests,617.5,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,zarr-vectors (no codec),bytes,4230304.25,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,write_full,"zarr-vectors (no codec, sharded)",s,0.327928,0.007736,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,"zarr-vectors (no codec, sharded)",bytes,5413276,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,"zarr-vectors (no codec, sharded)",s,0.513116,0.024971,7,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,"zarr-vectors (no codec, sharded)",s,0.381952,0.00556,7,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,1133.0,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,5304022.25,0.0,16,chunks=
+mesh_precomputed,meshes,100000,99936,694,write_full,precomputed mesh,s,0.310037,0.031965,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,precomputed mesh,bytes,3232579,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,precomputed mesh,s,0.070444,0.001966,8,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,precomputed mesh,s,6.6e-05,6e-06,200,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,precomputed mesh,requests,3.0,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,precomputed mesh,bytes,4694.75,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,write_full,precomputed mesh (sharded),s,0.007324,0.000461,69,
+mesh_precomputed,meshes,100000,99936,694,bytes,precomputed mesh (sharded),bytes,3234783,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,precomputed mesh (sharded),s,0.001714,0.000118,200,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,precomputed mesh (sharded),s,8.3e-05,1e-06,200,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,precomputed mesh (sharded),bytes,5403.5,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,write_full,"precomputed mesh (sharded, gzip)",s,0.109604,0.000757,7,
+mesh_precomputed,meshes,100000,99936,694,bytes,"precomputed mesh (sharded, gzip)",bytes,1231076,0.0,1,
+mesh_precomputed,meshes,100000,99936,694,read_full,"precomputed mesh (sharded, gzip)",s,0.00812,0.000345,62,
+mesh_precomputed,meshes,100000,99936,694,fetch_one,"precomputed mesh (sharded, gzip)",s,9.3e-05,2e-06,200,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,100000,99936,694,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2528.75,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,write_full,zarr-vectors (zstd),s,2.074205,0.409812,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,zarr-vectors (zstd),bytes,10184347,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,zarr-vectors (zstd),s,2.624675,0.048982,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,zarr-vectors (zstd),s,2.556141,0.020382,5,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,zarr-vectors (zstd),requests,1304.125,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,zarr-vectors (zstd),bytes,5470915.8125,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,"zarr-vectors (zstd, sharded)",s,1.802255,0.133766,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,"zarr-vectors (zstd, sharded)",bytes,10272127,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,"zarr-vectors (zstd, sharded)",s,3.110449,0.031431,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,"zarr-vectors (zstd, sharded)",s,2.904054,0.036919,5,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,"zarr-vectors (zstd, sharded)",requests,2431.25,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,"zarr-vectors (zstd, sharded)",bytes,7811826.3125,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,zarr-vectors (no codec),s,2.015494,0.370607,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,zarr-vectors (no codec),bytes,53259824,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,zarr-vectors (no codec),s,2.584478,0.079297,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,zarr-vectors (no codec),s,2.51932,0.007401,5,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,zarr-vectors (no codec),requests,1304.125,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,zarr-vectors (no codec),bytes,41309489.0,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,"zarr-vectors (no codec, sharded)",s,1.722363,0.058508,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,"zarr-vectors (no codec, sharded)",bytes,53346134,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,"zarr-vectors (no codec, sharded)",s,2.956423,0.034374,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,"zarr-vectors (no codec, sharded)",s,2.804502,0.018238,5,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,"zarr-vectors (no codec, sharded)",requests,2431.25,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,"zarr-vectors (no codec, sharded)",bytes,43643553.5,0.0,16,chunks=
+mesh_precomputed,meshes,1000000,999936,6944,write_full,precomputed mesh,s,3.874975,0.735185,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,precomputed mesh,bytes,32351023,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,precomputed mesh,s,1.883547,3.169974,5,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,precomputed mesh,s,0.00011,3.1e-05,200,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,precomputed mesh,requests,3.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,precomputed mesh,bytes,4695.6875,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,write_full,precomputed mesh (sharded),s,0.080198,0.026318,7,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,precomputed mesh (sharded),bytes,32363367,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,precomputed mesh (sharded),s,0.017479,0.001113,29,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,precomputed mesh (sharded),s,8.5e-05,2e-06,200,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,precomputed mesh (sharded),requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,precomputed mesh (sharded),bytes,5537.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,write_full,"precomputed mesh (sharded, gzip)",s,1.085056,0.029304,3,
+mesh_precomputed,meshes,1000000,999936,6944,bytes,"precomputed mesh (sharded, gzip)",bytes,12306235,0.0,1,
+mesh_precomputed,meshes,1000000,999936,6944,read_full,"precomputed mesh (sharded, gzip)",s,0.077633,0.00337,7,
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one,"precomputed mesh (sharded, gzip)",s,0.000116,5e-06,200,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_requests,"precomputed mesh (sharded, gzip)",requests,4.0,0.0,16,by id
+mesh_precomputed,meshes,1000000,999936,6944,fetch_one_bytes,"precomputed mesh (sharded, gzip)",bytes,2650.25,0.0,16,by id

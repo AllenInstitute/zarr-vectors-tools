@@ -674,3 +674,260 @@ def hdf5_read_bbox(path, low, high, chunk_shape, bounds):
     if not parts:
         return np.zeros((0, 3), np.float32)
     return _bbox_filter(np.concatenate(parts), low, high)
+
+
+# ====================================================================
+# Neuroglancer precomputed meshes
+# ====================================================================
+#
+# The competitor a mesh store is actually up against: precomputed's
+# legacy (single-resolution) mesh format, which is what segmentation
+# layers ship.  Every object is its own fragment, so reading one mesh
+# reads exactly that mesh -- the property a chunked store has to earn
+# back through its fragment index.
+#
+# Layout (https://github.com/google/neuroglancer, precomputed mesh and
+# sharded specs):
+#
+#   info                  {"@type": "neuroglancer_legacy_mesh", ...}
+#
+#   unsharded:
+#     <id>:0              manifest, {"fragments": ["<id>"]}
+#     <id>                fragment: uint32 n_vertices, float32 xyz * n,
+#                         uint32 triangle indices to end of file
+#
+#   sharded ("sharding" in info): no manifests; a segment's mesh is one
+#   fragment, stored as chunk <id> of a neuroglancer_uint64_sharded_v1
+#   shard file <shard hex>.shard:
+#     shard index         2**minishard_bits * (uint64 start, uint64 end),
+#                         byte range of each minishard index, relative to
+#                         the end of the shard index
+#     chunk data          fragments, raw or gzip per data_encoding
+#     minishard indices   uint64le[3, n]: chunk ids (delta-coded), start
+#                         offsets (each relative to the end of the
+#                         previous chunk; the first to the end of the
+#                         shard index), sizes
+#
+# Reading one mesh is then two reads unsharded (manifest, fragment) and
+# three ranged reads sharded (shard index entry, minishard index,
+# fragment), after the ``info`` read -- which the readers below make on
+# every call, as a zarr-vectors read reads its metadata on every call.
+#
+# Readers fetch through a ``_harness.FileFetch`` so the same code is
+# timed and counted.
+
+_PCM_TYPE = "neuroglancer_legacy_mesh"
+_SHARD_TYPE = "neuroglancer_uint64_sharded_v1"
+
+
+def _pcm_objects(vertices, faces, object_ids):
+    """Yield ``(id, vertices, local_faces)`` per object.
+
+    A face belongs to the object of its first vertex -- the generator
+    never makes a face that spans two -- and its indices are rewritten to
+    that object's own vertex numbering.
+    """
+    vertices = np.asarray(vertices, dtype="<f4")
+    faces = np.asarray(faces, dtype=np.int64)
+    oids = np.asarray(object_ids, dtype=np.int64)
+    order = np.argsort(oids, kind="stable")
+    ids, starts = np.unique(oids[order], return_index=True)
+    stops = np.r_[starts[1:], len(order)]
+    local = np.empty(len(oids), dtype=np.int64)
+    local[order] = np.arange(len(order)) - np.repeat(starts, stops - starts)
+    owner = oids[faces[:, 0]]
+    forder = np.argsort(owner, kind="stable")
+    fstarts = np.searchsorted(owner[forder], ids, side="left")
+    fstops = np.searchsorted(owner[forder], ids, side="right")
+    for k, oid in enumerate(ids.tolist()):
+        rows = order[starts[k]:stops[k]]
+        tri = faces[forder[fstarts[k]:fstops[k]]]
+        yield oid, vertices[rows], local[tri]
+
+
+def _pcm_encode(verts, tri) -> bytes:
+    return (struct.pack("<I", len(verts))
+            + np.ascontiguousarray(verts, dtype="<f4").tobytes()
+            + np.ascontiguousarray(tri, dtype="<u4").tobytes())
+
+
+def _pcm_decode(blob: bytes):
+    n = struct.unpack_from("<I", blob, 0)[0]
+    verts = np.frombuffer(blob, dtype="<f4", count=3 * n, offset=4).reshape(n, 3)
+    tri = np.frombuffer(blob, dtype="<u4", offset=4 + 12 * n).reshape(-1, 3)
+    return {"vertices": np.array(verts), "faces": tri.astype(np.int64)}
+
+
+def precomputed_mesh_sharding(n_objects: int, *, data_encoding: str = "raw") -> dict:
+    """Sharding parameters for ``n_objects`` meshes.
+
+    One shard -- the same packing as the zarr-vectors sharded store it is
+    compared against, whose 125 chunk cells all land in one shard -- and
+    minishards of ~32 meshes, so a minishard index is under a kilobyte.
+    ``identity`` hashing, since the ids are dense and already spread.
+    """
+    minishard_bits = max(0, int(np.ceil(np.log2(max(1, n_objects) / 32))))
+    return {
+        "@type": _SHARD_TYPE,
+        "hash": "identity",
+        "preshift_bits": 0,
+        "minishard_bits": minishard_bits,
+        "shard_bits": 0,
+        "minishard_index_encoding": "raw",
+        "data_encoding": data_encoding,
+    }
+
+
+def _shard_of(chunk_id: int, sharding: dict) -> tuple[int, int]:
+    """``(shard, minishard)`` for one chunk id (identity hash)."""
+    h = int(chunk_id) >> int(sharding["preshift_bits"])
+    mb, sb = int(sharding["minishard_bits"]), int(sharding["shard_bits"])
+    return (h >> mb) & ((1 << sb) - 1), h & ((1 << mb) - 1)
+
+
+def _shard_name(shard: int, sharding: dict) -> str:
+    digits = max(1, -(-int(sharding["shard_bits"]) // 4))
+    return f"{shard:0{digits}x}.shard"
+
+
+def precomputed_mesh_write(root, vertices, faces, object_ids, *, sharding=None):
+    """Write a legacy precomputed mesh layer, one fragment per object."""
+    import gzip as _gzip
+    import json
+
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    info = {"@type": _PCM_TYPE}
+    if sharding is not None:
+        info["sharding"] = sharding
+    (root / "info").write_text(json.dumps(info))
+
+    if sharding is None:
+        for oid, verts, tri in _pcm_objects(vertices, faces, object_ids):
+            (root / str(oid)).write_bytes(_pcm_encode(verts, tri))
+            (root / f"{oid}:0").write_text(json.dumps({"fragments": [str(oid)]}))
+        return
+
+    gz = sharding.get("data_encoding", "raw") == "gzip"
+    shards: dict[int, dict[int, list[tuple[int, bytes]]]] = {}
+    for oid, verts, tri in _pcm_objects(vertices, faces, object_ids):
+        blob = _pcm_encode(verts, tri)
+        if gz:
+            blob = _gzip.compress(blob, compresslevel=6)
+        shard, mini = _shard_of(oid, sharding)
+        shards.setdefault(shard, {}).setdefault(mini, []).append((oid, blob))
+
+    n_mini = 1 << int(sharding["minishard_bits"])
+    for shard, minis in shards.items():
+        data = bytearray()
+        index_blobs: dict[int, bytes] = {}
+        for mini in sorted(minis):
+            chunks = sorted(minis[mini])
+            ids = np.array([c[0] for c in chunks], dtype=np.int64)
+            sizes = np.array([len(c[1]) for c in chunks], dtype=np.int64)
+            starts = []
+            for _, blob in chunks:
+                starts.append(len(data))
+                data += blob
+            starts = np.array(starts, dtype=np.int64)
+            prev_end = np.r_[0, starts[:-1] + sizes[:-1]]
+            table = np.stack([np.diff(ids, prepend=0), starts - prev_end, sizes])
+            index_blobs[mini] = table.astype("<u8").tobytes()
+        shard_index = np.zeros((n_mini, 2), dtype="<u8")
+        for mini in sorted(index_blobs):
+            shard_index[mini] = (len(data), len(data) + len(index_blobs[mini]))
+            data += index_blobs[mini]
+        with open(root / _shard_name(shard, sharding), "wb") as fh:
+            fh.write(shard_index.tobytes())
+            fh.write(bytes(data))
+
+
+def _pcm_info(fetch) -> dict:
+    import json
+    return json.loads(fetch.get("info"))
+
+
+def _minishard_chunks(table, index_bytes: int):
+    """``(ids, starts, sizes)`` from a decoded ``[3, n]`` minishard index;
+    starts are absolute offsets into the shard file."""
+    ids = np.cumsum(table[0])
+    sizes = table[2]
+    starts = np.empty_like(sizes)
+    pos = 0
+    for i, (delta, size) in enumerate(zip(table[1].tolist(), sizes.tolist())):
+        starts[i] = pos + delta
+        pos = starts[i] + size
+    return ids, starts + index_bytes, sizes
+
+
+def precomputed_mesh_read_one(fetch, object_id: int):
+    """One mesh by id: two reads unsharded, three ranged reads sharded."""
+    import gzip as _gzip
+    import json
+
+    info = _pcm_info(fetch)
+    sharding = info.get("sharding")
+    if sharding is None:
+        manifest = json.loads(fetch.get(f"{int(object_id)}:0"))
+        parts = [_pcm_decode(fetch.get(f)) for f in manifest["fragments"]]
+        return parts[0] if len(parts) == 1 else _pcm_concat(parts)
+    shard, mini = _shard_of(object_id, sharding)
+    name = _shard_name(shard, sharding)
+    index_bytes = 16 << int(sharding["minishard_bits"])
+    entry = fetch.get(name, 16 * mini, 16 * mini + 16)
+    lo, hi = np.frombuffer(entry, dtype="<u8").tolist()
+    if lo == hi:
+        return None
+    table = np.frombuffer(
+        fetch.get(name, index_bytes + lo, index_bytes + hi), dtype="<u8",
+    ).reshape(3, -1).astype(np.int64)
+    ids, starts, sizes = _minishard_chunks(table, index_bytes)
+    hit = np.flatnonzero(ids == int(object_id))
+    if hit.size == 0:
+        return None
+    s, n = int(starts[hit[0]]), int(sizes[hit[0]])
+    blob = fetch.get(name, s, s + n)
+    if sharding.get("data_encoding") == "gzip":
+        blob = _gzip.decompress(blob)
+    return _pcm_decode(blob)
+
+
+def _pcm_concat(parts):
+    verts, tris, base = [], [], 0
+    for p in parts:
+        verts.append(p["vertices"])
+        tris.append(p["faces"] + base)
+        base += len(p["vertices"])
+    return {"vertices": np.concatenate(verts), "faces": np.concatenate(tris)}
+
+
+def precomputed_mesh_read_full(fetch):
+    """Every mesh: each fragment file unsharded, each shard file whole."""
+    import gzip as _gzip
+
+    info = _pcm_info(fetch)
+    sharding = info.get("sharding")
+    meshes = []
+    if sharding is None:
+        for name in fetch.list():
+            if name != "info" and ":" not in name:
+                meshes.append(_pcm_decode(fetch.get(name)))
+        return meshes
+    gz = sharding.get("data_encoding") == "gzip"
+    index_bytes = 16 << int(sharding["minishard_bits"])
+    for name in fetch.list():
+        if not name.endswith(".shard"):
+            continue
+        whole = fetch.get(name)
+        index = np.frombuffer(whole[:index_bytes], dtype="<u8").reshape(-1, 2)
+        for lo, hi in index.tolist():
+            if lo == hi:
+                continue
+            table = np.frombuffer(
+                whole[index_bytes + lo:index_bytes + hi], dtype="<u8",
+            ).reshape(3, -1).astype(np.int64)
+            _, starts, sizes = _minishard_chunks(table, index_bytes)
+            for s, n in zip(starts.tolist(), sizes.tolist()):
+                blob = whole[s:s + n]
+                meshes.append(_pcm_decode(_gzip.decompress(blob) if gz else blob))
+    return meshes
