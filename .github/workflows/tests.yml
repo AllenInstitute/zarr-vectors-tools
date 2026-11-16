@@ -62,7 +62,7 @@ env:
   # object and octree work and follows its behaviour (contiguous level
   # removal, NGFF transforms, [child, parent] skeleton links), which core's
   # main does not have yet. Move to main once the stack merges.
-  CORE_SHA: 116bf6df350f97f93a12b92eda3a552190fb453e
+  CORE_SHA: 0d92e7cbeb929332303ee22bb2f3beb59422602a
   CORE_REPO: https://github.com/AllenInstitute/zarr-vectors-py
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
