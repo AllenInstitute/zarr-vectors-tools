@@ -39,3 +39,36 @@
   TOTAL        1:29:34
 wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv
 wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/run_large.log
+=== run_large 2026-09-10 17:18:47 sizes=1000,10000,100000,1000000,10000000 out=/home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv ===
+
+--- block 1/1: by_id (elapsed 0:00) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks by_id --workdir /tmp/claude-1001/-home-andrew-scripts-zarr-vectors-tools/5e8ceb33-296c-40e5-b9a7-a4394c0cebea/scratchpad/sweep_work --replace
+--- by_id done in 10:17 ---
+
+=== summary ===
+  by_id          10:17  100.0%
+  TOTAL          10:17
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/run_large.log
+=== run_large 2026-09-10 18:13:22 sizes=1000,10000,100000,1000000,10000000 out=/home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv ===
+
+--- block 1/1: chunks_by_id (elapsed 0:00) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks chunks_by_id --workdir /tmp/claude-1001/-home-andrew-scripts-zarr-vectors-tools/5e8ceb33-296c-40e5-b9a7-a4394c0cebea/scratchpad/sweep_work --replace
+--- chunks_by_id done in 2:52 ---
+
+=== summary ===
+  chunks_by_id      2:52  100.0%
+  TOTAL           2:52
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/run_large.log
+=== run_large 2026-09-10 18:47:54 sizes=1000,10000,100000,1000000,10000000 out=/home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv ===
+
+--- block 1/1: chunked_by_id (elapsed 0:00) ---
+    /home/andrew/miniconda3/envs/zarr-vectors/bin/python /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/run_sweep.py --sizes 1000,10000,100000,1000000,10000000 --out /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv --blocks chunked_by_id --workdir /tmp/claude-1001/-home-andrew-scripts-zarr-vectors-tools/5e8ceb33-296c-40e5-b9a7-a4394c0cebea/scratchpad/sweep_work --replace
+--- chunked_by_id done in 6:41 ---
+
+=== summary ===
+  chunked_by_id      6:41  100.0%
+  TOTAL           6:41
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/measurements.csv
+wrote /home/andrew/scripts/zarr-vectors-tools/benchmarks/paper/results/large/run_large.log

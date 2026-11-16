@@ -37,6 +37,7 @@ results/panels/A_storage_per_vertex.{png,pdf}   +  A_storage_per_vertex_key
                 F_read_region                      F_read_region_key
                 F2_read_region_equal_box           F2_read_region_equal_box_key
                 G_vs_precomputed                   G_vs_precomputed_key
+                G2_vs_precomputed_by_id            G2_vs_precomputed_by_id_key
                 H_read_one_vs_chunks               H_read_one_vs_chunks_key
                 H2_read_one_vs_fragments           H2_read_one_vs_fragments_key
 ```
@@ -236,6 +237,44 @@ from 24 ms at 8 chunks to 9.4 ms at 1000 and worsens to 14 ms at 8000,
 and a mesh sits at 2.4–3.8 s throughout. `bin_shape` is held at a quarter
 of the chunk side so the sweep moves one thing.
 
+**The dash-dot lines in H cut the same datasets by object id instead**
+(the `chunks_by_id` block). Streamlines and meshes are written with
+`chunk_by_attribute` on an `id_bucket = oid // B` vertex attribute over a
+single spatial cell, with B chosen so the store has as many id cells as
+the solid line's grid has chunks — a mesh store has only 6.9 k objects,
+so its finest grid stops at one object per cell. Object `oid` is then
+fragment `oid % B` of cell `(oid // B, 0, 0, 0)`, and `read_fragment`
+returns it without reading a manifest. It is the other end of a
+trade-off rather than a better configuration: with one spatial cell, a
+region query reads every cell there is. H does not measure that; the
+point-cloud block behind G2 does (below). As measured, a streamline fetch takes 3.1–3.9 ms at every id-cell count
+against 9.4–24 ms on the spatial grid, and a mesh fetch 2.4–6.2 ms
+against 2.4–3.8 s. Writing costs about the same at coarse grids (within
+15%) and less at fine ones: 11 s against 40 s for streamlines near 8000
+cells, 37 s against 55 s for meshes. The same store swept across N at a
+fixed ~4 k vertices per cell is the
+`by_id` block — rows under `object_by_id`, in the supplementary table but
+not plotted. Four things to know when reading either:
+
+- The mesh gap to the solid line is mostly `read_mesh` having no
+  `object_ids=`, not the manifest. For streamlines the manifest read is
+  about a millisecond (5.3 ms through it against 4.1 ms without, same
+  store, 10⁶); the rest of the gap is a spatial chunk carrying far more
+  of other objects' vertices than an id cell does.
+- Writing it costs about what the spatial store does up to 10⁶, and less
+  for streamlines at every size (36 s against 44 s at 10⁷). The mesh
+  write outgrows it: 18 s against 17 s at 10⁶, then 542 s against 151 s
+  at 10⁷.
+- The address is how the writers order fragments today, not a documented
+  contract, so both blocks check it against the store's manifests and the
+  source objects before timing, and fail rather than time the wrong read
+  if a core change breaks it.
+- Points are left out of H. The spatial fetch already reads one cell,
+  and `chunk_by_attribute` forces a per-point object index on the writer,
+  so the layout reads one point more slowly (3.8 ms against 1.6 ms at
+  10⁶) and writes 24× slower. G2 measures it anyway, against
+  precomputed's `by_id`, where it is the like-for-like comparison.
+
 **H2 is the panel that answers "does crossing chunks cost?"** H cannot:
 its objects are 32-unit random walks against chunks of 50 to 500 units,
 so they span a mean of 1.1 cells at the coarse end and 3.1 at the fine
@@ -288,6 +327,21 @@ lines making a point the table already makes. What precomputed does not
 do is share storage between the two access patterns: the spatial index
 and `by_id` are independent copies of every annotation, which is where
 its size goes.
+
+**G2 is G with the point cloud chunked by id as a third implementation**
+(the `chunked_by_id` block). Precomputed answers "read one" from its
+`by_id` index, and a store addressed the same way — cell and fragment
+arithmetic on the id, no manifest — is the like-for-like opponent. It
+does not close the gap. Read one is 3.1–3.8 ms, *slower* than the
+spatial store's 1.6–2.2 ms and about 240× precomputed's 0.016 ms: the
+floor is the store's own read path (opening it, then a zarr read of the
+cell and its fragment index) against one plain file read. Building the
+layout costs 10.3 s at 10⁶ points against 0.43 s for the spatial store
+(24×), though still under precomputed's 47 s, which it overtakes above
+~1.2 k points. Reading everything is about the same (20 ms against 16 ms
+at 10⁶). The price is region queries: the ~100-object box has to read
+every id cell, 65 ms against 2.9 ms for the spatial store at 10⁶, which
+is in the supplementary table rather than on the panel.
 
 Single-object replacement and the query-size sweep are still measured and
 are in the supplementary table; they are not plotted. The figure carries

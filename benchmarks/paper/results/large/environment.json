@@ -8,10 +8,10 @@
   "numcodecs": "0.15.1",
   "nibabel": "5.4.2",
   "networkx": "3.6.1",
-  "zarr_vectors": "0.2.1.dev71+g9261255bb.d20260806",
-  "zarr_vectors_git": "169586a",
-  "zarr_vectors_tree_sha": "01754702d5d3",
-  "zarr_vectors_tools_git": "0f336cd-dirty",
+  "zarr_vectors": "0.2.1.dev85+g4b83b803b",
+  "zarr_vectors_git": "f6f178f-dirty",
+  "zarr_vectors_tree_sha": "882c7cbbcc08",
+  "zarr_vectors_tools_git": "794ff21-dirty",
   "domain": 1000.0,
   "chunk_shape": [
     200.0,
@@ -46,7 +46,7 @@
     "meshes": 144
   },
   "codec": "zstd",
-  "workdir": "/tmp/zv_large_work",
+  "workdir": "/tmp/claude-1001/-home-andrew-scripts-zarr-vectors-tools/5e8ceb33-296c-40e5-b9a7-a4394c0cebea/scratchpad/sweep_work",
   "workdir_fstype": "ext4",
   "fractions": [
     0.001,
@@ -65,5 +65,14 @@
     125.0,
     100.0,
     50.0
+  ],
+  "previous_run": {
+    "zarr_vectors": "0.2.1.dev71+g9261255bb.d20260806",
+    "zarr_vectors_git": "169586a",
+    "zarr_vectors_tree_sha": "01754702d5d3",
+    "zarr_vectors_tools_git": "0f336cd-dirty"
+  },
+  "mixed_run": [
+    "by_id"
   ]
 }

@@ -1,0 +1,73 @@
+{
+  "python": "3.11.15",
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "processor": "x86_64",
+  "cpu_count": 32,
+  "numpy": "2.0.2",
+  "zarr": "3.1.6",
+  "numcodecs": "0.15.1",
+  "nibabel": "5.4.2",
+  "networkx": "3.6.1",
+  "zarr_vectors": "0.9.3.dev39+gcd6a3c0e4.d20260924",
+  "zarr_vectors_git": "06a3bc8",
+  "zarr_vectors_tree_sha": "de79f2d905cd",
+  "zarr_vectors_tools_git": "794ff21-dirty",
+  "domain": 1000.0,
+  "chunk_shape": [
+    200.0,
+    200.0,
+    200.0
+  ],
+  "bin_shape": [
+    50.0,
+    50.0,
+    50.0
+  ],
+  "seed": 0,
+  "gpu": "NVIDIA RTX A2000 12GB",
+  "gpu_memory_bytes": 12479758336,
+  "cuda_driver": 13000,
+  "cuda_runtime": 12090,
+  "cupy": "13.6.0",
+  "nvcomp": "4.2.0",
+  "capabilities": {
+    "csr_fragments": true,
+    "array_manifests": true,
+    "manifests_csr_read": true,
+    "object_attribute_columns": true,
+    "array_link_cells": true,
+    "read_cells": true,
+    "read_neighbourhood": true,
+    "batched_link_reads": true,
+    "defer_presence": true,
+    "append_safe_sharding": true,
+    "dense_manifests": true,
+    "device_arrays": true,
+    "device_decode": true,
+    "gpu_encode": true,
+    "gpu_codecs": true,
+    "gpu_io": true
+  },
+  "sizes": [
+    1000,
+    3000,
+    10000,
+    30000,
+    100000,
+    300000,
+    1000000,
+    3000000,
+    10000000
+  ],
+  "codecs": [
+    "none",
+    "zstd"
+  ],
+  "arrays": [
+    "vertices",
+    "vertex_attributes/intensity"
+  ],
+  "runs": 5,
+  "warmup_runs": 1,
+  "workdir_fstype": "ext4"
+}

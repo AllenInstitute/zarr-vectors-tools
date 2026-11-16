@@ -542,6 +542,7 @@ _INTERRUPTED_INGEST = textwrap.dedent('''
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(sys.platform == "win32", reason="Popen.send_signal has no SIGINT on Windows")
 def test_sigint_stops_a_parallel_trk_ingest_promptly(tmp_path):
     """Eight 4-second parts on two workers: a shutdown that waited for the
     queue took ~12 s after the interrupt; the pool is now abandoned at once."""

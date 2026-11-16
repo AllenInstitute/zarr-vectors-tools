@@ -430,3 +430,59 @@ fragments,meshes,1000,1000000,49,fetch_one,zarr-vectors,s,4.069565,0.083796,5,ch
 fragments,points,8000,1000000,1,fetch_one,zarr-vectors,s,0.003761,9.5e-05,134,chunk side 50; one point spans 1 chunks; 1 vertices read
 fragments,streamlines,8000,1000000,98,fetch_one,zarr-vectors,s,0.018697,0.000556,27,chunk side 50; 1024-vertex streamline spans 98 chunks; 1024 vertices read
 fragments,meshes,8000,1000000,247,fetch_one,zarr-vectors,s,3.857315,0.045976,5,chunk side 50; 2304-vertex patch spans 247 chunks; 39737 vertices read
+object_by_id,streamlines,1000,972,83,fetch_one,zarr-vectors (chunked by id),s,0.002527,4.1e-05,198,"350 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,1000,972,83,write_full,zarr-vectors (chunked by id),s,0.046697,0.0,1,"350 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,10000,9720,833,fetch_one,zarr-vectors (chunked by id),s,0.003741,4.3e-05,134,"351 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,10000,9720,833,write_full,zarr-vectors (chunked by id),s,0.098986,0.0,1,"351 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,100000,95747,8333,fetch_one,zarr-vectors (chunked by id),s,0.003712,4.7e-05,135,"356 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,100000,95747,8333,write_full,zarr-vectors (chunked by id),s,0.413229,0.0,1,"356 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,1000000,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.004112,7.4e-05,122,"356 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,streamlines,1000000,958210,83333,write_full,zarr-vectors (chunked by id),s,3.63971,0.0,1,"356 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,1000,864,6,fetch_one,zarr-vectors (chunked by id),s,0.003751,3.4e-05,134,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,1000,864,6,write_full,zarr-vectors (chunked by id),s,0.132216,0.0,1,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,10000,9936,69,fetch_one,zarr-vectors (chunked by id),s,0.003787,3.9e-05,133,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,10000,9936,69,write_full,zarr-vectors (chunked by id),s,0.281405,0.0,1,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,100000,99936,694,fetch_one,zarr-vectors (chunked by id),s,0.003878,5e-05,129,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,100000,99936,694,write_full,zarr-vectors (chunked by id),s,1.785732,0.0,1,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,1000000,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003963,4.6e-05,127,"28 objects per id cell; fragment addressed from the id, no manifest read"
+object_by_id,meshes,1000000,999936,6944,write_full,zarr-vectors (chunked by id),s,18.372883,0.0,1,"28 objects per id cell; fragment addressed from the id, no manifest read"
+chunks_by_id,streamlines,8,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.003946,6.8e-05,127,"10417 objects per id cell, against the 8-chunk spatial grid"
+chunks_by_id,streamlines,8,958210,83333,write_full,zarr-vectors (chunked by id),s,3.32903,0.0,1,"10417 objects per id cell, against the 8-chunk spatial grid"
+chunks_by_id,streamlines,64,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.00343,4e-05,146,"1303 objects per id cell, against the 64-chunk spatial grid"
+chunks_by_id,streamlines,64,958210,83333,write_full,zarr-vectors (chunked by id),s,3.319751,0.0,1,"1303 objects per id cell, against the 64-chunk spatial grid"
+chunks_by_id,streamlines,125,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.003292,3.3e-05,152,"667 objects per id cell, against the 125-chunk spatial grid"
+chunks_by_id,streamlines,125,958210,83333,write_full,zarr-vectors (chunked by id),s,3.437875,0.0,1,"667 objects per id cell, against the 125-chunk spatial grid"
+chunks_by_id,streamlines,512,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.003109,3.7e-05,161,"163 objects per id cell, against the 512-chunk spatial grid"
+chunks_by_id,streamlines,512,958210,83333,write_full,zarr-vectors (chunked by id),s,3.755928,0.0,1,"163 objects per id cell, against the 512-chunk spatial grid"
+chunks_by_id,streamlines,993,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.003354,3.9e-05,150,"84 objects per id cell, against the 1,000-chunk spatial grid"
+chunks_by_id,streamlines,993,958210,83333,write_full,zarr-vectors (chunked by id),s,4.512003,0.0,1,"84 objects per id cell, against the 1,000-chunk spatial grid"
+chunks_by_id,streamlines,7576,958210,83333,fetch_one,zarr-vectors (chunked by id),s,0.003753,0.000116,134,"11 objects per id cell, against the 8,000-chunk spatial grid"
+chunks_by_id,streamlines,7576,958210,83333,write_full,zarr-vectors (chunked by id),s,10.876716,0.0,1,"11 objects per id cell, against the 8,000-chunk spatial grid"
+chunks_by_id,meshes,8,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.004447,7.5e-05,113,"868 objects per id cell, against the 8-chunk spatial grid"
+chunks_by_id,meshes,8,999936,6944,write_full,zarr-vectors (chunked by id),s,17.063747,0.0,1,"868 objects per id cell, against the 8-chunk spatial grid"
+chunks_by_id,meshes,64,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003719,7.2e-05,135,"109 objects per id cell, against the 64-chunk spatial grid"
+chunks_by_id,meshes,64,999936,6944,write_full,zarr-vectors (chunked by id),s,17.023836,0.0,1,"109 objects per id cell, against the 64-chunk spatial grid"
+chunks_by_id,meshes,124,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003446,4.8e-05,146,"56 objects per id cell, against the 125-chunk spatial grid"
+chunks_by_id,meshes,124,999936,6944,write_full,zarr-vectors (chunked by id),s,17.672277,0.0,1,"56 objects per id cell, against the 125-chunk spatial grid"
+chunks_by_id,meshes,496,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.003148,8.5e-05,159,"14 objects per id cell, against the 512-chunk spatial grid"
+chunks_by_id,meshes,496,999936,6944,write_full,zarr-vectors (chunked by id),s,18.324748,0.0,1,"14 objects per id cell, against the 512-chunk spatial grid"
+chunks_by_id,meshes,992,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.00244,7e-05,200,"7 objects per id cell, against the 1,000-chunk spatial grid"
+chunks_by_id,meshes,992,999936,6944,write_full,zarr-vectors (chunked by id),s,19.797841,0.0,1,"7 objects per id cell, against the 1,000-chunk spatial grid"
+chunks_by_id,meshes,6944,999936,6944,fetch_one,zarr-vectors (chunked by id),s,0.006235,7.7e-05,81,"1 objects per id cell, against the 8,000-chunk spatial grid"
+chunks_by_id,meshes,6944,999936,6944,write_full,zarr-vectors (chunked by id),s,37.292831,0.0,1,"1 objects per id cell, against the 8,000-chunk spatial grid"
+chunked_by_id,points,1000,1000,1000,write_full,zarr-vectors (chunked by id),s,0.050859,0.004622,10,4096 objects per id cell
+chunked_by_id,points,1000,1000,1000,read_full,zarr-vectors (chunked by id),s,0.003301,0.000104,152,4096 objects per id cell
+chunked_by_id,points,1000,1000,1000,bbox_query,zarr-vectors (chunked by id),s,0.002871,3.1e-05,175,4096 objects per id cell; box fraction 0.100000
+chunked_by_id,points,1000,1000,1000,fetch_one,zarr-vectors (chunked by id),s,0.003085,8.8e-05,163,4096 objects per id cell
+chunked_by_id,points,10000,10000,10000,write_full,zarr-vectors (chunked by id),s,0.147733,0.012381,7,4096 objects per id cell
+chunked_by_id,points,10000,10000,10000,read_full,zarr-vectors (chunked by id),s,0.003365,6.5e-05,149,4096 objects per id cell
+chunked_by_id,points,10000,10000,10000,bbox_query,zarr-vectors (chunked by id),s,0.004467,0.000199,112,4096 objects per id cell; box fraction 0.010000
+chunked_by_id,points,10000,10000,10000,fetch_one,zarr-vectors (chunked by id),s,0.003442,5.3e-05,146,4096 objects per id cell
+chunked_by_id,points,100000,100000,100000,write_full,zarr-vectors (chunked by id),s,1.065512,0.021492,7,4096 objects per id cell
+chunked_by_id,points,100000,100000,100000,read_full,zarr-vectors (chunked by id),s,0.006449,7.4e-05,78,4096 objects per id cell
+chunked_by_id,points,100000,100000,100000,bbox_query,zarr-vectors (chunked by id),s,0.008787,0.000236,57,4096 objects per id cell; box fraction 0.001000
+chunked_by_id,points,100000,100000,100000,fetch_one,zarr-vectors (chunked by id),s,0.003708,5.4e-05,135,4096 objects per id cell
+chunked_by_id,points,1000000,1000000,1000000,write_full,zarr-vectors (chunked by id),s,10.275069,0.119753,3,4096 objects per id cell
+chunked_by_id,points,1000000,1000000,1000000,read_full,zarr-vectors (chunked by id),s,0.020409,0.000197,25,4096 objects per id cell
+chunked_by_id,points,1000000,1000000,1000000,bbox_query,zarr-vectors (chunked by id),s,0.065045,0.000813,8,4096 objects per id cell; box fraction 0.000100
+chunked_by_id,points,1000000,1000000,1000000,fetch_one,zarr-vectors (chunked by id),s,0.003845,6.6e-05,131,4096 objects per id cell

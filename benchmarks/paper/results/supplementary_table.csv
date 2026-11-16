@@ -1,10 +1,17 @@
 geometry,vertices,objects,measurement,implementation,value,per_vertex,ratio_to_zarr_vectors,runs,note
+point cloud,1000,1000,bounding-box query (s),HDF5,0.00092 ± 0.00000,,,200,box fraction 0.100000
 point cloud,1000,1000,bounding-box query (s),PLY,0.00007 ± 0.00000,,0.004,200,box sized to ~100 objects (fraction 0.1)
 point cloud,1000,1000,bounding-box query (s),PLY,0.00007 ± 0.00000,,0.004,200,"equal box, ~100 vertices (fraction 0.1)"
+point cloud,1000,1000,bounding-box query (s),Parquet,0.00137 ± 0.00006,,,200,box fraction 0.100000
+point cloud,1000,1000,bounding-box query (s),plain Zarr,0.01594 ± 0.00025,,,32,box fraction 0.100000
+point cloud,1000,1000,bounding-box query (s),precomputed annotations,0.00055 ± 0.00002,,,200,box fraction 0.100000
 point cloud,1000,1000,bounding-box query (s),zarr-vectors,0.01869 ± 0.00061,,1.0,27,box sized to ~100 objects (fraction 0.1)
 point cloud,1000,1000,bounding-box query (s),zarr-vectors,0.01655 ± 0.00043,,1.0,31,"equal box, ~100 vertices (fraction 0.1)"
+point cloud,1000,1000,bounding-box query (s),zarr-vectors (chunked by id),0.00287 ± 0.00003,,1.0,175,store chunked by object id; 4096 objects per id cell; box fraction 0.100000
 point cloud,1000,1000,fetch one object (s),PLY,0.00003 ± 0.00000,,0.016,200,fixed-width record: seek + 12-byte read
+point cloud,1000,1000,fetch one object (s),precomputed annotations,0.00002 ± 0.00000,,,200,"by_id: one file, one read"
 point cloud,1000,1000,fetch one object (s),zarr-vectors,0.00210 ± 0.00005,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,1000,1000,fetch one object (s),zarr-vectors (chunked by id),0.00309 ± 0.00009,,1.0,163,store chunked by object id; 4096 objects per id cell
 point cloud,1000,1000,on-disk size (bytes),CSV,"23,692",23.69,0.696,1,text
 point cloud,1000,1000,on-disk size (bytes),CSV (gzip),"11,945",11.95,0.351,1,text-gzip
 point cloud,1000,1000,on-disk size (bytes),HDF5,"34,014",34.01,0.999,1,chunked
@@ -18,18 +25,35 @@ point cloud,1000,1000,on-disk size (bytes),precomputed annotations,"33,391",33.3
 point cloud,1000,1000,on-disk size (bytes),zarr-vectors (no codec),"152,416",152.42,4.475,1,
 point cloud,1000,1000,on-disk size (bytes),zarr-vectors (zstd),"34,062",34.06,1.0,1,
 point cloud,1000,1000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","34,719",34.72,1.019,1,
+point cloud,1000,1000,read whole dataset (s),HDF5,0.00049 ± 0.00000,,,200,
 point cloud,1000,1000,read whole dataset (s),PLY,0.00002 ± 0.00000,,0.005,200,
+point cloud,1000,1000,read whole dataset (s),Parquet,0.00780 ± 0.00030,,,65,
+point cloud,1000,1000,read whole dataset (s),plain Zarr,0.02463 ± 0.00038,,,21,
+point cloud,1000,1000,read whole dataset (s),precomputed annotations,0.00186 ± 0.00002,,,200,
 point cloud,1000,1000,read whole dataset (s),zarr-vectors,0.00470 ± 0.00014,,1.0,107,
+point cloud,1000,1000,read whole dataset (s),zarr-vectors (chunked by id),0.00330 ± 0.00010,,1.0,152,store chunked by object id; 4096 objects per id cell
 point cloud,1000,1000,replace one object (s),PLY,0.00004 ± 0.00000,,0.003,200,in-place seek + 12-byte overwrite
 point cloud,1000,1000,replace one object (s),zarr-vectors,0.01554 ± 0.00015,,1.0,33,VertexRef.from_position
+point cloud,1000,1000,write whole dataset (s),HDF5,0.00215 ± 0.00024,,,200,
 point cloud,1000,1000,write whole dataset (s),PLY,0.00010 ± 0.00001,,0.001,200,
+point cloud,1000,1000,write whole dataset (s),Parquet,0.01366 ± 0.00942,,,37,
+point cloud,1000,1000,write whole dataset (s),plain Zarr,0.04556 ± 0.00084,,,12,
+point cloud,1000,1000,write whole dataset (s),precomputed annotations,0.04564 ± 0.00028,,,11,
 point cloud,1000,1000,write whole dataset (s),zarr-vectors,0.16336 ± 0.03436,,1.0,5,
+point cloud,1000,1000,write whole dataset (s),zarr-vectors (chunked by id),0.05086 ± 0.00462,,1.0,10,store chunked by object id; 4096 objects per id cell
+point cloud,10000,10000,bounding-box query (s),HDF5,0.00127 ± 0.00000,,,200,box fraction 0.010000
 point cloud,10000,10000,bounding-box query (s),PLY,0.00031 ± 0.00000,,0.039,200,box sized to ~100 objects (fraction 0.01)
 point cloud,10000,10000,bounding-box query (s),PLY,0.00032 ± 0.00000,,0.052,200,"equal box, ~100 vertices (fraction 0.01)"
+point cloud,10000,10000,bounding-box query (s),Parquet,0.00137 ± 0.00003,,,200,box fraction 0.010000
+point cloud,10000,10000,bounding-box query (s),plain Zarr,0.02167 ± 0.00018,,,24,box fraction 0.010000
+point cloud,10000,10000,bounding-box query (s),precomputed annotations,0.00058 ± 0.00000,,,200,box fraction 0.010000
 point cloud,10000,10000,bounding-box query (s),zarr-vectors,0.00800 ± 0.00032,,1.0,63,box sized to ~100 objects (fraction 0.01)
 point cloud,10000,10000,bounding-box query (s),zarr-vectors,0.00603 ± 0.00005,,1.0,83,"equal box, ~100 vertices (fraction 0.01)"
+point cloud,10000,10000,bounding-box query (s),zarr-vectors (chunked by id),0.00447 ± 0.00020,,1.0,112,store chunked by object id; 4096 objects per id cell; box fraction 0.010000
 point cloud,10000,10000,fetch one object (s),PLY,0.00003 ± 0.00000,,0.016,200,fixed-width record: seek + 12-byte read
+point cloud,10000,10000,fetch one object (s),precomputed annotations,0.00002 ± 0.00000,,,200,"by_id: one file, one read"
 point cloud,10000,10000,fetch one object (s),zarr-vectors,0.00217 ± 0.00004,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,10000,10000,fetch one object (s),zarr-vectors (chunked by id),0.00344 ± 0.00005,,1.0,146,store chunked by object id; 4096 objects per id cell
 point cloud,10000,10000,on-disk size (bytes),CSV,"236,743",23.67,1.654,1,text
 point cloud,10000,10000,on-disk size (bytes),CSV (gzip),"111,611",11.16,0.78,1,text-gzip
 point cloud,10000,10000,on-disk size (bytes),HDF5,"133,128",13.31,0.93,1,chunked
@@ -43,18 +67,35 @@ point cloud,10000,10000,on-disk size (bytes),precomputed annotations,"321,392",3
 point cloud,10000,10000,on-disk size (bytes),zarr-vectors (no codec),"260,417",26.04,1.819,1,
 point cloud,10000,10000,on-disk size (bytes),zarr-vectors (zstd),"143,133",14.31,1.0,1,
 point cloud,10000,10000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","175,130",17.51,1.224,1,
+point cloud,10000,10000,read whole dataset (s),HDF5,0.00136 ± 0.00000,,,200,
 point cloud,10000,10000,read whole dataset (s),PLY,0.00003 ± 0.00000,,0.006,200,
+point cloud,10000,10000,read whole dataset (s),Parquet,0.01144 ± 0.00018,,,44,
+point cloud,10000,10000,read whole dataset (s),plain Zarr,0.02894 ± 0.00288,,,18,
+point cloud,10000,10000,read whole dataset (s),precomputed annotations,0.00189 ± 0.00001,,,200,
 point cloud,10000,10000,read whole dataset (s),zarr-vectors,0.00498 ± 0.00005,,1.0,101,
+point cloud,10000,10000,read whole dataset (s),zarr-vectors (chunked by id),0.00336 ± 0.00006,,1.0,149,store chunked by object id; 4096 objects per id cell
 point cloud,10000,10000,replace one object (s),PLY,0.00004 ± 0.00000,,0.003,200,in-place seek + 12-byte overwrite
 point cloud,10000,10000,replace one object (s),zarr-vectors,0.01582 ± 0.00024,,1.0,32,VertexRef.from_position
+point cloud,10000,10000,write whole dataset (s),HDF5,0.00661 ± 0.00024,,,76,
 point cloud,10000,10000,write whole dataset (s),PLY,0.00014 ± 0.00001,,0.001,200,
+point cloud,10000,10000,write whole dataset (s),Parquet,0.01298 ± 0.00009,,,39,
+point cloud,10000,10000,write whole dataset (s),plain Zarr,0.08075 ± 0.00975,,,7,
+point cloud,10000,10000,write whole dataset (s),precomputed annotations,0.44383 ± 0.00203,,,7,
 point cloud,10000,10000,write whole dataset (s),zarr-vectors,0.19796 ± 0.01116,,1.0,5,
+point cloud,10000,10000,write whole dataset (s),zarr-vectors (chunked by id),0.14773 ± 0.01238,,1.0,7,store chunked by object id; 4096 objects per id cell
+point cloud,100000,100000,bounding-box query (s),HDF5,0.00082 ± 0.00000,,,200,box fraction 0.001000
 point cloud,100000,100000,bounding-box query (s),PLY,0.00272 ± 0.00003,,0.797,184,box sized to ~100 objects (fraction 0.001)
 point cloud,100000,100000,bounding-box query (s),PLY,0.00302 ± 0.00003,,0.964,166,"equal box, ~100 vertices (fraction 0.001)"
+point cloud,100000,100000,bounding-box query (s),Parquet,0.00093 ± 0.00005,,,200,box fraction 0.001000
+point cloud,100000,100000,bounding-box query (s),plain Zarr,0.00221 ± 0.00001,,,200,box fraction 0.001000
+point cloud,100000,100000,bounding-box query (s),precomputed annotations,0.00012 ± 0.00000,,,200,box fraction 0.001000
 point cloud,100000,100000,bounding-box query (s),zarr-vectors,0.00341 ± 0.00007,,1.0,147,box sized to ~100 objects (fraction 0.001)
 point cloud,100000,100000,bounding-box query (s),zarr-vectors,0.00314 ± 0.00002,,1.0,160,"equal box, ~100 vertices (fraction 0.001)"
+point cloud,100000,100000,bounding-box query (s),zarr-vectors (chunked by id),0.00879 ± 0.00024,,1.0,57,store chunked by object id; 4096 objects per id cell; box fraction 0.001000
 point cloud,100000,100000,fetch one object (s),PLY,0.00003 ± 0.00000,,0.016,200,fixed-width record: seek + 12-byte read
+point cloud,100000,100000,fetch one object (s),precomputed annotations,0.00002 ± 0.00000,,,200,"by_id: one file, one read"
 point cloud,100000,100000,fetch one object (s),zarr-vectors,0.00207 ± 0.00005,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,100000,100000,fetch one object (s),zarr-vectors (chunked by id),0.00371 ± 0.00005,,1.0,135,store chunked by object id; 4096 objects per id cell
 point cloud,100000,100000,on-disk size (bytes),CSV,"2,366,911",23.67,2.156,1,text
 point cloud,100000,100000,on-disk size (bytes),CSV (gzip),"1,103,110",11.03,1.005,1,text-gzip
 point cloud,100000,100000,on-disk size (bytes),HDF5,"1,083,140",10.83,0.987,1,chunked
@@ -68,14 +109,25 @@ point cloud,100000,100000,on-disk size (bytes),precomputed annotations,"3,201,39
 point cloud,100000,100000,on-disk size (bytes),zarr-vectors (no codec),"1,340,418",13.4,1.221,1,
 point cloud,100000,100000,on-disk size (bytes),zarr-vectors (zstd),"1,097,816",10.98,1.0,1,
 point cloud,100000,100000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","1,540,407",15.4,1.403,1,
+point cloud,100000,100000,read whole dataset (s),HDF5,0.00446 ± 0.00000,,,113,
 point cloud,100000,100000,read whole dataset (s),PLY,0.00015 ± 0.00001,,0.024,200,
+point cloud,100000,100000,read whole dataset (s),Parquet,0.01076 ± 0.00032,,,47,
+point cloud,100000,100000,read whole dataset (s),plain Zarr,0.02655 ± 0.00024,,,19,
+point cloud,100000,100000,read whole dataset (s),precomputed annotations,0.00208 ± 0.00002,,,200,
 point cloud,100000,100000,read whole dataset (s),zarr-vectors,0.00602 ± 0.00005,,1.0,83,
+point cloud,100000,100000,read whole dataset (s),zarr-vectors (chunked by id),0.00645 ± 0.00007,,1.0,78,store chunked by object id; 4096 objects per id cell
 point cloud,100000,100000,replace one object (s),PLY,0.00004 ± 0.00000,,0.003,200,in-place seek + 12-byte overwrite
 point cloud,100000,100000,replace one object (s),zarr-vectors,0.01612 ± 0.00016,,1.0,32,VertexRef.from_position
 point cloud,100000,100000,round-trip max |Δ| (store units),PLY,exact,,,1,100000 in / 100000 out
 point cloud,100000,100000,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,100000 in / 100000 out
+point cloud,100000,100000,write whole dataset (s),HDF5,0.03192 ± 0.00112,,,16,
 point cloud,100000,100000,write whole dataset (s),PLY,0.00076 ± 0.00001,,0.004,200,
+point cloud,100000,100000,write whole dataset (s),Parquet,0.03491 ± 0.00093,,,15,
+point cloud,100000,100000,write whole dataset (s),plain Zarr,0.07347 ± 0.02189,,,7,
+point cloud,100000,100000,write whole dataset (s),precomputed annotations,4.42339 ± 0.62439,,,7,
 point cloud,100000,100000,write whole dataset (s),zarr-vectors,0.20809 ± 0.01215,,1.0,5,
+point cloud,100000,100000,write whole dataset (s),zarr-vectors (chunked by id),1.06551 ± 0.02149,,1.0,7,store chunked by object id; 4096 objects per id cell
+point cloud,1000000,1000000,bounding-box query (s),HDF5,0.00209 ± 0.00000,,,200,box fraction 0.000100
 point cloud,1000000,1000000,bounding-box query (s),PLY,0.03040 ± 0.00035,,10.416,17,box sized to ~100 objects (fraction 0.0001)
 point cloud,1000000,1000000,bounding-box query (s),PLY,0.02819 ± 0.00069,,8.497,18,volume fraction 0.001
 point cloud,1000000,1000000,bounding-box query (s),PLY,0.02905 ± 0.00015,,2.976,18,volume fraction 0.01
@@ -83,6 +135,9 @@ point cloud,1000000,1000000,bounding-box query (s),PLY,0.03297 ± 0.00011,,1.334
 point cloud,1000000,1000000,bounding-box query (s),PLY,0.03774 ± 0.00040,,0.385,14,volume fraction 0.5
 point cloud,1000000,1000000,bounding-box query (s),PLY,0.03809 ± 0.00127,,0.222,14,volume fraction 1.0
 point cloud,1000000,1000000,bounding-box query (s),PLY,0.03036 ± 0.00034,,14.94,17,"equal box, ~100 vertices (fraction 0.0001)"
+point cloud,1000000,1000000,bounding-box query (s),Parquet,0.00119 ± 0.00003,,,200,box fraction 0.000100
+point cloud,1000000,1000000,bounding-box query (s),plain Zarr,0.00218 ± 0.00004,,,200,box fraction 0.000100
+point cloud,1000000,1000000,bounding-box query (s),precomputed annotations,0.00033 ± 0.00000,,,200,box fraction 0.000100
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00292 ± 0.00005,,1.0,172,box sized to ~100 objects (fraction 0.0001)
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00332 ± 0.00009,,1.0,151,volume fraction 0.001
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00976 ± 0.00014,,1.0,52,volume fraction 0.01
@@ -90,7 +145,9 @@ point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.02472 ± 0.000
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.09797 ± 0.00370,,1.0,7,volume fraction 0.5
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.17154 ± 0.00140,,1.0,7,volume fraction 1.0
 point cloud,1000000,1000000,bounding-box query (s),zarr-vectors,0.00203 ± 0.00006,,1.0,200,"equal box, ~100 vertices (fraction 0.0001)"
+point cloud,1000000,1000000,bounding-box query (s),zarr-vectors (chunked by id),0.06505 ± 0.00081,,1.0,8,store chunked by object id; 4096 objects per id cell; box fraction 0.000100
 point cloud,1000000,1000000,fetch one object (s),PLY,0.00002 ± 0.00000,,0.014,200,fixed-width record: seek + 12-byte read
+point cloud,1000000,1000000,fetch one object (s),precomputed annotations,0.00002 ± 0.00000,,,200,"by_id: one file, one read"
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00311 ± 0.00007,,1.0,161,8 chunks over the domain; chunk side 500; reads 1x the object
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00272 ± 0.00003,,1.0,185,64 chunks over the domain; chunk side 250; reads 1x the object
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00298 ± 0.00007,,1.0,168,125 chunks over the domain; chunk side 200; reads 1x the object
@@ -104,6 +161,7 @@ point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00378 ± 0.00007,,1.0,
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00159 ± 0.00001,,1.0,200,crosses 1000 chunks; chunk side 100; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1,fetch one object (s),zarr-vectors,0.00376 ± 0.00010,,1.0,134,crosses 8000 chunks; chunk side 50; one point spans 1 chunks; 1 vertices read
 point cloud,1000000,1000000,fetch one object (s),zarr-vectors,0.00162 ± 0.00002,,1.0,200,bbox= around the point; reads 1x the object
+point cloud,1000000,1000000,fetch one object (s),zarr-vectors (chunked by id),0.00384 ± 0.00007,,1.0,131,store chunked by object id; 4096 objects per id cell
 point cloud,1000000,1000000,on-disk size (bytes),CSV,"23,667,344",23.67,2.233,1,text
 point cloud,1000000,1000000,on-disk size (bytes),CSV (gzip),"11,016,729",11.02,1.04,1,text-gzip
 point cloud,1000000,1000000,on-disk size (bytes),HDF5,"10,613,271",10.61,1.001,1,chunked
@@ -117,11 +175,20 @@ point cloud,1000000,1000000,on-disk size (bytes),precomputed annotations,"32,001
 point cloud,1000000,1000000,on-disk size (bytes),zarr-vectors (no codec),"12,140,419",12.14,1.146,1,
 point cloud,1000000,1000000,on-disk size (bytes),zarr-vectors (zstd),"10,597,568",10.6,1.0,1,
 point cloud,1000000,1000000,on-disk size (bytes),"zarr-vectors (zstd, per-point object index)","15,303,897",15.3,1.444,1,
+point cloud,1000000,1000000,read whole dataset (s),HDF5,0.04768 ± 0.00170,,,11,
 point cloud,1000000,1000000,read whole dataset (s),PLY,0.00130 ± 0.00003,,0.083,200,
+point cloud,1000000,1000000,read whole dataset (s),Parquet,0.01823 ± 0.00098,,,28,
+point cloud,1000000,1000000,read whole dataset (s),plain Zarr,0.03354 ± 0.00055,,,15,
+point cloud,1000000,1000000,read whole dataset (s),precomputed annotations,0.00760 ± 0.00030,,,66,
 point cloud,1000000,1000000,read whole dataset (s),zarr-vectors,0.01570 ± 0.00019,,1.0,32,
+point cloud,1000000,1000000,read whole dataset (s),zarr-vectors (chunked by id),0.02041 ± 0.00020,,1.0,25,store chunked by object id; 4096 objects per id cell
 point cloud,1000000,1000000,replace one object (s),PLY,0.00004 ± 0.00000,,0.002,200,in-place seek + 12-byte overwrite
 point cloud,1000000,1000000,replace one object (s),zarr-vectors,0.01718 ± 0.00034,,1.0,30,VertexRef.from_position
+point cloud,1000000,1000000,write whole dataset (s),HDF5,0.50794 ± 0.00567,,,3,
 point cloud,1000000,1000000,write whole dataset (s),PLY,0.00816 ± 0.00023,,0.019,62,
+point cloud,1000000,1000000,write whole dataset (s),Parquet,0.31411 ± 0.00788,,,3,
+point cloud,1000000,1000000,write whole dataset (s),plain Zarr,0.23829 ± 0.00667,,,3,
+point cloud,1000000,1000000,write whole dataset (s),precomputed annotations,47.06319 ± 6.90713,,,3,
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.43276 ± 0.03064,,1.0,5,
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.28243 ± 0.00000,,1.0,1,8 chunks over the domain; chunk side 500; reads 1x the object
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.34247 ± 0.00000,,1.0,1,64 chunks over the domain; chunk side 250; reads 1x the object
@@ -129,12 +196,14 @@ point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,0.44202 ± 0.00
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,1.05066 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,1.79429 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
 point cloud,1000000,1000000,write whole dataset (s),zarr-vectors,11.23224 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+point cloud,1000000,1000000,write whole dataset (s),zarr-vectors (chunked by id),10.27507 ± 0.11975,,1.0,3,store chunked by object id; 4096 objects per id cell
 streamlines,972,83,bounding-box query (s),TRK,0.00107 ± 0.00001,,0.113,200,box sized to ~100 objects (fraction 1.0)
 streamlines,972,83,bounding-box query (s),TRK,0.00105 ± 0.00001,,0.135,200,"equal box, ~100 vertices (fraction 0.10288066)"
 streamlines,972,83,bounding-box query (s),zarr-vectors,0.00943 ± 0.00041,,1.0,53,box sized to ~100 objects (fraction 1.0)
 streamlines,972,83,bounding-box query (s),zarr-vectors,0.00777 ± 0.00012,,1.0,65,"equal box, ~100 vertices (fraction 0.10288066)"
 streamlines,972,83,fetch one object (s),TRK,0.00095 ± 0.00004,,0.291,200,variable-length records: full scan
 streamlines,972,83,fetch one object (s),zarr-vectors,0.00328 ± 0.00005,,1.0,153,object_ids=; reads 1x the object
+streamlines,972,83,fetch one object (s),zarr-vectors (chunked by id),0.00253 ± 0.00004,,1.0,198,"store chunked by object id; 350 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,972,83,on-disk size (bytes),TRK,"12,996",13.37,0.439,1,binary
 streamlines,972,83,on-disk size (bytes),TRK (gzip),"10,695",11.0,0.361,1,binary-gzip
 streamlines,972,83,on-disk size (bytes),TRX,"12,513",12.87,0.422,1,binary
@@ -149,12 +218,14 @@ streamlines,972,83,replace one object (s),TRK,0.00259 ± 0.00007,,0.09,193,varia
 streamlines,972,83,replace one object (s),zarr-vectors,0.02884 ± 0.00294,,1.0,18,edit_fragment via object manifest
 streamlines,972,83,write whole dataset (s),TRK,0.00168 ± 0.00024,,0.013,200,
 streamlines,972,83,write whole dataset (s),zarr-vectors,0.13261 ± 0.01228,,1.0,5,
+streamlines,972,83,write whole dataset (s),zarr-vectors (chunked by id),0.04670 ± 0.00000,,1.0,1,"store chunked by object id; 350 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,9720,833,bounding-box query (s),TRK,0.00459 ± 0.00002,,0.262,109,box sized to ~100 objects (fraction 0.120048)
 streamlines,9720,833,bounding-box query (s),TRK,0.00456 ± 0.00002,,0.283,110,"equal box, ~100 vertices (fraction 0.01028807)"
 streamlines,9720,833,bounding-box query (s),zarr-vectors,0.01751 ± 0.00052,,1.0,29,box sized to ~100 objects (fraction 0.120048)
 streamlines,9720,833,bounding-box query (s),zarr-vectors,0.01609 ± 0.00123,,1.0,32,"equal box, ~100 vertices (fraction 0.01028807)"
 streamlines,9720,833,fetch one object (s),TRK,0.00343 ± 0.00010,,0.938,146,variable-length records: full scan
 streamlines,9720,833,fetch one object (s),zarr-vectors,0.00365 ± 0.00007,,1.0,137,object_ids=; reads 1x the object
+streamlines,9720,833,fetch one object (s),zarr-vectors (chunked by id),0.00374 ± 0.00004,,1.0,134,"store chunked by object id; 351 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,9720,833,on-disk size (bytes),TRK,"120,972",12.45,0.761,1,binary
 streamlines,9720,833,on-disk size (bytes),TRK (gzip),"106,113",10.92,0.668,1,binary-gzip
 streamlines,9720,833,on-disk size (bytes),TRX,"120,491",12.4,0.758,1,binary
@@ -169,12 +240,14 @@ streamlines,9720,833,replace one object (s),TRK,0.01438 ± 0.00089,,0.331,35,var
 streamlines,9720,833,replace one object (s),zarr-vectors,0.04344 ± 0.00759,,1.0,13,edit_fragment via object manifest
 streamlines,9720,833,write whole dataset (s),TRK,0.01011 ± 0.00002,,0.034,50,
 streamlines,9720,833,write whole dataset (s),zarr-vectors,0.29442 ± 0.01119,,1.0,5,
+streamlines,9720,833,write whole dataset (s),zarr-vectors (chunked by id),0.09899 ± 0.00000,,1.0,1,"store chunked by object id; 351 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,95747,8333,bounding-box query (s),TRK,0.03047 ± 0.00023,,0.406,17,box sized to ~100 objects (fraction 0.012)
 streamlines,95747,8333,bounding-box query (s),TRK,0.03039 ± 0.00030,,0.39,17,"equal box, ~100 vertices (fraction 0.00104442)"
 streamlines,95747,8333,bounding-box query (s),zarr-vectors,0.07512 ± 0.00334,,1.0,7,box sized to ~100 objects (fraction 0.012)
 streamlines,95747,8333,bounding-box query (s),zarr-vectors,0.07796 ± 0.00988,,1.0,7,"equal box, ~100 vertices (fraction 0.00104442)"
 streamlines,95747,8333,fetch one object (s),TRK,0.02302 ± 0.00042,,4.067,22,variable-length records: full scan
 streamlines,95747,8333,fetch one object (s),zarr-vectors,0.00566 ± 0.00011,,1.0,89,object_ids=; reads 1x the object
+streamlines,95747,8333,fetch one object (s),zarr-vectors (chunked by id),0.00371 ± 0.00005,,1.0,135,"store chunked by object id; 356 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,95747,8333,on-disk size (bytes),TRK,"1,183,296",12.36,0.988,1,binary
 streamlines,95747,8333,on-disk size (bytes),TRK (gzip),"1,045,437",10.92,0.873,1,binary-gzip
 streamlines,95747,8333,on-disk size (bytes),TRX,"1,182,817",12.35,0.988,1,binary
@@ -192,6 +265,7 @@ streamlines,95747,8333,round-trip max |Δ| (store units),TRX,exact,,,1,95747 in 
 streamlines,95747,8333,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,95747 in / 95747 out
 streamlines,95747,8333,write whole dataset (s),TRK,0.09593 ± 0.00083,,0.121,6,
 streamlines,95747,8333,write whole dataset (s),zarr-vectors,0.79193 ± 0.02185,,1.0,5,
+streamlines,95747,8333,write whole dataset (s),zarr-vectors (chunked by id),0.41323 ± 0.00000,,1.0,1,"store chunked by object id; 356 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,958210,83333,bounding-box query (s),TRK,0.31585 ± 0.00300,,0.429,5,box sized to ~100 objects (fraction 0.0012)
 streamlines,958210,83333,bounding-box query (s),TRK,0.31332 ± 0.00307,,0.465,7,volume fraction 0.001
 streamlines,958210,83333,bounding-box query (s),TRK,0.31854 ± 0.00254,,0.441,7,volume fraction 0.01
@@ -214,6 +288,13 @@ streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01018 ± 0.00034,,1
 streamlines,958210,83333,fetch one object (s),zarr-vectors,0.00941 ± 0.00034,,1.0,54,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
 streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01378 ± 0.00044,,1.0,37,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
 streamlines,958210,83333,fetch one object (s),zarr-vectors,0.01023 ± 0.00075,,1.0,49,object_ids=; reads 1x the object
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00395 ± 0.00007,,1.0,127,"8 id cells, store chunked by object id; 10417 objects per id cell, against the 8-chunk spatial grid"
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00343 ± 0.00004,,1.0,146,"64 id cells, store chunked by object id; 1303 objects per id cell, against the 64-chunk spatial grid"
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00329 ± 0.00003,,1.0,152,"125 id cells, store chunked by object id; 667 objects per id cell, against the 125-chunk spatial grid"
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00311 ± 0.00004,,1.0,161,"512 id cells, store chunked by object id; 163 objects per id cell, against the 512-chunk spatial grid"
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00335 ± 0.00004,,1.0,150,"993 id cells, store chunked by object id; 84 objects per id cell, against the 1,000-chunk spatial grid"
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00375 ± 0.00012,,1.0,134,"7,576 id cells, store chunked by object id; 11 objects per id cell, against the 8,000-chunk spatial grid"
+streamlines,958210,83333,fetch one object (s),zarr-vectors (chunked by id),0.00411 ± 0.00007,,1.0,122,"store chunked by object id; 356 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,958210,83333,on-disk size (bytes),TRK,"11,832,852",12.35,1.025,1,binary
 streamlines,958210,83333,on-disk size (bytes),TRK (gzip),"10,459,797",10.92,0.906,1,binary-gzip
 streamlines,958210,83333,on-disk size (bytes),TRX,"11,832,375",12.35,1.025,1,binary
@@ -234,6 +315,13 @@ streamlines,958210,83333,write whole dataset (s),zarr-vectors,4.86334 ± 0.00000
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,8.19420 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 1x the object
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,11.09179 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 1x the object"
 streamlines,958210,83333,write whole dataset (s),zarr-vectors,40.43589 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 1x the object"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),3.32903 ± 0.00000,,1.0,1,"8 id cells, store chunked by object id; 10417 objects per id cell, against the 8-chunk spatial grid"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),3.31975 ± 0.00000,,1.0,1,"64 id cells, store chunked by object id; 1303 objects per id cell, against the 64-chunk spatial grid"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),3.43788 ± 0.00000,,1.0,1,"125 id cells, store chunked by object id; 667 objects per id cell, against the 125-chunk spatial grid"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),3.75593 ± 0.00000,,1.0,1,"512 id cells, store chunked by object id; 163 objects per id cell, against the 512-chunk spatial grid"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),4.51200 ± 0.00000,,1.0,1,"993 id cells, store chunked by object id; 84 objects per id cell, against the 1,000-chunk spatial grid"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),10.87672 ± 0.00000,,1.0,1,"7,576 id cells, store chunked by object id; 11 objects per id cell, against the 8,000-chunk spatial grid"
+streamlines,958210,83333,write whole dataset (s),zarr-vectors (chunked by id),3.63971 ± 0.00000,,1.0,1,"store chunked by object id; 356 objects per id cell; fragment addressed from the id, no manifest read"
 streamlines,1000000,9,fetch one object (s),zarr-vectors,0.10838 ± 0.00265,,1.0,7,crosses 8 chunks; chunk side 500; 1024-vertex streamline spans 9 chunks; 1024 vertices read
 streamlines,1000000,27,fetch one object (s),zarr-vectors,0.06824 ± 0.00050,,1.0,8,crosses 64 chunks; chunk side 250; 1024-vertex streamline spans 27 chunks; 1024 vertices read
 streamlines,1000000,23,fetch one object (s),zarr-vectors,0.04141 ± 0.00060,,1.0,13,crosses 125 chunks; chunk side 200; 1024-vertex streamline spans 23 chunks; 1024 vertices read
@@ -286,6 +374,7 @@ meshes,864,6,bounding-box query (s),zarr-vectors,0.02360 ± 0.00208,,1.0,22,box 
 meshes,864,6,bounding-box query (s),zarr-vectors,0.01697 ± 0.00032,,1.0,30,"equal box, ~100 vertices (fraction 0.11574074)"
 meshes,864,6,fetch one object (s),STL,0.00006 ± 0.00000,,0.003,200,no object index: full read
 meshes,864,6,fetch one object (s),zarr-vectors,0.02010 ± 0.00216,,1.0,25,chunks= then filter (no object_ids= on read_mesh); reads 1x the object
+meshes,864,6,fetch one object (s),zarr-vectors (chunked by id),0.00375 ± 0.00003,,1.0,134,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,864,6,on-disk size (bytes),OBJ,"49,313",57.08,2.301,1,text
 meshes,864,6,on-disk size (bytes),OBJ (gzip),"15,316",17.73,0.715,1,text-gzip
 meshes,864,6,on-disk size (bytes),STL,"72,684",84.12,3.391,1,binary
@@ -297,12 +386,14 @@ meshes,864,6,read whole dataset (s),STL,0.00005 ± 0.00000,,0.003,200,
 meshes,864,6,read whole dataset (s),zarr-vectors,0.01993 ± 0.00091,,1.0,26,
 meshes,864,6,write whole dataset (s),STL,0.00029 ± 0.00000,,0.002,200,
 meshes,864,6,write whole dataset (s),zarr-vectors,0.12801 ± 0.02180,,1.0,5,
+meshes,864,6,write whole dataset (s),zarr-vectors (chunked by id),0.13222 ± 0.00000,,1.0,1,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,9936,69,bounding-box query (s),STL,0.00180 ± 0.00001,,0.026,200,box sized to ~100 objects (fraction 1.0)
 meshes,9936,69,bounding-box query (s),STL,0.00161 ± 0.00001,,0.026,200,"equal box, ~100 vertices (fraction 0.01006441)"
 meshes,9936,69,bounding-box query (s),zarr-vectors,0.06838 ± 0.00739,,1.0,8,box sized to ~100 objects (fraction 1.0)
 meshes,9936,69,bounding-box query (s),zarr-vectors,0.06123 ± 0.01324,,1.0,9,"equal box, ~100 vertices (fraction 0.01006441)"
 meshes,9936,69,fetch one object (s),STL,0.00014 ± 0.00000,,0.004,200,no object index: full read
 meshes,9936,69,fetch one object (s),zarr-vectors,0.03511 ± 0.00414,,1.0,15,chunks= then filter (no object_ids= on read_mesh); reads 1x the object
+meshes,9936,69,fetch one object (s),zarr-vectors (chunked by id),0.00379 ± 0.00004,,1.0,133,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,9936,69,on-disk size (bytes),OBJ,"622,986",62.7,4.836,1,text
 meshes,9936,69,on-disk size (bytes),OBJ (gzip),"168,234",16.93,1.306,1,text-gzip
 meshes,9936,69,on-disk size (bytes),STL,"834,984",84.04,6.482,1,binary
@@ -314,12 +405,14 @@ meshes,9936,69,read whole dataset (s),STL,0.00014 ± 0.00000,,0.002,200,
 meshes,9936,69,read whole dataset (s),zarr-vectors,0.05523 ± 0.00523,,1.0,10,
 meshes,9936,69,write whole dataset (s),STL,0.00204 ± 0.00001,,0.005,200,
 meshes,9936,69,write whole dataset (s),zarr-vectors,0.40971 ± 0.01469,,1.0,5,
+meshes,9936,69,write whole dataset (s),zarr-vectors (chunked by id),0.28141 ± 0.00000,,1.0,1,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,99936,694,bounding-box query (s),STL,0.01687 ± 0.00006,,0.049,30,box sized to ~100 objects (fraction 0.144092)
 meshes,99936,694,bounding-box query (s),STL,0.01759 ± 0.00022,,0.043,29,"equal box, ~100 vertices (fraction 0.00100064)"
 meshes,99936,694,bounding-box query (s),zarr-vectors,0.34637 ± 0.05223,,1.0,7,box sized to ~100 objects (fraction 0.144092)
 meshes,99936,694,bounding-box query (s),zarr-vectors,0.40498 ± 0.06111,,1.0,7,"equal box, ~100 vertices (fraction 0.00100064)"
 meshes,99936,694,fetch one object (s),STL,0.00126 ± 0.00002,,0.005,200,no object index: full read
 meshes,99936,694,fetch one object (s),zarr-vectors,0.24362 ± 0.00224,,1.0,5,chunks= then filter (no object_ids= on read_mesh); reads 10x the object
+meshes,99936,694,fetch one object (s),zarr-vectors (chunked by id),0.00388 ± 0.00005,,1.0,129,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,99936,694,on-disk size (bytes),OBJ,"6,771,112",67.75,6.337,1,text
 meshes,99936,694,on-disk size (bytes),OBJ (gzip),"1,730,900",17.32,1.62,1,text-gzip
 meshes,99936,694,on-disk size (bytes),STL,"8,397,484",84.03,7.859,1,binary
@@ -333,6 +426,7 @@ meshes,99936,694,round-trip max |Δ| (store units),STL,exact,,,1,99936 in / 9993
 meshes,99936,694,round-trip max |Δ| (store units),zarr-vectors (zstd),exact,,,1,99936 in / 99936 out
 meshes,99936,694,write whole dataset (s),STL,0.01992 ± 0.00010,,0.009,26,
 meshes,99936,694,write whole dataset (s),zarr-vectors,2.32698 ± 0.22275,,1.0,5,
+meshes,99936,694,write whole dataset (s),zarr-vectors (chunked by id),1.78573 ± 0.00000,,1.0,1,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,999936,6944,bounding-box query (s),STL,0.20700 ± 0.00182,,0.039,5,box sized to ~100 objects (fraction 0.014401)
 meshes,999936,6944,bounding-box query (s),STL,0.20891 ± 0.00146,,0.057,7,volume fraction 0.001
 meshes,999936,6944,bounding-box query (s),STL,0.21081 ± 0.00169,,0.051,7,volume fraction 0.01
@@ -355,6 +449,13 @@ meshes,999936,6944,fetch one object (s),zarr-vectors,3.79222 ± 0.56807,,1.0,5,5
 meshes,999936,6944,fetch one object (s),zarr-vectors,3.65787 ± 0.05361,,1.0,5,"1,000 chunks over the domain; chunk side 100; reads 23x the object"
 meshes,999936,6944,fetch one object (s),zarr-vectors,3.50680 ± 0.41125,,1.0,5,"8,000 chunks over the domain; chunk side 50; reads 10x the object"
 meshes,999936,6944,fetch one object (s),zarr-vectors,4.53897 ± 0.47811,,1.0,5,chunks= then filter (no object_ids= on read_mesh); reads 70x the object
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00445 ± 0.00007,,1.0,113,"8 id cells, store chunked by object id; 868 objects per id cell, against the 8-chunk spatial grid"
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00372 ± 0.00007,,1.0,135,"64 id cells, store chunked by object id; 109 objects per id cell, against the 64-chunk spatial grid"
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00345 ± 0.00005,,1.0,146,"124 id cells, store chunked by object id; 56 objects per id cell, against the 125-chunk spatial grid"
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00315 ± 0.00009,,1.0,159,"496 id cells, store chunked by object id; 14 objects per id cell, against the 512-chunk spatial grid"
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00244 ± 0.00007,,1.0,200,"992 id cells, store chunked by object id; 7 objects per id cell, against the 1,000-chunk spatial grid"
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00624 ± 0.00008,,1.0,81,"6,944 id cells, store chunked by object id; 1 objects per id cell, against the 8,000-chunk spatial grid"
+meshes,999936,6944,fetch one object (s),zarr-vectors (chunked by id),0.00396 ± 0.00005,,1.0,127,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,999936,6944,on-disk size (bytes),OBJ,"72,801,996",72.81,7.191,1,text
 meshes,999936,6944,on-disk size (bytes),OBJ (gzip),"17,133,471",17.13,1.692,1,text-gzip
 meshes,999936,6944,on-disk size (bytes),STL,"84,022,484",84.03,8.299,1,binary
@@ -372,6 +473,13 @@ meshes,999936,6944,write whole dataset (s),zarr-vectors,16.01670 ± 0.00000,,1.0
 meshes,999936,6944,write whole dataset (s),zarr-vectors,19.03581 ± 0.00000,,1.0,1,512 chunks over the domain; chunk side 125; reads 16x the object
 meshes,999936,6944,write whole dataset (s),zarr-vectors,22.75739 ± 0.00000,,1.0,1,"1,000 chunks over the domain; chunk side 100; reads 23x the object"
 meshes,999936,6944,write whole dataset (s),zarr-vectors,55.33136 ± 0.00000,,1.0,1,"8,000 chunks over the domain; chunk side 50; reads 10x the object"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),17.06375 ± 0.00000,,1.0,1,"8 id cells, store chunked by object id; 868 objects per id cell, against the 8-chunk spatial grid"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),17.02384 ± 0.00000,,1.0,1,"64 id cells, store chunked by object id; 109 objects per id cell, against the 64-chunk spatial grid"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),17.67228 ± 0.00000,,1.0,1,"124 id cells, store chunked by object id; 56 objects per id cell, against the 125-chunk spatial grid"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),18.32475 ± 0.00000,,1.0,1,"496 id cells, store chunked by object id; 14 objects per id cell, against the 512-chunk spatial grid"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),19.79784 ± 0.00000,,1.0,1,"992 id cells, store chunked by object id; 7 objects per id cell, against the 1,000-chunk spatial grid"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),37.29283 ± 0.00000,,1.0,1,"6,944 id cells, store chunked by object id; 1 objects per id cell, against the 8,000-chunk spatial grid"
+meshes,999936,6944,write whole dataset (s),zarr-vectors (chunked by id),18.37288 ± 0.00000,,1.0,1,"store chunked by object id; 28 objects per id cell; fragment addressed from the id, no manifest read"
 meshes,1000000,8,fetch one object (s),zarr-vectors,4.71687 ± 0.04079,,1.0,5,crosses 8 chunks; chunk side 500; 2304-vertex patch spans 8 chunks; 1002240 vertices read
 meshes,1000000,24,fetch one object (s),zarr-vectors,4.44399 ± 0.08740,,1.0,5,crosses 64 chunks; chunk side 250; 2304-vertex patch spans 24 chunks; 417920 vertices read
 meshes,1000000,16,fetch one object (s),zarr-vectors,3.87024 ± 0.08628,,1.0,5,crosses 125 chunks; chunk side 200; 2304-vertex patch spans 16 chunks; 143510 vertices read

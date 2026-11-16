@@ -31,6 +31,14 @@ Five ``--blocks`` produce six row groups in the CSV's ``block`` column.
               geometry rather than one per geometry.
 ``chunked``   the same bulk and single-object operations against the
               other chunked layouts (Parquet, Zarr, HDF5, precomputed).
+``by_id``     -> ``object_by_id`` fetch one object from a store chunked
+                            by object id instead of by space, addressed
+                            from the id without reading its manifest.
+``chunks_by_id``  that store in the chunk-count sweep: the same fetch at
+              10^6, cut into as many id cells as the spatial grid has
+              chunks, for panel H.
+``chunked_by_id`` the point cloud chunked by id, timed like ``chunked``
+              (write, read, box, read one) for panel G2.
 ``fidelity``  write, read back, compare -- per geometry and competitor.
 
 One sweep variable: every block sweeps the **vertex** count (``SIZES``).
@@ -73,7 +81,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _formats as F  # noqa: E402
 import _harness as H  # noqa: E402
-from zarr_vectors.building import open_store, read_object_manifests  # noqa: E402
+from zarr_vectors.building import (  # noqa: E402
+    open_store,
+    read_fragment,
+    read_object_manifests,
+)
 from zarr_vectors.ops import EditSession, FragmentRef, VertexRef  # noqa: E402
 from zarr_vectors.types.graphs import read_graph, write_graph  # noqa: E402
 from zarr_vectors.types.meshes import read_mesh, write_mesh  # noqa: E402
@@ -1037,6 +1049,223 @@ def block_chunked(rows, sizes, ws):
                 add("fetch_one", m, hw, k, "by_id: one file, one read")
             ws.clear(f"c_{tag}_{n}")
 
+
+# --------------------------------------------------------------------
+# Block 9 -- fetch one object from a store chunked by id
+# --------------------------------------------------------------------
+#
+# Every other store in the sweep is chunked by space, so a fetch by id
+# goes id -> manifest -> the chunks it names, and those chunks carry
+# every other object that shares the space.  This block asks what the
+# same fetch costs when the store is laid out for it instead: one spatial
+# cell over the domain, with an ``id_bucket = oid // B`` vertex attribute
+# promoted to the leading chunk axis by ``chunk_by_attribute``.  Object
+# ``oid`` is then fragment ``oid % B`` of cell ``(oid // B, 0, 0, 0)`` --
+# arithmetic on the id, so the fetch reads no manifest at all.
+#
+# It is the other end of a trade-off, not a free win: with one spatial
+# cell, a region query on this store reads every cell there is.
+#
+# Streamlines and meshes only, here and in the chunk-count sweep.  A point
+# is addressed by where it is and the spatial fetch already reads one
+# cell, while ``chunk_by_attribute`` forces a per-point object index on
+# the writer: tried at 10^6, the fetch was no faster (4.1 ms against 3.7)
+# and the write 24x slower.  The exception is ``block_chunked_by_id``: the
+# precomputed comparison is a point cloud, and precomputed answers "read
+# one" from its ``by_id`` index, so there a store laid out for id access
+# is the like-for-like opponent whatever it costs to write.
+#
+# No size cap, but the mesh write is where this layout costs.  It tracks
+# the spatial store's to 10^6 (18 s against 17) and then outgrows it:
+# 542 s against 151 s at 10^7, taken once per size.  Part of that is the
+# writer checking that every object sits in one bucket with a full-array
+# mask per object, which is quadratic in N -- 1.3 s at 10^6 on its own.
+
+BY_ID_GEOMS = ("streamlines", "meshes")
+ZV_BY_ID = "zarr-vectors (chunked by id)"
+
+# Vertices per id cell, so B is 356 streamlines or 28 mesh patches at
+# every N.  The deployed grid holds 8000 vertices per chunk at 10^6; this
+# keeps an id cell the same order of size without tying it to N.
+BY_ID_CELL_VERTICES = 4096
+
+
+def _by_id_bucket(data):
+    """Objects per id cell: ``BY_ID_CELL_VERTICES`` worth of them."""
+    per = data["n_vertices"] / data["n_objects"]
+    return max(1, int(round(BY_ID_CELL_VERTICES / per)))
+
+
+def zv_write_by_id(path, geom, data, B):
+    """The same objects, chunked by ``oid // B`` over one spatial cell."""
+    kw = dict(chunk_shape=(H.DOMAIN,) * 3, bin_shape=(H.DOMAIN,) * 3,
+              bounds=H.BOUNDS, compressor=CODEC,
+              chunk_by_attribute="id_bucket")
+    if geom == "points":
+        return write_points(str(path), data["positions"], vertex_attributes={
+            "id_bucket": data["object_ids"] // B}, **kw)
+    if geom == "streamlines":
+        polys = data["polylines"]
+        return write_polylines(str(path), polys, vertex_attributes={
+            "id_bucket": [np.full(len(p), i // B, np.int64)
+                          for i, p in enumerate(polys)]}, **kw)
+    return write_mesh(str(path), data["vertices"], data["faces"],
+                      object_ids=data["object_ids"],
+                      vertex_attributes={"id_bucket": data["object_ids"] // B},
+                      **kw)
+
+
+def _zv_fetch_by_id(store, oid, B):
+    """Open the store and read one fragment -- no manifest, no search."""
+    level = open_store(str(store))["0"]
+    return read_fragment(level, (int(oid) // B, 0, 0, 0), int(oid) % B)
+
+
+def _check_by_id_address(geom, store, data, B):
+    """Refuse to time an address the store does not honour.
+
+    ``oid % B`` as the fragment index is how the writers order fragments
+    today, not a documented contract, so every store is checked against
+    its own manifests and against the source objects before it is timed:
+    a core change that reorders fragments fails the block loudly instead
+    of timing reads of the wrong object.
+    """
+    level = open_store(str(store))["0"]
+    no = data["n_objects"]
+    for oid in sorted({0, B - 1, B, no // 2, no - 1}):
+        if not 0 <= oid < no:
+            continue
+        ref = ((oid // B, 0, 0, 0), oid % B)
+        got = np.asarray(read_fragment(level, *ref), np.float32)
+        if geom == "points":
+            want = np.asarray(data["positions"][oid:oid + 1], np.float32)
+        elif geom == "streamlines":
+            want = np.asarray(data["polylines"][oid], np.float32)
+        else:
+            # A writer may reorder an object's vertices: compare as sets.
+            want = data["vertices"][data["object_ids"] == oid]
+            got, want = (a[np.lexsort(a.T[::-1])]
+                         for a in (got, want.astype(np.float32)))
+        if (read_object_manifests(level, ids=[oid]).get(oid) != [ref]
+                or got.shape != want.shape or not np.allclose(got, want)):
+            raise RuntimeError(
+                f"{geom}: object {oid} is not fragment {oid % B} of id cell "
+                f"{oid // B} -- the id-chunked address no longer holds")
+
+
+def block_by_id(rows, sizes, ws):
+    for geom in (g for g in BY_ID_GEOMS if g in TIMED_GEOMS):
+        for n in sizes:
+            data = H.GENERATORS[geom](n)
+            nv, no = data["n_vertices"], data["n_objects"]
+            B, oid = _by_id_bucket(data), no // 2
+            log(f"  by id   {geom:12s} N={n:>9,}  ({no:,} objects, "
+                f"{B} per id cell)")
+            tag = f"id_{geom}_{n}"
+            store = ws.store(tag)
+            t_write, _ = H.timed(zv_write_by_id, store, geom, data, B)
+            _check_by_id_address(geom, store, data, B)
+            m, hw, k = H.repeat(lambda: _zv_fetch_by_id(store, oid, B),
+                                timing_runs(n))
+            for op, val, half, runs in (("fetch_one", m, hw, k),
+                                        ("write_full", t_write, 0.0, 1)):
+                rows.add(block="object_by_id", geometry=geom, n_target=n,
+                         n_vertices=nv, n_objects=no, op=op, impl=ZV_BY_ID,
+                         unit="s", value=round(val, 6), ci_hw=round(half, 6),
+                         n_runs=runs,
+                         detail=f"{B} objects per id cell; fragment "
+                                f"addressed from the id, no manifest read")
+            ws.clear(tag)
+
+
+def block_chunks_by_id(rows, ws):
+    """Block 6 again, for the store chunked by id.
+
+    The same 10^6-vertex datasets, cut into as many id cells as the
+    spatial sweep cuts the domain into chunks -- 8 to 8000 -- by spreading
+    the objects evenly over them.  A mesh store holds only 6 944 objects,
+    so its finest grid stops at one object per cell; ``n_target`` records
+    the cells the store really has, not the count it was aiming for.
+    """
+    for geom in (g for g in BY_ID_GEOMS if g in TIMED_GEOMS):
+        data = H.GENERATORS[geom](CHUNK_SWEEP_N)
+        nv, no = data["n_vertices"], data["n_objects"]
+        oid = no // 2
+        for side in CHUNK_SIDES:
+            target = _grid_chunks(side)
+            B = -(-no // target)
+            cells = -(-no // B)
+            tag = f"ckid_{geom}_{target}"
+            store = ws.store(tag)
+            log(f"  chunks  {geom:12s} {cells:>6,} id cells  "
+                f"({B:,} objects per cell, {nv:,} verts)")
+            t_write, _ = H.timed(zv_write_by_id, store, geom, data, B)
+            _check_by_id_address(geom, store, data, B)
+            m, hw, k = H.repeat(lambda: _zv_fetch_by_id(store, oid, B),
+                                n_runs("fetch_one", nv))
+            for op, val, half, runs in (("fetch_one", m, hw, k),
+                                        ("write_full", t_write, 0.0, 1)):
+                rows.add(block="chunks_by_id", geometry=geom,
+                         n_target=cells, n_vertices=nv, n_objects=no, op=op,
+                         impl=ZV_BY_ID, unit="s", value=round(val, 6),
+                         ci_hw=round(half, 6), n_runs=runs,
+                         detail=f"{B} objects per id cell, against the "
+                                f"{target:,}-chunk spatial grid")
+            ws.clear(tag)
+
+
+def block_chunked_by_id(rows, sizes, ws):
+    """Block 8 again, for the point cloud chunked by id.
+
+    The operations the chunked block times against precomputed -- write
+    everything, read everything, the ~100-object box, and one object --
+    so panel G2 can set the store's id layout against precomputed's
+    ``by_id`` index, which answers "read one" the same way: from the id,
+    with no search.  The box is what the layout costs, since with one
+    spatial cell it has to read every id cell; it is measured so the
+    trade-off is on record rather than asserted.
+    """
+    geom = CHUNKED_GEOM
+    if geom not in GEOM_ALL:
+        return
+    for n in sizes:
+        data = H.GENERATORS[geom](n)
+        nv, no = data["n_vertices"], data["n_objects"]
+        B, oid = _by_id_bucket(data), no // 2
+        frac = min(1.0, FIXED_SELECTION / max(1, no))
+        low, high = bbox_for_fraction(frac)
+        log(f"  by id   {geom} N={n:>9,} ({B} per id cell, box fraction "
+            f"{frac:.6f})")
+
+        def add(op, mean, hw, runs, detail=""):
+            rows.add(block="chunked_by_id", geometry=geom, n_target=n,
+                     n_vertices=nv, n_objects=no, op=op, impl=ZV_BY_ID,
+                     unit="s", value=round(mean, 6), ci_hw=round(hw, 6),
+                     n_runs=runs, detail=f"{B} objects per id cell{detail}")
+
+        m, hw, k = H.repeat(
+            lambda t_: zv_write_by_id(ws.store(t_), geom, data, B),
+            n_runs("write_full", n),
+            setup=lambda i: f"cwid_{n}_{i}",
+            teardown=lambda t_: ws.clear(t_))
+        add("write_full", m, hw, k)
+
+        tag = f"cid_{n}"
+        store = ws.store(tag)
+        zv_write_by_id(store, geom, data, B)
+        _check_by_id_address(geom, store, data, B)
+        m, hw, k = H.repeat(lambda: read_points(str(store)),
+                            n_runs("read_full", n))
+        add("read_full", m, hw, k)
+        m, hw, k = H.repeat(lambda: read_points(str(store), bbox=(low, high)),
+                            n_runs("bbox_query", n))
+        add("bbox_query", m, hw, k, f"; box fraction {frac:.6f}")
+        m, hw, k = H.repeat(lambda: _zv_fetch_by_id(store, oid, B),
+                            n_runs("fetch_one", n))
+        add("fetch_one", m, hw, k)
+        ws.clear(tag)
+
+
 # --------------------------------------------------------------------
 # Block 5 -- round-trip fidelity
 # --------------------------------------------------------------------
@@ -1171,8 +1400,9 @@ def main():
                     help="parent directory for scratch stores")
     ap.add_argument("--out", default=str(RESULTS / "measurements.csv"))
     ap.add_argument("--blocks",
-                    default="storage,timing,spatial,chunks,fragments,"
-                            "chunked,fidelity")
+                    default="storage,timing,by_id,spatial,chunks,"
+                            "chunks_by_id,fragments,chunked,chunked_by_id,"
+                            "fidelity")
     ap.add_argument("--geometries", default=None,
                     help="comma-separated subset to measure, e.g. 'points'; "
                          "used with --append to re-measure one geometry")
@@ -1219,18 +1449,27 @@ def main():
         if "timing" in wanted:
             log("== bulk + per-object timing ==")
             block_timing(rows, sizes, ws)
+        if "by_id" in wanted:
+            log("== fetch one by id, store chunked by id ==")
+            block_by_id(rows, sizes, ws)
         if "spatial" in wanted:
             log("== spatial queries ==")
             block_spatial(rows, sizes, ws)
         if "chunks" in wanted:
             log("== chunk-count sweep ==")
             block_chunks(rows, ws)
+        if "chunks_by_id" in wanted:
+            log("== chunk-count sweep, store chunked by id ==")
+            block_chunks_by_id(rows, ws)
         if "fragments" in wanted:
             log("== fragmentation ==")
             block_fragments(rows, ws)
         if "chunked" in wanted:
             log("== versus other chunked formats ==")
             block_chunked(rows, sizes, ws)
+        if "chunked_by_id" in wanted:
+            log("== point cloud chunked by id, versus precomputed ==")
+            block_chunked_by_id(rows, sizes, ws)
         if "fidelity" in wanted:
             log("== round-trip fidelity ==")
             block_fidelity(rows, sizes, ws)

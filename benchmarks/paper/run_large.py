@@ -63,8 +63,9 @@ Roughly **1.5 hours**, a few GB of scratch, and about **12 GB of RAM**.
 Memory is the constraint that bites without warning: at 10^7 the mesh
 generator holds vertices, faces and object ids for ten million vertices
 while the writer builds its chunks, and that peak is the whole run's
-peak.  The single slowest measurement is one mesh write at 153 s, taken
-three times per block that writes one.
+peak.  The single slowest measurement is the ``by_id`` block's mesh
+write at 542 s, taken once; the slowest repeated one is a mesh write at
+153 s, taken three times per block that writes one.
 """
 
 from __future__ import annotations
@@ -94,14 +95,20 @@ BLOCKS = [
      "on-disk bytes for every (geometry, N, format)"),
     ("timing",    ("bulk", "object"),
      "write/read everything, fetch one, replace one"),
+    ("by_id",     ("object_by_id",),
+     "fetch one from a store chunked by id, no manifest"),
     ("spatial",   ("spatial_fraction", "spatial_fixed", "spatial_volume"),
      "bbox queries, swept three ways"),
     ("chunked",   ("chunked",),
      "versus Parquet / plain Zarr / HDF5 / precomputed"),
+    ("chunked_by_id", ("chunked_by_id",),
+     "point cloud chunked by id, versus precomputed's by_id"),
     ("fidelity",  ("fidelity",),
      "round trip, per geometry (fixed at 10^5)"),
     ("chunks",    ("chunks",),
      "chunk-count sweep (fixed at 10^6)"),
+    ("chunks_by_id", ("chunks_by_id",),
+     "chunk-count sweep, store chunked by id (fixed at 10^6)"),
     ("fragments", ("fragments",),
      "fragmentation sweep (fixed at 10^6)"),
 ]

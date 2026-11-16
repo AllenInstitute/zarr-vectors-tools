@@ -21,7 +21,11 @@ forces all of it.  Each panel is therefore its own file at one journal
 column (the storage bars take two) and each key is its own file beside
 it, cropped to the legend and nothing else.  ``--keys`` draws them inside
 the panels too, for reading one alone; ``--letters`` stamps A..G;
-``--combined`` still writes the old single-sheet ``figure1.{png,pdf}``.
+``--unlabelled`` (no format names, for lettering them by hand) and
+``--grid`` (y rules back on) write storage-bar variants beside the
+default panel, as ``A_storage_per_vertex_grid_unlabelled.png`` and so
+on; ``--combined`` still writes the old single-sheet
+``figure1.{png,pdf}``.
 
 Times are plotted in **milliseconds**.  The operations compared run from
 a 20 us seek-and-read to a 20 s mesh write, and milliseconds put the
@@ -72,6 +76,9 @@ they are not plotted.
 Colour encodes geometry and line style encodes implementation
 (solid + filled marker = zarr-vectors, dashed + open marker = the
 single-file competitor), so the same key reads across every line panel.
+H adds dash-dot + filled triangle for the same objects chunked by object
+id instead of by space -- streamlines and meshes only.  G2 is G with the
+point cloud chunked by id as a third, azure implementation.
 
 The palette is one blue-to-magenta arc with five fixed slots, validated
 as a set rather than chosen by eye: every pair -- not just neighbours --
@@ -262,20 +269,26 @@ def _band(ax, x, y, hw, color, alpha):
                     alpha=alpha, linewidth=0, zorder=2)
 
 
-def _line(ax, x, y, hw, geom, zv, label=None):
+def _line(ax, x, y, hw, geom, zv, label=None, *, linestyle=None,
+          marker=None):
     """One measured series: line, markers, and its uncertainty.
 
     Uncertainty is a filled band around the line, at low alpha so it
     reads as tolerance rather than as a second series.  On four points
     per line the band is an interpolation between four intervals, which
     is what a reader of a log-log trend line expects it to be.
+
+    ``zv`` picks the pair every line panel shares -- solid and filled for
+    zarr-vectors, dashed and open for the alternative.  ``linestyle`` and
+    ``marker`` override it for a series that is neither, such as panel
+    H's store chunked by id.
     """
     color = GEOM_COLOR[geom]
     x, y = np.asarray(x, float), np.asarray(y, float)
     hw = np.asarray(hw, dtype=float)
-    ax.plot(x, y, color=color, marker="o" if zv else "s",
+    ax.plot(x, y, color=color, marker=marker or ("o" if zv else "s"),
             markersize=6.0, linewidth=2.25,
-            linestyle="-" if zv else "--",
+            linestyle=linestyle or ("-" if zv else "--"),
             markerfacecolor=color if zv else "white",
             markeredgecolor=color, markeredgewidth=1.5, label=label,
             zorder=3)
@@ -413,12 +426,14 @@ PANEL_A_FORMATS = {
     # Each geometry gets its canonical format, that format compressed,
     # and where it exists a third encoding worth naming: precomputed for
     # points, TRX's own deflate for streamlines, OBJ against STL.
-    # Both precomputed variants are listed because the full one (with its
-    # ``by_id`` index) is not measured at the top size -- one file per
-    # annotation does not scale there -- and the spatial-only variant is,
-    # so the format is still named wherever the panel lands.
-    "points": ["PLY (gzip)", "precomputed annotations",
-               "precomputed (spatial only)", "Parquet"],
+    # Precomputed appears as the full format only -- spatial index plus
+    # ``by_id`` -- because that is what the format is; the spatial-only
+    # store is a partial one that cannot resolve an annotation id, and
+    # crediting it with the smaller size compares different things.  It
+    # is capped at 10^6 in the sweep (``by_id`` is one file per
+    # annotation), so a panel drawn at a larger top size will have no
+    # precomputed bar rather than a substitute for it.
+    "points": ["PLY (gzip)", "precomputed annotations", "Parquet"],
     "streamlines": ["TRK", "TRK (gzip)", "TRX deflate"],
     "skeletons": ["SWC", "SWC (gzip)"],
     "graphs": ["CSV edge-list", "CSV edge-list (gzip)"],
@@ -435,9 +450,7 @@ COMP_RAW, COMP_GZ = "#F0A0CE", "#B00060"
 
 # Long implementation names do not fit a rotated bar label at column
 # width; these are what the bars are called in the panel.
-BAR_NAME = {"precomputed annotations": "precomputed",
-            "precomputed (spatial only)": "precomputed (spatial)",
-            "precomputed (spatial only) (gzip)": "precomputed (spatial) gz"}
+BAR_NAME = {"precomputed annotations": "precomputed"}
 
 
 def _bar_name(impl):
@@ -445,8 +458,18 @@ def _bar_name(impl):
                         impl.replace(" edge-list", "").replace(" (gzip)", " gz"))
 
 
-def panel_storage_bars(ax, storage, best, env, letter=None, key=True):
-    """A -- bytes per vertex at the largest size measured."""
+def panel_storage_bars(ax, storage, best, env, letter=None, key=True,
+                       bar_labels=True, grid=False):
+    """A -- bytes per vertex at the largest size measured.
+
+    ``bar_labels=False`` draws the bars and nothing else: which file
+    format each competitor bar is stays for the assembler to letter by
+    hand, the same argument that keeps the key and the panel letters
+    out.  It is the one panel that names anything inside the axes.
+
+    ``grid=True`` puts the major y rules back, which is worth having when
+    the panel is read for the values rather than for the comparison.
+    """
     n_max = int(storage["n_target"].max())
     sub = storage[storage["n_target"] == n_max]
     geoms = [g for g in GEOM_ORDER if g in set(sub["geometry"])]
@@ -479,15 +502,19 @@ def panel_storage_bars(ax, storage, best, env, letter=None, key=True):
             ax.bar(x, val, width=w * 0.92, color=color, edgecolor="white",
                    linewidth=0.4)
             legend_of.setdefault(label, color)
-            if name:
-                ax.text(x, val, name, ha="center", va="bottom", fontsize=5.8,
-                        rotation=90, color=INK_MUTED)
+            if name and bar_labels:
+                ax.text(x, val, name, ha="center", va="bottom", fontsize=8.2,
+                        rotation=90, color=INK, fontweight="bold")
 
     ax.set_xticks(range(len(geoms)))
     ax.set_xticklabels([GEOM_LABEL[g] for g in geoms], rotation=20, ha="right")
     ax.set_ylabel("bytes per vertex")
     ax.set_title(f"Storage per vertex  (N \u2248 {n_max:,})")
-    ax.set_ylim(0, max(v for b in rows.values() for v, *_ in b) * 1.22)
+    # Headroom for the rotated labels, kept even when they are not drawn:
+    # an unlabelled panel is one that gets lettered by hand, and the hand
+    # needs the same room the labels would have taken.
+    tallest = max(v for b in rows.values() for v, *_ in b)
+    ax.set_ylim(0, tallest * 1.22)
     # Fixed order: the two store configurations, then raw file, then
     # compressed file -- so the key reads the same way every rebuild
     # regardless of which format each geometry happens to list first.
@@ -498,8 +525,17 @@ def panel_storage_bars(ax, storage, best, env, letter=None, key=True):
     if key:
         ax.legend(handles=handles, loc="upper left", frameon=False,
                   handlelength=1.2, fontsize=6.8)
-    ax.grid(True, which="major", axis="y", alpha=0.25)
-    ax.grid(True, which="minor", axis="y", alpha=0.12)
+    # No grid by default: the bars are read against each other and
+    # against the axis, and ruling behind labels this size only crowds
+    # them.  The rc default turns it on for every other panel, so it is
+    # switched off here rather than left unset.
+    # Everything off first: the rc default rules both axes, and a
+    # vertical rule through a bar group means nothing here.  Then the
+    # major y rules back if asked -- the minor ones subdivide every ten
+    # bytes five ways and turn the panel into ruled paper.
+    ax.grid(False, which="both")
+    if grid:
+        ax.grid(True, which="major", axis="y", alpha=0.25)
     ax.minorticks_on()
     ax.tick_params(axis="x", which="minor", bottom=False)
     _letter(ax, letter)
@@ -639,8 +675,15 @@ VS_PC_OPS = [
 VS_PC_IMPL = [("zarr-vectors", GEOM_COLOR["points"]),
               ("precomputed annotations", GEOM_COLOR["streamlines"])]
 
+# G2 adds the point cloud chunked by id as a third implementation (the
+# ``chunked_by_id`` sweep block): the layout that answers "read one" the
+# way precomputed's ``by_id`` does, from the id with no search.  Azure,
+# because blues are zarr-vectors on this arc.
+BY_ID_CHUNKED_BLOCK = "chunked_by_id"
+VS_PC_BY_ID = ("zarr-vectors, chunked by id", GEOM_COLOR["meshes"])
 
-def panel_vs_precomputed(ax, df, letter="G", key=True):
+
+def panel_vs_precomputed(ax, df, letter="G", key=True, *, by_id=False):
     """G -- the same three operations, against precomputed annotations.
 
     Precomputed is the comparison that matters here because it is built
@@ -655,11 +698,22 @@ def panel_vs_precomputed(ax, df, letter="G", key=True):
     Colour is the implementation and line style is the operation, the
     reverse of the single-file panels, because both sides here are
     chunked stores and neither is "the alternative encoding".
+
+    ``by_id=True`` draws G2: the same panel with the point cloud chunked
+    by id as a third implementation.  That is the store laid out the way
+    precomputed's ``by_id`` index is -- an object found from its id with
+    no search -- so the read-one lines compare like with like, and the
+    write lines show what the layout costs to build.
     """
+    impls = VS_PC_IMPL + ([VS_PC_BY_ID] if by_id else [])
     for row, (op, op_label, ls, marker, filled) in enumerate(VS_PC_OPS):
         curves = _chunked_curves(df, op, only=("zarr-vectors",
                                                "precomputed annotations"))
-        for impl, color in VS_PC_IMPL:
+        if by_id:
+            curves[VS_PC_BY_ID[0]] = df[
+                (df["block"] == BY_ID_CHUNKED_BLOCK)
+                & (df["op"] == op)].sort_values("n_vertices")
+        for impl, color in impls:
             sub = curves.get(impl)
             if sub is None or not len(sub):
                 continue
@@ -676,11 +730,16 @@ def panel_vs_precomputed(ax, df, letter="G", key=True):
         if zv is not None and pc is not None and len(zv) and len(pc):
             _note_crossover("vs precomputed", op_label,
                             crossover_of(zv, pc))
+        bi = curves.get(VS_PC_BY_ID[0])
+        if bi is not None and pc is not None and len(bi) and len(pc):
+            _note_crossover("vs precomputed, chunked by id", op_label,
+                            crossover_of(bi, pc))
 
+    names = {"zarr-vectors": "zarr-vectors",
+             "precomputed annotations": "precomputed"}
     handles = [Line2D([], [], color=c, linewidth=2.4,
-                      label="zarr-vectors" if impl == "zarr-vectors"
-                      else "precomputed")
-               for impl, c in VS_PC_IMPL]
+                      label=names.get(impl, impl))
+               for impl, c in impls]
     handles += [Line2D([], [], color="0.35", linestyle=ls, marker=m,
                        markersize=5.4, linewidth=2.1, label=lbl,
                        markerfacecolor="0.35" if filled else "white",
@@ -688,8 +747,10 @@ def panel_vs_precomputed(ax, df, letter="G", key=True):
                 for _op, lbl, ls, m, filled in VS_PC_OPS]
     if key:
         _draw_key(ax, handles)
-    _axes(ax, "vertices", T_LABEL,
-            "Write, read, read one\nvs precomputed annotations", letter)
+    title = ("Write, read, read one vs precomputed\n"
+             "(zarr-vectors chunked by space and by id)" if by_id
+             else "Write, read, read one\nvs precomputed annotations")
+    _axes(ax, "vertices", T_LABEL, title, letter)
     return handles
 
 
@@ -819,6 +880,18 @@ def panel_equal_box(ax, df, letter="F2", key=False):
                          letter, key, per_geometry=False)
 
 
+# Panel H's second layout: the same objects chunked by object id instead
+# of by space, at matching chunk counts (``block_chunks_by_id`` in the
+# sweep).  An object's cell and fragment come from its id, so no manifest
+# is read.  Filled, because it is still zarr-vectors; dash-dot, because it
+# is not the deployed layout.  Streamlines and meshes only.  The same
+# store swept across N rather than chunk count is in the supplementary
+# table, under ``object_by_id``.
+BY_ID_BLOCK = "object_by_id"
+BY_ID_CHUNKS_BLOCK = "chunks_by_id"
+BY_ID_STYLE = {"linestyle": "-.", "marker": "^"}
+
+
 def panel_chunks(ax, df, letter="H", key=False):
     """H -- what the partition itself costs, dataset held fixed.
 
@@ -833,22 +906,43 @@ def panel_chunks(ax, df, letter="H", key=False):
     chunks make a fetch read more than it needs, fine chunks make it pay
     per-chunk metadata, and where the minimum sits depends on the
     geometry -- which is the point of drawing all three.
+
+    The dash-dot lines cut the same datasets by object id instead: one
+    spatial cell, split into as many id cells as the solid line's grid
+    has chunks, with each object a fragment whose cell and index are
+    arithmetic on its id.  That is the layout a fetch by id would pick --
+    no manifest, and no vertices but those of the objects sharing its
+    cell -- paid for in spatial locality, which this panel does not
+    measure.  A mesh store at 10^6 vertices holds fewer objects than the
+    finest grid has chunks, so its id line stops at one object per cell.
     """
     sub = df[(df["block"] == "chunks") & (df["op"] == "fetch_one")]
+    by_id = df[(df["block"] == BY_ID_CHUNKS_BLOCK)
+               & (df["op"] == "fetch_one")]
     for g in TIMED:
-        s_ = sub[sub["geometry"] == g].sort_values("n_target")
-        if not len(s_):
-            continue
-        _line(ax, s_["n_target"].to_numpy(), s_["value"].to_numpy() * MS,
-              s_["ci_hw"].to_numpy() * MS, g, True)
+        for s_, style in ((sub, {}), (by_id, BY_ID_STYLE)):
+            s_ = s_[s_["geometry"] == g].sort_values("n_target")
+            if not len(s_):
+                continue
+            _line(ax, s_["n_target"].to_numpy(), s_["value"].to_numpy() * MS,
+                  s_["ci_hw"].to_numpy() * MS, g, True, **style)
     n = sub["n_vertices"].max()
-    _axes(ax, "chunks over the domain", T_LABEL,
+    _axes(ax, "chunks in the store", T_LABEL,
             f"Read one object vs chunk count\n(N = {_si(n)} vertices)",
             letter)
     handles = [Line2D([], [], color=GEOM_COLOR[g], marker="o", markersize=5.1,
                       linewidth=2.1, markerfacecolor=GEOM_COLOR[g],
                       markeredgecolor=GEOM_COLOR[g], label=GEOM_LABEL[g])
                for g in TIMED]
+    if len(by_id):
+        handles += [
+            Line2D([], [], color="0.35", linestyle="-", marker="o",
+                   markersize=5.1, linewidth=2.1, markerfacecolor="0.35",
+                   markeredgecolor="0.35", label="chunked by space"),
+            Line2D([], [], color="0.35", markersize=5.1, linewidth=2.1,
+                   markerfacecolor="0.35", markeredgecolor="0.35",
+                   label="chunked by id", **BY_ID_STYLE),
+        ]
     if key:
         _draw_key(ax, handles)
     return handles
@@ -953,9 +1047,18 @@ def _ctx(df, env):
             "pc_ratio": precomputed_ratio(storage)}
 
 
+# Panel A is the only panel that writes text inside the axes, so it is
+# the only one ``--unlabelled`` has anything to strip; the flag is read
+# here rather than passed down every draw signature, none of which would
+# use it.
+BAR_LABELS = True
+BAR_GRID = False
+
+
 def _draw_a(ax, c, letter=None, key=True):
     return panel_storage_bars(ax, c["storage"], c["best"], c["env"],
-                              letter=letter, key=key)
+                              letter=letter, key=key,
+                              bar_labels=BAR_LABELS, grid=BAR_GRID)
 
 
 def _draw_b(ax, c, letter=None, key=True):
@@ -1014,6 +1117,10 @@ def _draw_g(ax, c, letter=None, key=True):
     return panel_vs_precomputed(ax, c["df"], letter, key=key)
 
 
+def _draw_g2(ax, c, letter=None, key=True):
+    return panel_vs_precomputed(ax, c["df"], letter, key=key, by_id=True)
+
+
 # (letter, filename stem, figure size, draw function).  The letter is the
 # position this panel held in the assembled figure and is written only
 # when asked for; the stem is what the file is called either way.
@@ -1035,11 +1142,15 @@ PANELS = [
     # is the question "does crossing chunk boundaries cost?" -- H itself
     # cannot answer it, because its objects fit inside one chunk.
     ("H", "H2_read_one_vs_fragments", SIZE_LINE, _draw_h2),
+    # The alternative G: the store chunked by id as a third line, against
+    # the index precomputed answers "read one" from.  Last, so the
+    # eight-slot ``--combined`` sheet keeps the panels it always had.
+    ("G", "G2_vs_precomputed_by_id", SIZE_LINE, _draw_g2),
 ]
 
 
 def render_panels(df, env, outdir, formats=("png", "pdf"), letters=False,
-                  keys=False):
+                  keys=False, only=None, suffix=""):
     """Write every panel as its own file, each with its key beside it.
 
     Panel ``X`` produces ``X.png``/``X.pdf`` and ``X_key.png``/``X_key.pdf``.
@@ -1048,20 +1159,27 @@ def render_panels(df, env, outdir, formats=("png", "pdf"), letters=False,
     identification and where, decisions that belong to the layout the
     panels end up in.  ``keys=True`` draws it inside as well, for reading
     one panel on its own.
+
+    ``only`` restricts the run to the panels whose stems it names and
+    ``suffix`` is appended to every stem written, which is how a variant
+    (say the storage bars with no format names) lands beside the default
+    files instead of on top of them.
     """
     c = _ctx(df, env)
     outdir.mkdir(parents=True, exist_ok=True)
     written = []
     for letter, stem, size, draw in PANELS:
+        if only is not None and stem not in only:
+            continue
         fig, ax = plt.subplots(figsize=size)
         handles = draw(ax, c, letter=letter if letters else None, key=keys)
         fig.tight_layout(pad=0.35)
         for fmt in formats:
-            path = outdir / f"{stem}.{fmt}"
+            path = outdir / f"{stem}{suffix}.{fmt}"
             fig.savefig(path, bbox_inches="tight")
             written.append(path)
         plt.close(fig)
-        written += _write_key(handles, outdir, f"{stem}_key", formats)
+        written += _write_key(handles, outdir, f"{stem}{suffix}_key", formats)
     return written
 
 
@@ -1190,15 +1308,18 @@ def supplementary(df) -> pd.DataFrame:
             "note": "" if pd.isna(r["detail"]) else str(r["detail"]),
         })
 
-    timing = df[df["block"].isin(["bulk", "object", "spatial_fixed",
-                                  "spatial_fraction", "spatial_volume",
-                                  "chunks", "fragments"])].copy()
+    timing = df[df["block"].isin(["bulk", "object", BY_ID_BLOCK,
+                                  "spatial_fixed", "spatial_fraction",
+                                  "spatial_volume", "chunks",
+                                  BY_ID_CHUNKS_BLOCK, "fragments",
+                                  "chunked", BY_ID_CHUNKED_BLOCK])].copy()
     # The spatial blocks hold several measurements per (geometry, N, op) --
     # one per box size -- so the box size has to join the grouping key or
     # every ratio in those blocks would be taken against the first box.
     timing["_key"] = np.where(
         timing["block"].isin(["spatial_fraction", "spatial_fixed",
-                              "spatial_volume", "chunks", "fragments"]),
+                              "spatial_volume", "chunks",
+                              BY_ID_CHUNKS_BLOCK, "fragments"]),
         timing["detail"].astype(str), "")
     for (block, geom, n, op, _), grp in timing.groupby(
             ["block", "geometry", "n_target", "op", "_key"]):
@@ -1216,6 +1337,11 @@ def supplementary(df) -> pd.DataFrame:
                 note = f"{int(r['n_target']):,} chunks over the domain; {note}"
             elif block == "fragments":
                 note = f"crosses {int(r['n_target'])} chunks; {note}"
+            elif block in (BY_ID_BLOCK, BY_ID_CHUNKED_BLOCK):
+                note = f"store chunked by object id; {note}"
+            elif block == BY_ID_CHUNKS_BLOCK:
+                note = (f"{int(r['n_target']):,} id cells, store chunked by "
+                        f"object id; {note}")
             rows.append({
                 "geometry": GEOM_LABEL[geom],
                 "vertices": int(r["n_vertices"]),
@@ -1303,13 +1429,21 @@ def main():
                     help="also draw each key inside its panel; every key "
                          "is written as its own <panel>_key file either "
                          "way")
+    ap.add_argument("--unlabelled", "--unlabeled", action="store_true",
+                    dest="unlabelled",
+                    help="storage-bar variant: no format names, for "
+                         "lettering the panel by hand")
+    ap.add_argument("--grid", action="store_true",
+                    help="storage-bar variant: put the y gridlines back")
     ap.add_argument("--combined", action="store_true",
                     help="also write the eight panels as one sheet, "
                          "figure1.png/pdf")
     ap.add_argument("--no-table", action="store_true",
                     help="skip the supplementary table")
     args = ap.parse_args()
-    global RESULTS
+    global RESULTS, BAR_LABELS, BAR_GRID
+    BAR_LABELS = not args.unlabelled
+    BAR_GRID = args.grid
     if args.results:
         RESULTS = Path(args.results).resolve()
     panels_dir = Path(args.panels).resolve() if args.panels else RESULTS / "panels"
@@ -1319,8 +1453,16 @@ def main():
     df = load()
     env = json.loads((RESULTS / "environment.json").read_text())
 
+    # ``--grid`` and ``--unlabelled`` change panel A and nothing else, so
+    # a variant run writes panel A alone, under a stem naming the
+    # variant: the default files stay as they are and the other nine
+    # panels are not rewritten byte-for-byte under a new name.
+    suffix = ("_grid" if args.grid else "") + \
+             ("_unlabelled" if args.unlabelled else "")
     written = render_panels(df, env, panels_dir, formats=formats,
-                            letters=args.letters, keys=args.keys)
+                            letters=args.letters, keys=args.keys,
+                            only={"A_storage_per_vertex"} if suffix else None,
+                            suffix=suffix)
     for path in written:
         print(f"wrote {path}")
 
