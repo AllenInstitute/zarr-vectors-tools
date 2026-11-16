@@ -450,11 +450,17 @@ def _core_streamlines(path: Path, n: int = 40, *, segment_ids: bool = True) -> P
 
 
 def _scales(store: Path) -> list[list[float]]:
+    """Each level's bin ratio to level 0 (level 0 is 1).  The NGFF entries no
+    longer carry it: every level repeats level 0's transform, since coarse
+    vertices are stored in level-0 coordinates."""
     root = open_store(str(store))
-    out = []
     for ds in root.attrs.to_dict()["multiscales"][0]["datasets"]:
-        transforms = ds["coordinateTransformations"]
-        out.append(next(t["scale"] for t in transforms if t["type"] == "scale"))
+        scale = next(t["scale"] for t in ds["coordinateTransformations"] if t["type"] == "scale")
+        assert scale == [1.0] * len(scale)
+    out = []
+    for lv in list_resolution_levels(root):
+        ratio = read_level_metadata(root, lv).bin_ratio if lv else None
+        out.append([float(r) for r in ratio] if ratio else [1.0] * 3)
     return out
 
 

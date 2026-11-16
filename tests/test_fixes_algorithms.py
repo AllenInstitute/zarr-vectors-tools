@@ -336,9 +336,9 @@ def test_chunked_skeleton_link_adds_an_edge_without_reparenting(tmp_path):
     assert bfs_distances(path, 0)["distances"].tolist() == list(range(10))
 
 
-def test_weights_on_a_skeleton_store_name_the_links_they_lack(tmp_path):
-    """A Y: only the second branch's link is stored, with its weight; the
-    other three are implied and have none."""
+def test_weights_on_a_skeleton_store_follow_every_edge(tmp_path):
+    """A Y with an edge attribute: the skeleton writer stores every edge with
+    its weight (an implied parent would have none), so weighted paths work."""
     positions = np.array([[0, 0, 0], [5, 0, 0], [10, 0, 0], [15, 5, 0], [15, 6, 0]], np.float32)
     edges = np.array([[1, 0], [2, 1], [3, 2], [4, 2]])
     path = tmp_path / "weighted.zv"
@@ -350,8 +350,9 @@ def test_weights_on_a_skeleton_store_name_the_links_they_lack(tmp_path):
     assert compute_k_core(path)["max_core"] == 1
     # Unit weights when the attribute is absent, as on a graph store.
     assert shortest_path(path, 0, 4, weight="missing")["cost"] == 3.0
-    with pytest.raises(ValueError, match="implies"):
-        shortest_path(path, 0, 4, weight="w")
+    # 0 -> 1 -> 2 -> 4 over edges weighted 1, 2 and 4.
+    got = shortest_path(path, 0, 4, weight="w")
+    assert got["cost"] == 7.0 and list(got["path"]) == [0, 1, 2, 4]
 
 
 def test_explicit_graph_edges_are_the_stored_records(tmp_path):

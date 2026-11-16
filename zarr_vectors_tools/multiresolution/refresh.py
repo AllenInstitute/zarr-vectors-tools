@@ -291,12 +291,16 @@ def rebuild_pyramid_from_level(
         cross_level_depth = root_meta.cross_level_depth
     _clear_cross_level_families(root, from_level=source_level)
 
+    # Levels must stay contiguous, so drop the planned ones coarsest first
+    # (the plan already holds what each needs), then rebuild them in order.
+    for entry in sorted(plan, key=lambda e: e["level"], reverse=True):
+        remove_resolution_level(root, entry["level"])
+    if plan and session_for(root) is not None:
+        commit(root, "drop levels for refresh")
+
     summaries: list[dict[str, Any]] = []
     for entry in plan:
         lv = entry["level"]
-        remove_resolution_level(root, lv)
-        if session_for(root) is not None:
-            commit(root, f"drop level {lv} for refresh")
         summary = coarsen_level(
             url,
             source_level=entry["parent_level"],
