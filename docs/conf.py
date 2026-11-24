@@ -11,10 +11,10 @@ sys.path.insert(0, os.path.abspath(".."))
 # -- Project information ------------------------------------------------------
 project = "zarr-vectors-tools"
 copyright = (
-    "2024, BRIDGE Neuroscience. Aligned to the Zarr Vectors specification by "
+    "2024, FibreGraph. Aligned to the Zarr Vectors specification by "
     "Forrest Collman, Allen Institute for Brain Science."
 )
-author = "BRIDGE Neuroscience"
+author = "FibreGraph"
 # Package version. Independent of the on-disk FORMAT version this package
 # targets, which is Zarr Vectors 0.9 (the merged links/<delta>/<offsets>/ layout).
 release = "0.3.0"
