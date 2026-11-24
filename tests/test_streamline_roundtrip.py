@@ -205,7 +205,7 @@ class TestTrkRoundTrip:
         )
         for store in (serial, parallel):
             attrs = zarr.open_group(str(store), mode="r").attrs.asdict()
-            assert [a.get("unit") for a in attrs["multiscales"][0]["axes"]] == ["millimeter"] * 3
+            assert [a.get("unit") for a in attrs["zarr_vectors"]["axes"]] == ["millimeter"] * 3
             world = attrs["ome"]["attributes"]["scene"]["coordinateSystems"][0]
             assert [a.get("unit") for a in world["axes"]] == ["millimeter"] * 3
             objects = store / "0" / "object_attributes"

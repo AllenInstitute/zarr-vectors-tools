@@ -93,5 +93,5 @@ def test_linc_trk_axes_are_millimetres(tmp_path: Path) -> None:
     ingest_linc_trk(source, store, (50, 50, 50), lut_path=lut, mapping_path=mapping)
 
     attrs = zarr.open_group(str(store), mode="r").attrs.asdict()
-    assert [a.get("unit") for a in attrs["multiscales"][0]["axes"]] == ["millimeter"] * 3
+    assert [a.get("unit") for a in attrs["zarr_vectors"]["axes"]] == ["millimeter"] * 3
     assert zarr.open_array(str(store / "0/object_attributes/label_id"), mode="r").shape == (4,)

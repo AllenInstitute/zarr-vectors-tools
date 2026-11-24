@@ -504,7 +504,7 @@ COMPOSE_STALE: str = "compose_stale"
 
 def mark_compose_stale(level_group: Any) -> None:
     """Mark a level out of date: ``{"zarr_vectors_tools": {"compose_stale":
-    true}}`` in its attributes.  Outside the ``zarr_vectors_level`` block,
+    true}}`` in its attributes.  Outside the level's ``zarr_vectors`` block,
     whose fields zarr-vectors-py's ``update_level_metadata`` restricts to
     the ones it declares."""
     from zarr_vectors_tools.multiresolution.coarsen import TOOLS_LEVEL_ATTRS_KEY

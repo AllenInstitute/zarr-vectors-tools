@@ -57,12 +57,10 @@ env:
   #   git -C ../zarr-vectors-py log -1 --format=%H
   #   git -C ../zarr-vectors-py branch -r --contains <sha>   # must list a branch
   #
-  # Currently core's perf/speedups-on-octree branch (the top of the
-  # gpu-backend -> octree -> speedups stack): this package needs its pyramid,
-  # object and octree work and follows its behaviour (contiguous level
-  # removal, NGFF transforms, [child, parent] skeleton links), which core's
-  # main does not have yet. Move to main once the stack merges.
-  CORE_SHA: 0d92e7cbeb929332303ee22bb2f3beb59422602a
+  # Currently core's format-0.10 branch (format 0.10.0: metadata on the Zarr
+  # Vectors convention; the root `multiscales` block lists levels only and
+  # the axes live in `zarr_vectors.axes`).
+  CORE_SHA: beeb9448ee577b38a387ad7509ca8f3dfd75d016
   CORE_REPO: https://github.com/AllenInstitute/zarr-vectors-py
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 

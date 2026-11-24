@@ -6,10 +6,9 @@ themselves and take no unit.  A store whose axes carry none is read as
 unitless: the viewer shows bare numbers, and a precomputed export has to
 assume nanometres.  So the ingesters that know their unit stamp it here.
 
-The axes live in two places, and both are rewritten: NGFF
-``multiscales[0].axes`` (what readers, and every later
-``write_multiscale_metadata``, take them from) and the ``world`` coordinate
-system of the RFC 8 ``ome`` node.
+The axes live in two places, and both are rewritten: the root
+``zarr_vectors.axes`` (format 0.10.0; what readers take them from) and the
+``world`` coordinate system of the RFC 8 ``ome`` node.
 """
 
 from __future__ import annotations
@@ -33,10 +32,10 @@ def declare_axis_unit(store_path: str | Path, unit: str) -> None:
         ]
 
     update: dict[str, Any] = {}
-    multiscales = copy.deepcopy(attrs.get("multiscales"))
-    if multiscales:
-        multiscales[0]["axes"] = with_unit(multiscales[0].get("axes") or [])
-        update["multiscales"] = multiscales
+    zv = copy.deepcopy(attrs.get("zarr_vectors"))
+    if zv and zv.get("axes"):
+        zv["axes"] = with_unit(zv["axes"])
+        update["zarr_vectors"] = zv
     ome = copy.deepcopy(attrs.get("ome"))
     systems = (((ome or {}).get("attributes") or {}).get("scene") or {}).get(
         "coordinateSystems"

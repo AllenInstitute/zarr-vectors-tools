@@ -38,6 +38,7 @@ from zarr_vectors.types.lines import write_lines
 from zarr_vectors.types.points import write_points
 from zarr_vectors.types.polylines import write_polylines
 
+from tests._layout import level_paths
 from tests._source_helpers import stamp_segment_id_from_manifests
 from zarr_vectors_tools.cli import main
 from zarr_vectors_tools.multiresolution.coarsen import (
@@ -450,13 +451,11 @@ def _core_streamlines(path: Path, n: int = 40, *, segment_ids: bool = True) -> P
 
 
 def _scales(store: Path) -> list[list[float]]:
-    """Each level's bin ratio to level 0 (level 0 is 1).  The NGFF entries no
-    longer carry it: every level repeats level 0's transform, since coarse
-    vertices are stored in level-0 coordinates."""
+    """Each level's bin ratio to level 0 (level 0 is 1).  The root `multiscales`
+    block carries no transform (coarse vertices are stored in level-0
+    coordinates), so it only lists the levels."""
     root = open_store(str(store))
-    for ds in root.attrs.to_dict()["multiscales"][0]["datasets"]:
-        scale = next(t["scale"] for t in ds["coordinateTransformations"] if t["type"] == "scale")
-        assert scale == [1.0] * len(scale)
+    assert level_paths(root.attrs.to_dict()) == [str(lv) for lv in list_resolution_levels(root)]
     out = []
     for lv in list_resolution_levels(root):
         ratio = read_level_metadata(root, lv).bin_ratio if lv else None

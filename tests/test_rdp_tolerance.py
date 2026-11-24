@@ -259,12 +259,12 @@ class TestToleranceIsRecorded:
     def test_the_record_lives_beside_core_level_metadata(
         self, tmp_path: Path,
     ) -> None:
-        """A key inside ``zarr_vectors_level`` would be dropped the next time
+        """A key inside the level ``zarr_vectors`` block would be dropped the next time
         core restamps that block; a sibling key is not."""
         store = _streamline_store(tmp_path / "s.zv")
         _pyramid(store, [(2.0, 1.0)], rdp_tolerances=[0.5])
         attrs = open_store(str(store))["1"].attrs.to_dict()
-        assert "rdp_tolerance" not in attrs["zarr_vectors_level"]
+        assert "rdp_tolerance" not in attrs["zarr_vectors"]
         assert attrs[TOOLS_LEVEL_ATTRS_KEY]["coarsening"]["rdp_tolerance"] == 0.5
 
 
