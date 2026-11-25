@@ -48,6 +48,22 @@ __all__ = [
 # =====================================================================
 
 
+def _grid_origin(group: Any, path: str, ndim: int) -> tuple[int, ...]:
+    """Chunk coordinate of the first cell of the array at ``path``.
+
+    Asked of core (``chunk_grid_bounds``) rather than read from the array's
+    attributes: where ``chunk_grid_origin`` is stored is core's business,
+    and format 0.10 moved it inside the array's ``zarr_vectors`` object.
+    Absent means zero.
+    """
+    try:
+        found = group.chunk_grid_bounds(path)
+    except Exception:  # noqa: BLE001 - not a chunk array
+        found = None
+    raw = found[0] if found is not None else None
+    return tuple(int(o) for o in raw) if raw else (0,) * ndim
+
+
 def expand_grid(
     dataset: Any,
     level: Any,
@@ -94,9 +110,7 @@ def expand_grid(
         current = tuple(int(s) for s in vertices.shape)
     except Exception as exc:  # noqa: BLE001
         raise StoreError("cannot read the target's grid shape to expand it") from exc
-    origin = tuple(
-        int(o) for o in (vertices.attrs.get("chunk_grid_origin") or (0,) * len(current))
-    )
+    origin = _grid_origin(group, "vertices", len(current))
 
     want_hi = tuple(int(v) for v in needed)
     # The highest cell wanted lying below the first cell means the data on
@@ -141,9 +155,7 @@ def expand_grid(
             continue
         # Each array is grown to reach the same top cell, from its own first
         # cell: arrays created at different times need not share an origin.
-        own = tuple(
-            int(o) for o in (array.attrs.get("chunk_grid_origin") or (0,) * len(shape))
-        )
+        own = _grid_origin(group, path, len(shape))
         merged = tuple(
             max(size, first + size_v - own_first)
             for size, first, size_v, own_first in zip(shape, origin, target, own)
