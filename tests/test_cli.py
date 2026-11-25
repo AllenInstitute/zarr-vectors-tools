@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from zarr_vectors.building import list_resolution_levels, open_store
 
+from tests._layout import level_paths
 from zarr_vectors_tools.cli import build_parser, main
 from zarr_vectors_tools.cli._args import (
     build_factors,
@@ -614,7 +615,7 @@ def test_merge_table_into_store(tmp_path):
                  "--chunk-shape", "100,100,100", *table]) == 0
     assert main(["merge", str(target), str(staged), "--pyramid", "drop"]) == 0
     meta = json.loads((target / "0" / "zarr.json").read_text())
-    assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == 26
+    assert meta["attributes"]["zarr_vectors"]["vertex_count"] == 26
 
 
 def test_merge_refuses_points_without_objects(tmp_path):
@@ -624,7 +625,7 @@ def test_merge_refuses_points_without_objects(tmp_path):
     extra = _write_csv(tmp_path / "b.csv", n=5, seed=1)
     assert main(["merge", str(target), str(extra)]) == 1   # IngestError, cleanly
     meta = json.loads((target / "0" / "zarr.json").read_text())
-    assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == 20
+    assert meta["attributes"]["zarr_vectors"]["vertex_count"] == 20
 
 
 # ===================================================================
@@ -633,7 +634,7 @@ def test_merge_refuses_points_without_objects(tmp_path):
 
 def _multiscale_paths(store: Path) -> list[str]:
     attrs = json.loads((store / "zarr.json").read_text())["attributes"]
-    return [d["path"] for d in attrs["multiscales"][0]["datasets"]]
+    return level_paths(attrs)
 
 
 class TestPyramidReplace:
@@ -683,7 +684,7 @@ def test_convert_refuses_existing_output(tmp_path):
         main(["convert", str(_write_csv(tmp_path / "b.csv", n=5, seed=3)), str(out),
               "--chunk-shape", "100,100,100"])
     meta = json.loads((out / "0" / "zarr.json").read_text())
-    assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == 300
+    assert meta["attributes"]["zarr_vectors"]["vertex_count"] == 300
 
 
 def test_edgelist_attributes_follow_their_edges(tmp_path, monkeypatch):
@@ -746,7 +747,7 @@ class TestPointPyramid:
         for level in (1, 2, 3):
             meta = json.loads((out / str(level) / "zarr.json").read_text())
             rows = len(read_points(str(out), level=level)["positions"])
-            assert meta["attributes"]["zarr_vectors_level"]["vertex_count"] == rows
+            assert meta["attributes"]["zarr_vectors"]["vertex_count"] == rows
 
 
 class TestAttributeSparsity:
@@ -817,7 +818,7 @@ def test_coarse_levels_count_their_own_vertices(tmp_path):
         level_group = get_resolution_level(root, level)
         counts = np.asarray(read_object_attributes(level_group, "vertex_count"))
         meta = json.loads((out / str(level) / "zarr.json").read_text())
-        assert int(counts.sum()) == meta["attributes"]["zarr_vectors_level"]["vertex_count"]
+        assert int(counts.sum()) == meta["attributes"]["zarr_vectors"]["vertex_count"]
         if level:
             assert (counts == 0).sum() > 0      # dropped objects count 0, not "missing"
 

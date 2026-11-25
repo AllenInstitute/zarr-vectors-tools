@@ -34,6 +34,7 @@ from zarr_vectors.building import (
 )
 from zarr_vectors.types.graphs import read_graph
 
+from tests._layout import level_paths
 from zarr_vectors_tools.cli import main
 from zarr_vectors_tools.multiresolution.skeleton_layout import (
     LAYOUT_LINKED,
@@ -625,7 +626,7 @@ class TestObjectColumns:
 
 
 # ===================================================================
-# Skeleton levels record their scale (OME multiscales) and stride
+# Skeleton levels record their scale (level metadata) and stride
 # ===================================================================
 
 
@@ -644,12 +645,11 @@ def test_skeleton_levels_record_their_scale_and_stride(
     assert [tuple(read_level_metadata(root, lv).bin_ratio) for lv in (1, 2)] == [
         (4, 4, 4), (16, 16, 16)]
     assert [read_coarsening_record(root, lv)["stride"] for lv in (1, 2)] == [4, 2]
-    # NGFF carries level 0's transform on every level: coarse vertices are
-    # stored in level-0 coordinates, and the ratio above is the level's scale.
+    # The root multiscales block lists the levels and carries no transform:
+    # coarse vertices are stored in level-0 coordinates, and the ratio above
+    # is the level's scale.
     meta = json.loads((store / "zarr.json").read_text())["attributes"]
-    scales = [d["coordinateTransformations"][0]["scale"]
-              for d in meta["multiscales"][0]["datasets"]]
-    assert scales == [[1.0] * 3] * 3
+    assert level_paths(meta) == ["0", "1", "2"]
 
     def snapshot() -> list[np.ndarray]:
         out = []

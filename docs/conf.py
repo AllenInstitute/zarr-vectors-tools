@@ -11,12 +11,13 @@ sys.path.insert(0, os.path.abspath(".."))
 # -- Project information ------------------------------------------------------
 project = "zarr-vectors-tools"
 copyright = (
-    "2024, BRIDGE Neuroscience. Aligned to the Zarr Vectors specification by "
-    "Forrest Collman, Allen Institute for Brain Science."
+    "2024, Andrew Keenlyside and Forrest Collman. Aligned to the Zarr "
+    "Vectors specification by Forrest Collman, Allen Institute for Brain "
+    "Science."
 )
-author = "BRIDGE Neuroscience"
+author = "Andrew Keenlyside, Forrest Collman"
 # Package version. Independent of the on-disk FORMAT version this package
-# targets, which is Zarr Vectors 0.9 (the merged links/<delta>/<offsets>/ layout).
+# targets, which is Zarr Vectors 0.10.
 release = "0.3.0"
 version = release
 
@@ -27,7 +28,7 @@ version = release
 # substitution mechanism: rst_prolog covers the .rst pages (|zv_version|),
 # myst_substitutions covers the .md pages ({{ zv_version }}). rst_prolog
 # alone leaves the literal "|zv_version|" in the rendered Markdown.
-zv_format_version = "0.9"
+zv_format_version = "0.10"
 
 rst_prolog = f"""
 .. |zv_version| replace:: {zv_format_version}

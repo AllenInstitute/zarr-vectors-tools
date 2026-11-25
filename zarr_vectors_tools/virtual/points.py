@@ -1,5 +1,5 @@
 """SWC neurons and point tables (.csv, .tsv, .xyz) as virtual zarr-vectors
-0.9.4 skeleton and point-cloud stores.
+0.10.0 skeleton and point-cloud stores.
 
 The browser's layout (ngplatform's Zarr Vectors plugin,
 ``src/virtual/points.ts``), chunk for chunk: one cell holds everything,
@@ -26,7 +26,6 @@ are left out, and columns without a header are ``col<i>``.
 
 from __future__ import annotations
 
-import json
 import math
 import re
 import struct
@@ -35,7 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from .meshes import mesh_unit
-from .streamlines import ZV_VERSION, _column, _group, element, fragment_index, vlen_chunk
+from .streamlines import ZV_VERSION, _column, _group, _json, element, fragment_index, vlen_chunk
 
 MANIFEST_ROWS = 16384
 COLUMN_ROWS = 65536
@@ -339,7 +338,7 @@ class CellStore:
         )
 
     def get(self, key: str):
-        j = lambda v: json.dumps(v, separators=(",", ":")).encode()  # noqa: E731
+        j = _json
         if key != "zarr.json" and re.sub(r"/(zarr\.json|c/.*)$", "", key) not in self.directories:
             return None
         m = re.match(

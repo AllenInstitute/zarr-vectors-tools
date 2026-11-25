@@ -172,7 +172,7 @@ def select_coarsener_key(root_meta: Any) -> str:
 #: Level-group attribute key under which this package records coarsening
 #: parameters that core's ``LevelMetadata`` has no field for.
 #:
-#: A sibling of core's ``zarr_vectors_level`` block rather than a key inside
+#: A sibling of core's level ``zarr_vectors`` block rather than a key inside
 #: it.  ``create_resolution_level`` rewrites that block wholesale from
 #: ``LevelMetadata.to_dict()``, so an unknown key inside it is dropped the
 #: next time a writer restamps the level -- which the polyline coarsener

@@ -24,6 +24,7 @@ import pytest
 from zarr_vectors.exceptions import ExportError, IngestError
 from zarr_vectors.types.points import read_points, write_points
 
+from tests._layout import array_block
 from zarr_vectors_tools.cli import main
 from zarr_vectors_tools.cli._args import FORMAT_REGISTRY, parse_delimiter
 from zarr_vectors_tools.convert.export.csv_points import export_csv
@@ -43,7 +44,7 @@ def _cli(capsys, *argv) -> tuple[int, str]:
 
 def _attr_meta(store: Path, name: str, level: int = 0) -> dict:
     path = store / str(level) / "vertex_attributes" / name / "zarr.json"
-    return json.loads(path.read_text())["attributes"]
+    return array_block(json.loads(path.read_text())["attributes"])
 
 
 def _write_points_text(path: Path, points: np.ndarray, *, sep: str, header: str | None):
@@ -242,7 +243,7 @@ def _write_trx(path: Path) -> np.ndarray:
 
 
 def _axes(store: Path) -> list[dict]:
-    return json.loads((store / "zarr.json").read_text())["attributes"]["multiscales"][0]["axes"]
+    return json.loads((store / "zarr.json").read_text())["attributes"]["zarr_vectors"]["axes"]
 
 
 class TestTrx:

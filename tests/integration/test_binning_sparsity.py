@@ -239,10 +239,7 @@ class TestOMEZarrMetadata:
 
         root = open_store(store, mode="r+")
         ms = write_multiscale_metadata(root)
-        assert ms[0]["version"] == "0.4"
-        assert ms[0]["metadata"]["format"] == "zarr_vectors"
-        assert "type" not in ms[0]
-        assert len(ms[0]["datasets"]) == 3
+        assert ms == {"layout": [{"asset": "0"}, {"asset": "1"}, {"asset": "2"}]}
 
         # Coarse vertices are stored in level-0 coordinates, so every level
         # carries level 0's transform; the bin ratio lives in level metadata.

@@ -172,7 +172,7 @@ def test_point_table_store_reads_back_with_its_columns(tmp_path):
     _write(store, root)
     assert validate(str(root), level=3).ok
     attrs = json.loads(store.get("zarr.json"))["attributes"]
-    assert attrs["multiscales"][0]["axes"][0]["unit"] == "micrometer"
+    assert attrs["zarr_vectors"]["axes"][0]["unit"] == "micrometer"
     assert store.list("0/vertex_attributes/") == ["id/", "volume/", "zarr.json"]
     points = read_points(str(root), attribute_names=["volume"])
     xyz = np.asarray(points["positions"], float) + attrs["zarr_vectors"]["coordinate_offset"]

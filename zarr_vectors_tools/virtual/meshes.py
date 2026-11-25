@@ -1,5 +1,5 @@
 """Mesh files (.obj, .stl, .ply, GIFTI .gii, FreeSurfer surfaces) as virtual
-zarr-vectors 0.9.4 mesh stores.
+zarr-vectors 0.10.0 mesh stores.
 
 The browser's layout (ngplatform's Zarr Vectors plugin,
 ``src/virtual/meshes.ts``), chunk for chunk: one cell holds the whole mesh;
@@ -12,14 +12,13 @@ vertices and one group of the faces (``fragment_link_groups``); ids start at
 
 from __future__ import annotations
 
-import json
 import re
 import struct
 from pathlib import Path
 
 import numpy as np
 
-from .streamlines import ZV_VERSION, _column, _group, element, fragment_index, vlen_chunk
+from .streamlines import ZV_VERSION, _column, _group, _json, element, fragment_index, vlen_chunk
 
 MANIFEST_ROWS = 16384
 COLUMN_ROWS = 65536
@@ -471,7 +470,7 @@ class MeshStore:
         }
 
     def get(self, key: str):
-        j = lambda v: json.dumps(v, separators=(",", ":")).encode()  # noqa: E731
+        j = _json
         c = self.chunk
         extent = max(h - lo for h, lo in zip(self.hi, self.lo))
         n_faces = len(self.faces)

@@ -39,7 +39,7 @@ A command that needs a missing extra stops with an error naming it.
 
 ## Core package version
 
-The core must write Zarr Vectors format 0.9 and provide `zarr_vectors.building`,
+The core must write Zarr Vectors format 0.10 and provide `zarr_vectors.building`,
 or `import zarr_vectors_tools` fails. If it does not, install the latest core
 from GitHub:
 

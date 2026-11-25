@@ -410,7 +410,7 @@ class TestGiftiCoordinates:
         import json
 
         attrs = json.loads((gifti_store / "zarr.json").read_text())["attributes"]
-        assert [a.get("unit") for a in attrs["multiscales"][0]["axes"]] == ["millimeter"] * 3
+        assert [a.get("unit") for a in attrs["zarr_vectors"]["axes"]] == ["millimeter"] * 3
 
     def test_the_command_line_takes_space_for_gifti(self, tmp_path: Path) -> None:
         from zarr_vectors_tools.cli import main
