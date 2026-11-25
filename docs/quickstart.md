@@ -45,7 +45,7 @@ zvtools validate cells.zv --level 5
 
 ```text
 store: cells.zv
-  zv_version:        0.9.4
+  zv_version:        0.10.0
   geometry_types:    ['point_cloud']
   ...
   resolution levels: [0, 1, 2]
